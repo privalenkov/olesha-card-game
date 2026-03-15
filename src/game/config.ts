@@ -1,7 +1,7 @@
-import type { CardFinish, Rarity } from './types';
+import type { CardFinish, Rarity } from './types.js';
 
 export const STORAGE_KEY = 'olesha-gacha-state-v1';
-export const PACKS_PER_DAY = 2;
+export const PACKS_PER_DAY = 1;
 export const CARDS_PER_PACK = 5;
 
 export interface RarityMeta {

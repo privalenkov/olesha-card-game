@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { PACKS_PER_DAY } from '../game/config';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard } from '../game/types';
 import { PackScene } from './PackScene';
@@ -29,7 +28,12 @@ const initialDrag: DragState = {
 };
 
 export function PackExperience() {
-  const { openPack, remainingPacks, state, timeUntilReset } = useGame();
+  const {
+    error,
+    openPack,
+    state,
+    timeUntilReset,
+  } = useGame();
   const [face, setFace] = useState<'front' | 'back'>('front');
   const [phase, setPhase] = useState<PackPhase>('sealed');
   const [drag, setDrag] = useState<DragState>(initialDrag);
@@ -78,12 +82,12 @@ export function PackExperience() {
   const isRevealVisible =
     activePack !== null && currentCard !== null && (phase === 'revealing' || phase === 'finished');
 
-  const beginOpen = (anchor: number, direction: number) => {
-    if (remainingPacks <= 0 || phase !== 'sealed') {
+  const beginOpen = async (anchor: number, direction: number) => {
+    if (phase !== 'sealed') {
       return;
     }
 
-    const pack = openPack();
+    const pack = await openPack();
     if (!pack) {
       return;
     }
@@ -173,7 +177,7 @@ export function PackExperience() {
             }
 
             if (drag.zone === 'top' && Math.abs(drag.deltaX) > 72) {
-              beginOpen(drag.anchorX, drag.deltaX);
+              void beginOpen(drag.anchorX, drag.deltaX);
             }
 
             if (drag.zone === 'bottom' && Math.abs(drag.deltaX) > 72) {
@@ -208,9 +212,10 @@ export function PackExperience() {
 
       <div className="home-stage__status">
         <strong>
-          {state.packsOpenedToday} из {PACKS_PER_DAY}
+          {state.remainingPacks} из {state.dailyPackLimit}
         </strong>
         <span>Обновление паков через: {timeUntilReset}</span>
+        {error ? <span className="home-stage__error">{error}</span> : null}
       </div>
     </section>
   );

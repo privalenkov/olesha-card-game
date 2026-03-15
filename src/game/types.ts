@@ -34,3 +34,42 @@ export interface GameState {
   totalPacksOpened: number;
   collection: OwnedCard[];
 }
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
+export interface RemoteGameState {
+  collection: OwnedCard[];
+  packsOpenedToday: number;
+  totalPacksOpened: number;
+  remainingPacks: number;
+  dailyPackLimit: number;
+  nextPackResetAt: string;
+  serverNow: string;
+}
+
+export interface SessionState {
+  authenticated: boolean;
+  authConfigured: boolean;
+  user: AuthUser | null;
+  game: RemoteGameState | null;
+}
+
+export interface OpenPackResult {
+  pack: OwnedCard[];
+  game: RemoteGameState;
+}
+
+export interface UpdateNicknameResult {
+  user: AuthUser;
+}
+
+export interface ApiErrorResponse {
+  error: string;
+  message: string;
+  nextPackResetAt?: string;
+}

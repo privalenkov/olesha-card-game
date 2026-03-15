@@ -1,90 +1,240 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
   type PropsWithChildren,
 } from 'react';
-import { PACKS_PER_DAY } from './config';
-import { rollPack } from './packLogic';
 import {
-  createInitialState,
-  getTimeUntilReset,
-  normalizeState,
-  persistState,
-  readState,
-} from './storage';
-import type { GameState, OwnedCard } from './types';
+  ApiError,
+  EMPTY_REMOTE_GAME_STATE,
+  fetchSessionState,
+  formatResetCountdown,
+  requestNicknameUpdate,
+  requestLogout,
+  requestPackOpen,
+} from './api';
+import type { AuthUser, RemoteGameState, SessionState, OwnedCard } from './types';
 
 interface GameContextValue {
-  state: GameState;
+  status: 'loading' | 'ready';
+  state: RemoteGameState;
+  authenticated: boolean;
+  authConfigured: boolean;
+  user: AuthUser | null;
   remainingPacks: number;
   timeUntilReset: string;
-  openPack: () => OwnedCard[] | null;
-  resetProgress: () => void;
+  error: string | null;
+  openPack: () => Promise<OwnedCard[] | null>;
+  refresh: () => Promise<void>;
+  login: () => void;
+  logout: () => Promise<void>;
+  updateNickname: (name: string) => Promise<boolean>;
 }
 
 const GameContext = createContext<GameContextValue | null>(null);
 
+const emptySessionState: SessionState = {
+  authenticated: false,
+  authConfigured: false,
+  user: null,
+  game: null,
+};
+
 export function GameProvider({ children }: PropsWithChildren) {
-  const [state, setState] = useState<GameState>(() => readState());
-  const [timeUntilReset, setTimeUntilReset] = useState(() => getTimeUntilReset());
+  const [status, setStatus] = useState<'loading' | 'ready'>('loading');
+  const [session, setSession] = useState<SessionState>(emptySessionState);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
-  const liveState = normalizeState(state);
+  const applySession = useCallback((nextSession: SessionState) => {
+    setSession(nextSession);
+    setStatus('ready');
+  }, []);
 
-  useEffect(() => {
-    persistState(state);
-  }, [state]);
-
-  useEffect(() => {
-    if (liveState !== state) {
-      setState(liveState);
+  const refresh = useCallback(async () => {
+    try {
+      const nextSession = await fetchSessionState();
+      applySession(nextSession);
+      setError(null);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error
+          ? requestError.message
+          : 'Не удалось загрузить состояние с сервера.';
+      setError(message);
+      setStatus('ready');
     }
-  }, [liveState, state]);
+  }, [applySession]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setState((current) => readState());
-      setTimeUntilReset(getTimeUntilReset());
+      setNow(Date.now());
     }, 60000);
 
     return () => window.clearInterval(timer);
   }, []);
 
-  const remainingPacks = Math.max(PACKS_PER_DAY - liveState.packsOpenedToday, 0);
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
 
-  const value = useMemo<GameContextValue>(
-    () => ({
-      state: liveState,
-      remainingPacks,
-      timeUntilReset,
-      openPack: () => {
-        if (liveState.packsOpenedToday >= PACKS_PER_DAY) {
+    const timer = window.setTimeout(() => {
+      setError((current) => (current === error ? null : current));
+    }, 3500);
+
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
+  const login = useCallback(() => {
+    window.location.assign('/api/auth/google/start');
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await requestLogout();
+    } catch {
+      // Ignore logout errors and clear local session anyway.
+    }
+
+    setSession((current) => ({
+      authenticated: false,
+      authConfigured: current.authConfigured,
+      user: null,
+      game: null,
+    }));
+  }, []);
+
+  const updateNickname = useCallback(
+    async (name: string) => {
+      if (!session.authenticated || !session.user) {
+        setError('сначала авторизируйтесь');
+        return false;
+      }
+
+      try {
+        const result = await requestNicknameUpdate(name);
+
+        setSession((current) => ({
+          ...current,
+          user: result.user,
+        }));
+        setError(null);
+
+        return true;
+      } catch (requestError) {
+        if (requestError instanceof ApiError) {
+          setError(requestError.message);
+
+          if (requestError.error === 'UNAUTHORIZED') {
+            await refresh();
+          }
+
+          return false;
+        }
+
+        setError('Не удалось изменить ник.');
+        return false;
+      }
+    },
+    [refresh, session.authenticated, session.user],
+  );
+
+  const openPack = useCallback(async () => {
+    if (!session.authenticated || !session.user) {
+      setError('авторизируйтесь для открытия пака');
+      return null;
+    }
+
+    try {
+      const result = await requestPackOpen();
+
+      setSession({
+        authenticated: true,
+        authConfigured: session.authConfigured,
+        user: session.user,
+        game: result.game,
+      });
+      setError(null);
+
+      return result.pack;
+    } catch (requestError) {
+      if (requestError instanceof ApiError) {
+        setError(requestError.message);
+
+        if (requestError.error === 'UNAUTHORIZED') {
+          await refresh();
           return null;
         }
 
-        const nextPackNumber = liveState.totalPacksOpened + 1;
-        const pack = rollPack(nextPackNumber);
+        if (requestError.error === 'PACK_LIMIT_REACHED') {
+          setSession((current) => {
+            if (!current.game) {
+              return current;
+            }
 
-        setState((current) => {
-          const normalized = normalizeState(current);
+            return {
+              ...current,
+              game: {
+                ...current.game,
+                packsOpenedToday: current.game.dailyPackLimit,
+                remainingPacks: 0,
+                nextPackResetAt:
+                  requestError.nextPackResetAt ?? current.game.nextPackResetAt,
+              },
+            };
+          });
+        }
 
-          return {
-            ...normalized,
-            packsOpenedToday: normalized.packsOpenedToday + 1,
-            totalPacksOpened: normalized.totalPacksOpened + 1,
-            collection: [...pack, ...normalized.collection],
-          };
-        });
+        return null;
+      }
 
-        return pack;
-      },
-      resetProgress: () => {
-        setState(createInitialState());
-      },
+      setError('Не удалось открыть пак. Попробуй еще раз.');
+      return null;
+    }
+  }, [login, refresh, session]);
+
+  const state = session.game ?? EMPTY_REMOTE_GAME_STATE;
+  const timeUntilReset = useMemo(
+    () => formatResetCountdown(state.nextPackResetAt, now),
+    [now, state.nextPackResetAt],
+  );
+
+  const value = useMemo<GameContextValue>(
+    () => ({
+      status,
+      state,
+      authenticated: session.authenticated,
+      authConfigured: session.authConfigured,
+      user: session.user,
+      remainingPacks: state.remainingPacks,
+      timeUntilReset,
+      error,
+      openPack,
+      refresh,
+      login,
+      logout,
+      updateNickname,
     }),
-    [liveState, remainingPacks, timeUntilReset],
+    [
+      error,
+      login,
+      logout,
+      openPack,
+      refresh,
+      session,
+      state,
+      status,
+      timeUntilReset,
+      updateNickname,
+    ],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

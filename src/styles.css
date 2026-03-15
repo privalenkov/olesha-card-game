@@ -69,8 +69,41 @@ button {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 24px;
+  width: min(1180px, calc(100% - 56px));
   padding: 0;
+}
+
+.topbar__nav,
+.topbar__auth {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.topbar__auth {
+  justify-content: flex-end;
+}
+
+.topbar__hint {
+  color: var(--copy-faint);
+  font-size: 0.82rem;
+}
+
+.topbar__auth-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.topbar__auth-button:hover {
+  color: var(--accent);
 }
 
 .nav-link {
@@ -155,6 +188,17 @@ button {
 .home-stage__status span {
   color: var(--copy-faint);
   font-size: 0.92rem;
+}
+
+.home-stage__hint {
+  color: var(--copy-faint);
+  font-size: 0.82rem;
+}
+
+.home-stage__error {
+  color: #ffb39b;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
 }
 
 .hero-panel,
@@ -859,7 +903,15 @@ button {
 
   .topbar {
     top: 22px;
-    gap: 20px;
+    width: calc(100% - 32px);
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .topbar__nav,
+  .topbar__auth {
+    width: 100%;
+    justify-content: center;
   }
 
   .hero-panel,
