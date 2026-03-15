@@ -6,7 +6,14 @@ import {
   type Texture,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
-import type { OwnedCard } from '../game/types';
+import {
+  type CardEffectLayer,
+  getDefaultCardVisuals,
+  type CardFrameStyle,
+  type CardTreatmentEffect,
+  type CardVisuals,
+  type OwnedCard,
+} from '../game/types';
 
 const CARD_PREVIEW_WIDTH = 344;
 const CARD_PREVIEW_HEIGHT = 482;
@@ -18,6 +25,41 @@ type RemoteImageCacheEntry = {
 };
 
 const remoteImageCache = new Map<string, RemoteImageCacheEntry>();
+
+const frameStylePalette: Record<
+  CardFrameStyle,
+  {
+    start: string;
+    end: string;
+    shadow: string;
+  }
+> = {
+  aurora: {
+    start: '#10273d',
+    end: '#1b4561',
+    shadow: '#09121a',
+  },
+  ember: {
+    start: '#31150d',
+    end: '#6a2518',
+    shadow: '#170907',
+  },
+  mint: {
+    start: '#0f2922',
+    end: '#1e5a4a',
+    shadow: '#06110f',
+  },
+  onyx: {
+    start: '#111216',
+    end: '#31333d',
+    shadow: '#050609',
+  },
+  plasma: {
+    start: '#1c1536',
+    end: '#274d6f',
+    shadow: '#090711',
+  },
+};
 
 function setupTexture(canvas: HTMLCanvasElement, repeat = false): Texture {
   const texture = new CanvasTexture(canvas);
@@ -164,6 +206,52 @@ function useRemoteImage(url: string | null) {
   return entry.image;
 }
 
+function useRemoteImages(urls: string[]) {
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const nonEmptyUrls = urls.filter(Boolean);
+
+    if (nonEmptyUrls.length === 0) {
+      return;
+    }
+
+    const pending = nonEmptyUrls
+      .map((url) => ensureRemoteImage(url))
+      .filter((entry) => entry.status === 'loading' && entry.promise)
+      .map((entry) => entry.promise as Promise<void>);
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.allSettled(pending).then(() => {
+      if (!cancelled) {
+        setVersion((current) => current + 1);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [urls]);
+
+  return useMemo(
+    () =>
+      urls.map((url) => {
+        if (!url) {
+          return null;
+        }
+
+        const entry = remoteImageCache.get(url);
+        return entry?.status === 'loaded' ? entry.image : null;
+      }),
+    [urls, version],
+  );
+}
+
 function addNoise(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -180,6 +268,404 @@ function addNoise(
     ctx.fillRect(x, y, size, size);
   }
   ctx.restore();
+}
+
+function getCardVisuals(card: OwnedCard): CardVisuals {
+  return card.visuals ?? getDefaultCardVisuals();
+}
+
+function getCardEffectLayers(card: OwnedCard): CardEffectLayer[] {
+  return card.effectLayers ?? [];
+}
+
+function applyEffectPlacementClip(
+  ctx: CanvasRenderingContext2D,
+  placement: CardVisuals['effectPlacement'],
+  heroX: number,
+  heroY: number,
+  heroWidth: number,
+  heroHeight: number,
+) {
+  if (placement === 'full') {
+    return;
+  }
+
+  const clipPath = new Path2D();
+
+  if (placement === 'hero') {
+    clipPath.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
+    ctx.clip(clipPath);
+    return;
+  }
+
+  clipPath.rect(0, 0, 1024, 1536);
+  clipPath.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
+  ctx.clip(clipPath, 'evenodd');
+}
+
+function drawVisualEffectPattern(
+  ctx: CanvasRenderingContext2D,
+  pattern: CardVisuals['effectPattern'],
+  accentColor: string,
+) {
+  if (pattern === 'none') {
+    return;
+  }
+
+  ctx.save();
+
+  if (pattern === 'sparkles') {
+    for (let index = 0; index < 26; index += 1) {
+      const x = 86 + ((index * 61) % 860);
+      const y = 106 + ((index * 97) % 1260);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate((Math.PI / 4) * (index % 4));
+      ctx.fillStyle = index % 2 === 0 ? `${accentColor}d8` : 'rgba(255,255,255,0.62)';
+      ctx.fillRect(-1.3, -14, 2.6, 28);
+      ctx.fillRect(-14, -1.3, 28, 2.6);
+      ctx.restore();
+    }
+  }
+
+  if (pattern === 'grid') {
+    ctx.strokeStyle = `${accentColor}70`;
+    ctx.lineWidth = 2;
+
+    for (let x = 72; x <= 952; x += 72) {
+      ctx.beginPath();
+      ctx.moveTo(x, 72);
+      ctx.lineTo(x, 1464);
+      ctx.stroke();
+    }
+
+    for (let y = 72; y <= 1464; y += 72) {
+      ctx.beginPath();
+      ctx.moveTo(72, y);
+      ctx.lineTo(952, y);
+      ctx.stroke();
+    }
+  }
+
+  if (pattern === 'waves') {
+    for (let band = 0; band < 8; band += 1) {
+      ctx.beginPath();
+      for (let step = 0; step <= 1024; step += 12) {
+        const x = step;
+        const y = 140 + band * 156 + Math.sin(step * 0.02 + band * 0.8) * 24;
+        if (step === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.strokeStyle = band % 2 === 0 ? `${accentColor}96` : 'rgba(255,255,255,0.32)';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+
+  if (pattern === 'shards') {
+    const shards = [
+      [
+        [86, 132],
+        [292, 84],
+        [248, 314],
+      ],
+      [
+        [642, 126],
+        [928, 194],
+        [782, 394],
+      ],
+      [
+        [104, 842],
+        [318, 754],
+        [344, 1084],
+      ],
+      [
+        [616, 716],
+        [910, 794],
+        [748, 1136],
+      ],
+    ];
+
+    shards.forEach((shape, index) =>
+      drawPolygon(
+        ctx,
+        shape as Array<[number, number]>,
+        index % 2 === 0 ? `${accentColor}b4` : 'rgba(255,255,255,0.38)',
+        1,
+      ),
+    );
+  }
+
+  ctx.restore();
+}
+
+function createCanvas(width: number, height: number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function withMaskedLayer(
+  ctx: CanvasRenderingContext2D,
+  maskImage: CanvasImageSource,
+  opacity: number,
+  drawEffect: (effectContext: CanvasRenderingContext2D) => void,
+  blendMode: GlobalCompositeOperation = 'screen',
+) {
+  const effectCanvas = createCanvas(ctx.canvas.width, ctx.canvas.height);
+  const effectContext = effectCanvas.getContext('2d');
+  if (!effectContext) {
+    return;
+  }
+
+  drawEffect(effectContext);
+  effectContext.globalCompositeOperation = 'destination-in';
+  effectContext.drawImage(maskImage, 0, 0, effectCanvas.width, effectCanvas.height);
+
+  ctx.save();
+  ctx.globalCompositeOperation = blendMode;
+  ctx.globalAlpha = opacity;
+  ctx.drawImage(effectCanvas, 0, 0);
+  ctx.restore();
+}
+
+function drawSpotGlossEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const primaryBand = ctx.createLinearGradient(0, 0, width, height);
+  primaryBand.addColorStop(0, 'rgba(255,255,255,0)');
+  primaryBand.addColorStop(0.2, 'rgba(255,255,255,0.08)');
+  primaryBand.addColorStop(0.4, 'rgba(255,255,255,0.96)');
+  primaryBand.addColorStop(0.58, 'rgba(255,255,255,0.14)');
+  primaryBand.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = primaryBand;
+  ctx.fillRect(0, 0, width, height);
+
+  const glossBloom = ctx.createRadialGradient(
+    width * 0.3,
+    height * 0.22,
+    24,
+    width * 0.34,
+    height * 0.26,
+    width * 0.44,
+  );
+  glossBloom.addColorStop(0, 'rgba(255,255,255,0.95)');
+  glossBloom.addColorStop(0.28, 'rgba(255,255,255,0.18)');
+  glossBloom.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glossBloom;
+  ctx.fillRect(0, 0, width, height);
+}
+
+function drawSpotHoloEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  hue: string,
+) {
+  const rainbow = ctx.createLinearGradient(0, 0, width, height);
+  rainbow.addColorStop(0, '#7fe8ff');
+  rainbow.addColorStop(0.2, accent);
+  rainbow.addColorStop(0.4, '#fff07f');
+  rainbow.addColorStop(0.62, hue);
+  rainbow.addColorStop(0.82, '#ff9fd8');
+  rainbow.addColorStop(1, '#ffffff');
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.globalCompositeOperation = 'overlay';
+  for (let index = 0; index < 16; index += 1) {
+    const x = -width * 0.15 + index * (width * 0.1);
+    ctx.save();
+    ctx.translate(x, 0);
+    ctx.rotate(-0.28);
+    ctx.fillStyle = index % 2 === 0 ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.12)';
+    ctx.fillRect(0, -height * 0.2, width * 0.05, height * 1.5);
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawTextureSugarEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+) {
+  for (let index = 0; index < 1800; index += 1) {
+    const x = 24 + ((index * 37) % (width - 48));
+    const y = 24 + ((index * 61) % (height - 48));
+    const size = 0.6 + ((index * 17) % 12) * 0.12;
+    ctx.fillStyle =
+      index % 5 === 0 ? `${accent}b8` : index % 2 === 0 ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.42)';
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawSparkleFoilEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+) {
+  for (let index = 0; index < 84; index += 1) {
+    const x = 30 + ((index * 113) % (width - 60));
+    const y = 30 + ((index * 173) % (height - 60));
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((Math.PI / 4) * (index % 4));
+    ctx.fillStyle = index % 3 === 0 ? `${accent}d8` : 'rgba(255,255,255,0.88)';
+    ctx.fillRect(-1.8, -20, 3.6, 40);
+    ctx.fillRect(-20, -1.8, 40, 3.6);
+    ctx.restore();
+  }
+
+  const rainbow = ctx.createLinearGradient(width * 0.15, 0, width * 0.85, height);
+  rainbow.addColorStop(0, 'rgba(127,237,255,0.38)');
+  rainbow.addColorStop(0.5, 'rgba(255,255,255,0.22)');
+  rainbow.addColorStop(1, `${accent}7a`);
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, width, height);
+}
+
+function drawPrismaticEdgeEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  hue: string,
+) {
+  const band = ctx.createLinearGradient(0, 0, width, height);
+  band.addColorStop(0, '#92efff');
+  band.addColorStop(0.25, accent);
+  band.addColorStop(0.5, '#fff5a3');
+  band.addColorStop(0.75, hue);
+  band.addColorStop(1, '#ffffff');
+  ctx.fillStyle = band;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(18, 18, width - 36, height - 36);
+}
+
+function applyEmbossLayer(
+  ctx: CanvasRenderingContext2D,
+  maskImage: CanvasImageSource,
+  opacity: number,
+) {
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  const highlightCanvas = createCanvas(width, height);
+  const shadowCanvas = createCanvas(width, height);
+  const fillCanvas = createCanvas(width, height);
+  const highlightContext = highlightCanvas.getContext('2d');
+  const shadowContext = shadowCanvas.getContext('2d');
+  const fillContext = fillCanvas.getContext('2d');
+
+  if (!highlightContext || !shadowContext || !fillContext) {
+    return;
+  }
+
+  highlightContext.filter = 'blur(3px)';
+  highlightContext.drawImage(maskImage, -6, -6, width, height);
+  highlightContext.globalCompositeOperation = 'source-in';
+  highlightContext.fillStyle = 'rgba(255,255,255,0.9)';
+  highlightContext.fillRect(0, 0, width, height);
+
+  shadowContext.filter = 'blur(4px)';
+  shadowContext.drawImage(maskImage, 7, 7, width, height);
+  shadowContext.globalCompositeOperation = 'source-in';
+  shadowContext.fillStyle = 'rgba(4,8,16,0.9)';
+  shadowContext.fillRect(0, 0, width, height);
+
+  fillContext.drawImage(maskImage, 0, 0, width, height);
+  fillContext.globalCompositeOperation = 'source-in';
+  const fillGradient = fillContext.createLinearGradient(0, 0, width, height);
+  fillGradient.addColorStop(0, 'rgba(255,255,255,0.18)');
+  fillGradient.addColorStop(1, 'rgba(0,0,0,0.16)');
+  fillContext.fillStyle = fillGradient;
+  fillContext.fillRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = opacity * 0.42;
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.drawImage(shadowCanvas, 0, 0);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(highlightCanvas, 0, 0);
+  ctx.globalAlpha = opacity * 0.35;
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.drawImage(fillCanvas, 0, 0);
+  ctx.restore();
+}
+
+function drawTreatmentLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: CardEffectLayer,
+  maskImage: CanvasImageSource,
+  accent: string,
+  hue: string,
+) {
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+
+  if (layer.type === 'emboss') {
+    applyEmbossLayer(ctx, maskImage, layer.opacity);
+    return;
+  }
+
+  const drawEffect = (effectContext: CanvasRenderingContext2D) => {
+    switch (layer.type) {
+      case 'spot_gloss':
+        drawSpotGlossEffect(effectContext, width, height);
+        break;
+      case 'spot_holo':
+        drawSpotHoloEffect(effectContext, width, height, accent, hue);
+        break;
+      case 'texture_sugar':
+        drawTextureSugarEffect(effectContext, width, height, accent);
+        break;
+      case 'sparkle_foil':
+        drawSparkleFoilEffect(effectContext, width, height, accent);
+        break;
+      case 'prismatic_edge':
+        drawPrismaticEdgeEffect(effectContext, width, height, accent, hue);
+        break;
+    }
+  };
+
+  const blendMode: GlobalCompositeOperation =
+    layer.type === 'texture_sugar' || layer.type === 'sparkle_foil' ? 'lighter' : 'screen';
+
+  withMaskedLayer(ctx, maskImage, layer.opacity, drawEffect, blendMode);
+}
+
+function drawTreatmentLayers(
+  ctx: CanvasRenderingContext2D,
+  card: OwnedCard,
+  maskImages: Array<HTMLImageElement | null>,
+  accent: string,
+  hue: string,
+) {
+  const effectLayers = getCardEffectLayers(card);
+
+  effectLayers.forEach((layer, index) => {
+    const maskImage = maskImages[index];
+    if (!maskImage) {
+      return;
+    }
+
+    drawTreatmentLayer(ctx, layer, maskImage, accent, hue);
+  });
 }
 
 function drawPolygon(
@@ -498,7 +984,11 @@ function drawPackFace(face: 'front' | 'back') {
   return canvas;
 }
 
-function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
+function drawCardFront(
+  card: OwnedCard,
+  artImage: HTMLImageElement | null,
+  effectMaskImages: Array<HTMLImageElement | null>,
+) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1536;
@@ -510,10 +1000,13 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
 
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
+  const visuals = getCardVisuals(card);
+  const palette = frameStylePalette[visuals.frameStyle];
+  const accent = visuals.accentColor;
   const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, meta.gradient[0]);
-  gradient.addColorStop(0.5, '#05070b');
-  gradient.addColorStop(1, meta.gradient[1]);
+  gradient.addColorStop(0, palette.start);
+  gradient.addColorStop(0.45, palette.shadow);
+  gradient.addColorStop(1, palette.end);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -525,14 +1018,14 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
     canvas.height * 0.24,
     640,
   );
-  bloom.addColorStop(0, `${meta.accent}b8`);
+  bloom.addColorStop(0, `${accent}b8`);
   bloom.addColorStop(0.3, `${meta.hue}2f`);
   bloom.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = bloom;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const outerGradient = ctx.createLinearGradient(48, 48, canvas.width - 48, canvas.height - 48);
-  outerGradient.addColorStop(0, `${meta.accent}88`);
+  outerGradient.addColorStop(0, `${accent}88`);
   outerGradient.addColorStop(0.45, 'rgba(255,255,255,0.16)');
   outerGradient.addColorStop(1, `${meta.hue}88`);
   drawRoundedPanel(ctx, 42, 42, canvas.width - 84, canvas.height - 84, 70);
@@ -549,7 +1042,7 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
   const heroGradient = ctx.createLinearGradient(72, 72, canvas.width - 72, 440);
   heroGradient.addColorStop(0, `${meta.hue}5e`);
   heroGradient.addColorStop(0.4, 'rgba(255,255,255,0.07)');
-  heroGradient.addColorStop(1, `${meta.accent}88`);
+  heroGradient.addColorStop(1, `${accent}88`);
   ctx.fillStyle = heroGradient;
   ctx.fill();
 
@@ -576,13 +1069,18 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
   const sheen = ctx.createLinearGradient(0, 0, canvas.width, 420);
   sheen.addColorStop(0, 'rgba(255,255,255,0.28)');
   sheen.addColorStop(0.18, 'rgba(255,255,255,0)');
-  sheen.addColorStop(0.75, `${meta.accent}18`);
+  sheen.addColorStop(0.75, `${accent}18`);
   sheen.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = sheen;
   ctx.fillRect(0, 0, canvas.width, 460);
   ctx.restore();
 
-  ctx.fillStyle = meta.accent;
+  ctx.save();
+  applyEffectPlacementClip(ctx, visuals.effectPlacement, heroX, heroY, heroWidth, heroHeight);
+  drawVisualEffectPattern(ctx, visuals.effectPattern, accent);
+  ctx.restore();
+
+  ctx.fillStyle = accent;
   ctx.font = '700 32px Space Grotesk, sans-serif';
   ctx.fillText(meta.label.toUpperCase(), 112, 128);
   ctx.textAlign = 'right';
@@ -591,7 +1089,7 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(255,255,255,0.82)';
   ctx.font = '700 44px Space Grotesk, sans-serif';
-  ctx.fillText('HOLOGRAPHIC SERIES', canvas.width / 2, 382);
+  ctx.fillText('CREATOR EDITION', canvas.width / 2, 382);
 
   ctx.textAlign = 'left';
   ctx.font = '700 80px Space Grotesk, sans-serif';
@@ -638,7 +1136,7 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
   });
 
   const foilStampGradient = ctx.createLinearGradient(0, 0, 180, 180);
-  foilStampGradient.addColorStop(0, `${meta.accent}b0`);
+  foilStampGradient.addColorStop(0, `${accent}b0`);
   foilStampGradient.addColorStop(0.5, '#ffffff');
   foilStampGradient.addColorStop(1, `${meta.hue}aa`);
   ctx.fillStyle = foilStampGradient;
@@ -650,6 +1148,8 @@ function drawCardFront(card: OwnedCard, artImage: HTMLImageElement | null) {
   ctx.fillText('OG', 826, 1264);
   ctx.font = '600 18px Sora, sans-serif';
   ctx.fillText('FOIL', 826, 1300);
+
+  drawTreatmentLayers(ctx, card, effectMaskImages, accent, meta.hue);
 
   addNoise(ctx, canvas.width, canvas.height, 7200);
   return canvas;
@@ -832,7 +1332,7 @@ function drawFoilLayer(card: OwnedCard) {
   return canvas;
 }
 
-function drawHoloZoneMask(card: OwnedCard) {
+function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElement | null>) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1536;
@@ -896,6 +1396,37 @@ function drawHoloZoneMask(card: OwnedCard) {
     ctx.stroke();
   }
 
+  const effectLayers = getCardEffectLayers(card);
+  effectLayers.forEach((layer, index) => {
+    const maskImage = effectMaskImages[index];
+    if (!maskImage) {
+      return;
+    }
+
+    let alpha = 0;
+
+    if (layer.type === 'spot_holo') {
+      alpha = 0.78 * layer.opacity;
+    } else if (layer.type === 'sparkle_foil') {
+      alpha = 0.68 * layer.opacity;
+    } else if (layer.type === 'prismatic_edge') {
+      alpha = 0.84 * layer.opacity;
+    } else if (layer.type === 'texture_sugar') {
+      alpha = 0.42 * layer.opacity;
+    } else if (layer.type === 'spot_gloss') {
+      alpha = 0.24 * layer.opacity;
+    }
+
+    if (alpha <= 0) {
+      return;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  });
+
   return canvas;
 }
 
@@ -932,6 +1463,11 @@ export function usePackTexture(face: 'front' | 'back') {
 
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const effectLayerUrls = useMemo(
+    () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
+    [card],
+  );
+  const effectMaskImages = useRemoteImages(effectLayerUrls);
 
   return useMemo(() => {
     if (!card) {
@@ -939,23 +1475,28 @@ export function useCardTextures(card: OwnedCard | null) {
     }
 
     return {
-      front: setupTexture(drawCardFront(card, artImage)),
+      front: setupTexture(drawCardFront(card, artImage, effectMaskImages)),
       back: setupTexture(drawCardBack(card)),
       foil: setupTexture(drawFoilLayer(card), true),
-      foilZone: setupTexture(drawHoloZoneMask(card)),
+      foilZone: setupTexture(drawHoloZoneMask(card, effectMaskImages)),
     };
-  }, [artImage, card]);
+  }, [artImage, card, effectMaskImages]);
 }
 
 export function useCardPreviewImage(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const effectLayerUrls = useMemo(
+    () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
+    [card],
+  );
+  const effectMaskImages = useRemoteImages(effectLayerUrls);
 
   return useMemo(() => {
     if (!card) {
       return '';
     }
 
-    const sourceCanvas = drawCardFront(card, artImage);
+    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages);
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = CARD_PREVIEW_WIDTH;
     previewCanvas.height = CARD_PREVIEW_HEIGHT;
@@ -971,5 +1512,5 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     } catch {
       return card.urlImage;
     }
-  }, [artImage, card]);
+  }, [artImage, card, effectMaskImages]);
 }

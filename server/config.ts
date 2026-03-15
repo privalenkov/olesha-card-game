@@ -106,10 +106,12 @@ export const serverConfig = {
   sessionSecret,
   sessionCookieName: 'olesha_session',
   googleStateCookieName: 'olesha_google_state',
+  adminUserId: process.env.ADMIN_USER_ID ?? '',
   sessionTtlMs: parseInteger(process.env.SESSION_TTL_DAYS, 30) * 24 * 60 * 60 * 1000,
   dailyPackLimit: parseInteger(process.env.DAILY_PACK_LIMIT, 1),
   appTimeZone: process.env.APP_TIMEZONE ?? 'Europe/Moscow',
   databaseFile: path.resolve(process.cwd(), process.env.DB_FILE ?? './data/olesha.sqlite'),
+  uploadsDir: path.resolve(process.cwd(), process.env.UPLOADS_DIR ?? './data/uploads'),
   clientDistDir: path.resolve(process.cwd(), './dist'),
   secureCookies:
     process.env.COOKIE_SECURE === 'true' ||

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CollectionCardTile } from '../components/CollectionCardTile';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
+import { requestProposalStart } from '../game/api';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard } from '../game/types';
 
 type CollectionTab = 'all' | 'duplicates';
 
 export function CollectionPage() {
-  const { state } = useGame();
+  const navigate = useNavigate();
+  const { authConfigured, authenticated, login, state } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
+  const [proposalBusy, setProposalBusy] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -40,54 +44,76 @@ export function CollectionPage() {
 
   return (
     <div className="page page--collection page--collection-minimal">
+      <section className="collection-toolbar">
+        <div className="collection-breakdown collection-breakdown--minimal">
+          <div>
+            <strong>{state.collection.length}</strong>
+            <span>Всего карточек</span>
+          </div>
+          <div>
+            <strong>{duplicateCount}</strong>
+            <span>Повторок</span>
+          </div>
+        </div>
+
+        <div className="filter-pills" role="tablist" aria-label="Фильтр коллекции">
+          <button
+            className={`filter-pill ${activeTab === 'all' ? 'filter-pill--active' : ''}`}
+            onClick={() => setActiveTab('all')}
+            type="button"
+          >
+            Все
+          </button>
+          <button
+            className={`filter-pill ${activeTab === 'duplicates' ? 'filter-pill--active' : ''}`}
+            onClick={() => setActiveTab('duplicates')}
+            type="button"
+          >
+            Повторки
+          </button>
+        </div>
+
+        <button
+          className="collection-toolbar__action action-button"
+          disabled={proposalBusy}
+          onClick={async () => {
+            if (!authenticated) {
+              if (authConfigured) {
+                login();
+              }
+
+              return;
+            }
+
+            setProposalBusy(true);
+
+            try {
+              const response = await requestProposalStart();
+              navigate(`/creator/${response.proposal.id}`);
+            } finally {
+              setProposalBusy(false);
+            }
+          }}
+          type="button"
+        >
+          Предложить свою карточку
+        </button>
+      </section>
+
       {state.collection.length === 0 ? (
         <section className="collection-empty">
           <strong>Коллекция пока пустая</strong>
         </section>
+      ) : visibleCards.length > 0 ? (
+        <section className="collection-grid collection-grid--minimal">
+          {visibleCards.map((card) => (
+            <CollectionCardTile key={card.instanceId} card={card} onOpen={setActiveCard} />
+          ))}
+        </section>
       ) : (
-        <>
-          <section className="collection-toolbar">
-            <div className="collection-breakdown collection-breakdown--minimal">
-              <div>
-                <strong>{state.collection.length}</strong>
-                <span>Всего карточек</span>
-              </div>
-              <div>
-                <strong>{duplicateCount}</strong>
-                <span>Повторок</span>
-              </div>
-            </div>
-
-            <div className="filter-pills" role="tablist" aria-label="Фильтр коллекции">
-              <button
-                className={`filter-pill ${activeTab === 'all' ? 'filter-pill--active' : ''}`}
-                onClick={() => setActiveTab('all')}
-                type="button"
-              >
-                Все
-              </button>
-              <button
-                className={`filter-pill ${activeTab === 'duplicates' ? 'filter-pill--active' : ''}`}
-                onClick={() => setActiveTab('duplicates')}
-                type="button"
-              >
-                Повторки
-              </button>
-            </div>
-          </section>
-
-          {visibleCards.length > 0 ? (
-            <section className="collection-grid collection-grid--minimal">
-              {visibleCards.map((card) => (
-                <CollectionCardTile key={card.instanceId} card={card} onOpen={setActiveCard} />
-              ))}
-            </section>
-          ) : (
-            <section className="collection-empty collection-empty--compact">
-              <strong>Повторок пока нет</strong>
-            </section>
-          )}
-        </>
+        <section className="collection-empty collection-empty--compact">
+          <strong>Повторок пока нет</strong>
+        </section>
       )}
 
       {activeCard ? (

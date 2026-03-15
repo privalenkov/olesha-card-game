@@ -23,6 +23,7 @@ interface GameContextValue {
   state: RemoteGameState;
   authenticated: boolean;
   authConfigured: boolean;
+  isAdmin: boolean;
   user: AuthUser | null;
   remainingPacks: number;
   timeUntilReset: string;
@@ -39,6 +40,7 @@ const GameContext = createContext<GameContextValue | null>(null);
 const emptySessionState: SessionState = {
   authenticated: false,
   authConfigured: false,
+  isAdmin: false,
   user: null,
   game: null,
 };
@@ -107,6 +109,7 @@ export function GameProvider({ children }: PropsWithChildren) {
     setSession((current) => ({
       authenticated: false,
       authConfigured: current.authConfigured,
+      isAdmin: false,
       user: null,
       game: null,
     }));
@@ -159,6 +162,7 @@ export function GameProvider({ children }: PropsWithChildren) {
       setSession({
         authenticated: true,
         authConfigured: session.authConfigured,
+        isAdmin: session.isAdmin,
         user: session.user,
         game: result.game,
       });
@@ -213,6 +217,7 @@ export function GameProvider({ children }: PropsWithChildren) {
       state,
       authenticated: session.authenticated,
       authConfigured: session.authConfigured,
+      isAdmin: session.isAdmin,
       user: session.user,
       remainingPacks: state.remainingPacks,
       timeUntilReset,

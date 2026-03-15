@@ -1,12 +1,33 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
-import type { ApiErrorResponse, SessionState } from '../src/game/types.js';
+import {
+  CARD_EFFECT_PATTERN_OPTIONS,
+  CARD_EFFECT_PLACEMENT_OPTIONS,
+  CARD_FINISH_OPTIONS,
+  CARD_FRAME_STYLE_OPTIONS,
+  CARD_TREATMENT_EFFECT_OPTIONS,
+  getDefaultCardVisuals,
+  type AdminProposalOverridePayload,
+  type ApiErrorResponse,
+  type AuthUser,
+  type CardEffectLayer,
+  type CardTreatmentEffect,
+  type ProposalEditorPayload,
+  type Rarity,
+  type SessionState,
+} from '../src/game/types.js';
 import { serverConfig } from './config.js';
-import { createGameStore, GameStore, NicknameTakenError, PackLimitReachedError } from './store.js';
+import {
+  createGameStore,
+  GameStore,
+  NicknameTakenError,
+  NoApprovedCardsError,
+  PackLimitReachedError,
+} from './store.js';
 
 function apiError(error: string, message: string, extra?: Partial<ApiErrorResponse>) {
   return {
@@ -28,6 +49,208 @@ function normalizeNickname(value: unknown): string | null {
   }
 
   return trimmed;
+}
+
+function isAdminUser(user: AuthUser | null): boolean {
+  return Boolean(
+    user &&
+      serverConfig.adminUserId &&
+      (user.id === serverConfig.adminUserId ||
+        user.googleSub === serverConfig.adminUserId ||
+        user.email === serverConfig.adminUserId),
+  );
+}
+
+function isStoredAssetUrl(value: string) {
+  return /^\/uploads\/[a-zA-Z0-9-]+\.(png|jpg|jpeg|webp)$/u.test(value);
+}
+
+function normalizeProposalPayload(
+  value: unknown,
+  effectBudget: { allowedEffects: CardEffectLayer['type'][]; maxEffectLayers: number },
+): ProposalEditorPayload | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const defaults = getDefaultCardVisuals();
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  const description = typeof payload.description === 'string' ? payload.description.trim() : '';
+  const urlImage = typeof payload.urlImage === 'string' ? payload.urlImage.trim() : '';
+  const defaultFinish =
+    typeof payload.defaultFinish === 'string' &&
+    CARD_FINISH_OPTIONS.includes(payload.defaultFinish as (typeof CARD_FINISH_OPTIONS)[number])
+      ? (payload.defaultFinish as (typeof CARD_FINISH_OPTIONS)[number])
+      : null;
+  const visuals =
+    typeof payload.visuals === 'object' && payload.visuals !== null
+      ? (payload.visuals as Record<string, unknown>)
+      : null;
+  const frameStyle =
+    typeof visuals?.frameStyle === 'string' &&
+    CARD_FRAME_STYLE_OPTIONS.includes(visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
+      ? (visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
+      : defaults.frameStyle;
+  const effectPattern =
+    typeof visuals?.effectPattern === 'string' &&
+    CARD_EFFECT_PATTERN_OPTIONS.includes(
+      visuals.effectPattern as (typeof CARD_EFFECT_PATTERN_OPTIONS)[number],
+    )
+      ? (visuals.effectPattern as (typeof CARD_EFFECT_PATTERN_OPTIONS)[number])
+      : defaults.effectPattern;
+  const effectPlacement =
+    typeof visuals?.effectPlacement === 'string' &&
+    CARD_EFFECT_PLACEMENT_OPTIONS.includes(
+      visuals.effectPlacement as (typeof CARD_EFFECT_PLACEMENT_OPTIONS)[number],
+    )
+      ? (visuals.effectPlacement as (typeof CARD_EFFECT_PLACEMENT_OPTIONS)[number])
+      : defaults.effectPlacement;
+  const accentColor =
+    typeof visuals?.accentColor === 'string' &&
+    /^#[0-9a-fA-F]{6}$/u.test(visuals.accentColor.trim())
+      ? visuals.accentColor.trim()
+      : defaults.accentColor;
+  const rawEffectLayers = Array.isArray(payload.effectLayers) ? payload.effectLayers : null;
+
+  if (title.length < 2 || title.length > 80) {
+    return null;
+  }
+
+  if (description.length < 8 || description.length > 280) {
+    return null;
+  }
+
+  if (!defaultFinish) {
+    return null;
+  }
+
+  if (!rawEffectLayers || rawEffectLayers.length > effectBudget.maxEffectLayers) {
+    return null;
+  }
+
+  const effectLayers: CardEffectLayer[] = [];
+  const seenIds = new Set<string>();
+  const seenTypes = new Set<CardEffectLayer['type']>();
+
+  for (const rawLayer of rawEffectLayers) {
+    if (typeof rawLayer !== 'object' || rawLayer === null) {
+      return null;
+    }
+
+    const layer = rawLayer as Record<string, unknown>;
+    const id = typeof layer.id === 'string' ? layer.id.trim() : '';
+    const type =
+      typeof layer.type === 'string' &&
+      CARD_TREATMENT_EFFECT_OPTIONS.includes(layer.type as CardEffectLayer['type'])
+        ? (layer.type as CardEffectLayer['type'])
+        : null;
+    const maskUrl = typeof layer.maskUrl === 'string' ? layer.maskUrl.trim() : '';
+    const opacity =
+      typeof layer.opacity === 'number' && Number.isFinite(layer.opacity) ? layer.opacity : NaN;
+
+    if (
+      id.length < 6 ||
+      !type ||
+      !effectBudget.allowedEffects.includes(type) ||
+      seenIds.has(id) ||
+      seenTypes.has(type) ||
+      (!isStoredAssetUrl(maskUrl) && maskUrl !== '') ||
+      !Number.isFinite(opacity)
+    ) {
+      return null;
+    }
+
+    seenIds.add(id);
+    seenTypes.add(type);
+    effectLayers.push({
+      id,
+      type,
+      maskUrl,
+      opacity: Math.max(0.18, Math.min(opacity, 1)),
+    });
+  }
+
+  return {
+    title,
+    description,
+    urlImage,
+    defaultFinish,
+    visuals: {
+      frameStyle,
+      accentColor,
+      effectPattern,
+      effectPlacement,
+    },
+    effectLayers,
+  };
+}
+
+function normalizeAdminProposalOverridePayload(value: unknown): AdminProposalOverridePayload | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const rarity =
+    typeof payload.rarity === 'string' &&
+    ['common', 'uncommon', 'rare', 'epic', 'veryrare'].includes(payload.rarity)
+      ? (payload.rarity as Rarity)
+      : null;
+  const rawAllowedEffects = Array.isArray(payload.allowedEffects) ? payload.allowedEffects : null;
+
+  if (!rarity || !rawAllowedEffects) {
+    return null;
+  }
+
+  const allowedEffects: CardTreatmentEffect[] = [];
+  const seen = new Set<CardTreatmentEffect>();
+
+  for (const rawEffect of rawAllowedEffects) {
+    if (
+      typeof rawEffect !== 'string' ||
+      !CARD_TREATMENT_EFFECT_OPTIONS.includes(rawEffect as CardTreatmentEffect)
+    ) {
+      return null;
+    }
+
+    const effect = rawEffect as CardTreatmentEffect;
+    if (seen.has(effect)) {
+      continue;
+    }
+
+    seen.add(effect);
+    allowedEffects.push(effect);
+  }
+
+  return {
+    rarity,
+    allowedEffects,
+  };
+}
+
+function parseImageDataUrl(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const match = value.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/u);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, mimeType, base64] = match;
+  const buffer = Buffer.from(base64, 'base64');
+
+  if (buffer.byteLength === 0 || buffer.byteLength > 5 * 1024 * 1024) {
+    return null;
+  }
+
+  return {
+    mimeType,
+    buffer,
+  };
 }
 
 function getMimeType(filePath: string): string {
@@ -110,6 +333,24 @@ async function serveClientFile(request: FastifyRequest, reply: FastifyReply) {
   }
 }
 
+async function serveUploadFile(request: FastifyRequest, reply: FastifyReply) {
+  const requestUrl = new URL(request.raw.url ?? '/', serverConfig.appBaseUrl);
+  const pathname = requestUrl.pathname.replace(/^\/uploads/u, '');
+  const candidatePath = path.resolve(serverConfig.uploadsDir, `.${pathname}`);
+
+  if (!candidatePath.startsWith(serverConfig.uploadsDir)) {
+    reply.code(403).send('Forbidden');
+    return;
+  }
+
+  try {
+    const file = await fs.readFile(candidatePath);
+    reply.type(getMimeType(candidatePath)).send(file);
+  } catch {
+    reply.code(404).send('Not found');
+  }
+}
+
 async function readSessionState(store: GameStore, request: FastifyRequest): Promise<SessionState> {
   const token = request.cookies[serverConfig.sessionCookieName];
   const user = store.getUserFromSessionToken(token);
@@ -118,6 +359,7 @@ async function readSessionState(store: GameStore, request: FastifyRequest): Prom
     return {
       authenticated: false,
       authConfigured: serverConfig.googleAuthConfigured,
+      isAdmin: false,
       user: null,
       game: null,
     };
@@ -126,6 +368,7 @@ async function readSessionState(store: GameStore, request: FastifyRequest): Prom
   return {
     authenticated: true,
     authConfigured: serverConfig.googleAuthConfigured,
+    isAdmin: isAdminUser(user),
     user,
     game: store.getPlayerSnapshot(user.id),
   };
@@ -133,6 +376,7 @@ async function readSessionState(store: GameStore, request: FastifyRequest): Prom
 
 export async function buildApp() {
   const app = Fastify({
+    bodyLimit: 8 * 1024 * 1024,
     logger: true,
     trustProxy: true,
   });
@@ -146,6 +390,7 @@ export async function buildApp() {
     : null;
 
   await app.register(cookie);
+  await fs.mkdir(serverConfig.uploadsDir, { recursive: true });
 
   app.addHook('onClose', async () => {
     store.close();
@@ -169,6 +414,10 @@ export async function buildApp() {
   app.get('/api/me', async (request, reply) => {
     setNoStore(reply);
     return readSessionState(store, request);
+  });
+
+  app.get('/uploads/*', async (request, reply) => {
+    await serveUploadFile(request, reply);
   });
 
   app.get('/api/auth/google/start', async (_request, reply) => {
@@ -303,6 +552,339 @@ export async function buildApp() {
     }
   });
 
+  app.post('/api/uploads/card-art', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    const payload =
+      typeof request.body === 'object' && request.body !== null
+        ? (request.body as Record<string, unknown>)
+        : null;
+    const parsed = parseImageDataUrl(payload?.dataUrl);
+
+    if (!parsed) {
+      reply.code(400).send(apiError('INVALID_IMAGE', 'Нужен PNG, JPEG или WEBP размером до 5 МБ.'));
+      return;
+    }
+
+    const extension =
+      parsed.mimeType === 'image/png'
+        ? 'png'
+        : parsed.mimeType === 'image/webp'
+          ? 'webp'
+          : 'jpg';
+    const fileName = `${randomUUID()}.${extension}`;
+    const filePath = path.join(serverConfig.uploadsDir, fileName);
+
+    await fs.writeFile(filePath, parsed.buffer);
+
+    setNoStore(reply);
+    reply.send({
+      url: `/uploads/${fileName}`,
+    });
+  });
+
+  app.post('/api/card-proposals/start', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      proposal: store.startCardProposal(user),
+    });
+  });
+
+  app.get('/api/card-proposals/:proposalId', async (request, reply) => {
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    const proposal = store.getProposalById(
+      (request.params as { proposalId: string }).proposalId,
+    );
+
+    if (!proposal) {
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      return;
+    }
+
+    if (proposal.creatorUserId !== user.id && !isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Нет доступа к этому черновику.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal });
+  });
+
+  app.patch('/api/card-proposals/:proposalId', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    const proposalId = (request.params as { proposalId: string }).proposalId;
+    const proposal = store.getProposalById(proposalId);
+
+    if (!proposal) {
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      return;
+    }
+
+    if (proposal.creatorUserId !== user.id) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Нельзя редактировать чужую карточку.'));
+      return;
+    }
+
+    const payload = normalizeProposalPayload(request.body, {
+      allowedEffects: proposal.allowedEffects,
+      maxEffectLayers: proposal.maxEffectLayers,
+    });
+
+    if (!payload) {
+      reply
+        .code(400)
+        .send(
+          apiError(
+            'INVALID_PROPOSAL',
+            'Заполни заголовок, описание, базовый стиль и используй только выданные сервером эффекты.',
+          ),
+        );
+      return;
+    }
+
+    const updated = store.updateProposalDraftById(proposalId, payload);
+
+    if (!updated) {
+      reply.code(409).send(apiError('PROPOSAL_LOCKED', 'Эту карточку уже отправили на модерацию.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal: updated });
+  });
+
+  app.post('/api/card-proposals/:proposalId/submit', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    const proposalId = (request.params as { proposalId: string }).proposalId;
+    const proposal = store.getProposalById(proposalId);
+
+    if (!proposal) {
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      return;
+    }
+
+    if (proposal.creatorUserId !== user.id) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Нельзя отправить чужую карточку.'));
+      return;
+    }
+
+    if (!proposal.urlImage) {
+      reply.code(400).send(apiError('IMAGE_REQUIRED', 'Сначала добавь изображение на карточку.'));
+      return;
+    }
+
+    if (proposal.effectLayers.some((layer) => !layer.maskUrl)) {
+      reply
+        .code(400)
+        .send(apiError('MASK_REQUIRED', 'У каждого добавленного treatment-слоя должна быть нарисована маска.'));
+      return;
+    }
+
+    const submitted = store.submitProposalById(proposalId);
+
+    if (!submitted) {
+      reply.code(409).send(apiError('PROPOSAL_LOCKED', 'Карточка уже отправлена или обработана.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal: submitted });
+  });
+
+  app.get('/api/admin/card-proposals', async (request, reply) => {
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      proposals: store.listAdminProposals(),
+    });
+  });
+
+  app.get('/api/admin/cards', async (request, reply) => {
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      cards: store.listAdminCards(),
+    });
+  });
+
+  app.get('/api/admin/users', async (request, reply) => {
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      users: store.listAdminUsers(),
+    });
+  });
+
+  app.post('/api/admin/card-proposals/:proposalId/approve', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    const proposal = store.approveProposalById(
+      (request.params as { proposalId: string }).proposalId,
+    );
+
+    if (!proposal) {
+      reply
+        .code(404)
+        .send(apiError('PROPOSAL_NOT_FOUND', 'Предложение не найдено или уже обработано.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal });
+  });
+
+  app.patch('/api/admin/card-proposals/:proposalId/override', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    const payload = normalizeAdminProposalOverridePayload(request.body);
+
+    if (!payload) {
+      reply
+        .code(400)
+        .send(apiError('INVALID_OVERRIDE', 'Укажи корректную редкость и допустимый набор effects.'));
+      return;
+    }
+
+    const proposal = store.updateProposalAdminOverrideById(
+      (request.params as { proposalId: string }).proposalId,
+      payload.rarity,
+      payload.allowedEffects,
+    );
+
+    if (!proposal) {
+      reply
+        .code(404)
+        .send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден или уже заблокирован.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal });
+  });
+
+  app.delete('/api/admin/card-proposals/:proposalId', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    const proposal = store.deleteProposalById(
+      (request.params as { proposalId: string }).proposalId,
+    );
+
+    if (!proposal) {
+      reply
+        .code(404)
+        .send(apiError('PROPOSAL_NOT_FOUND', 'Предложение не найдено или уже обработано.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ proposal });
+  });
+
   app.post('/api/packs/open', async (request, reply) => {
     assertAllowedOrigin(request, reply);
 
@@ -328,6 +910,11 @@ export async function buildApp() {
             nextPackResetAt: error.nextPackResetAt,
           }),
         );
+        return;
+      }
+
+      if (error instanceof NoApprovedCardsError) {
+        reply.code(409).send(apiError('NO_APPROVED_CARDS', error.message));
         return;
       }
 

@@ -1,9 +1,18 @@
 import type {
+  AdminCatalogResult,
+  AdminProposalOverridePayload,
+  AdminUserListResult,
   ApiErrorResponse,
+  CardProposal,
   OpenPackResult,
+  ProposalEditorPayload,
+  ProposalListResult,
   RemoteGameState,
   SessionState,
+  StartProposalResult,
   UpdateNicknameResult,
+  UpdateProposalResult,
+  UploadCardArtResult,
 } from './types';
 
 export const EMPTY_REMOTE_GAME_STATE: RemoteGameState = {
@@ -83,6 +92,74 @@ export function requestNicknameUpdate(name: string) {
   return apiRequest<UpdateNicknameResult>('/api/profile/nickname', {
     method: 'PATCH',
     body: JSON.stringify({ name }),
+  });
+}
+
+export function requestProposalStart() {
+  return apiRequest<StartProposalResult>('/api/card-proposals/start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchProposal(proposalId: string) {
+  return apiRequest<{ proposal: CardProposal }>(`/api/card-proposals/${proposalId}`);
+}
+
+export function saveProposal(proposalId: string, payload: ProposalEditorPayload) {
+  return apiRequest<UpdateProposalResult>(`/api/card-proposals/${proposalId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitProposal(proposalId: string) {
+  return apiRequest<UpdateProposalResult>(`/api/card-proposals/${proposalId}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function uploadCardArt(dataUrl: string) {
+  return apiRequest<UploadCardArtResult>('/api/uploads/card-art', {
+    method: 'POST',
+    body: JSON.stringify({ dataUrl }),
+  });
+}
+
+export function fetchAdminProposals() {
+  return apiRequest<ProposalListResult>('/api/admin/card-proposals');
+}
+
+export function fetchAdminCatalog() {
+  return apiRequest<AdminCatalogResult>('/api/admin/cards');
+}
+
+export function fetchAdminUsers() {
+  return apiRequest<AdminUserListResult>('/api/admin/users');
+}
+
+export function approveProposal(proposalId: string) {
+  return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function deleteProposal(proposalId: string) {
+  return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({}),
+  });
+}
+
+export function overrideProposalAsAdmin(
+  proposalId: string,
+  payload: AdminProposalOverridePayload,
+) {
+  return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}/override`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
   });
 }
 
