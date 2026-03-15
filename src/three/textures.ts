@@ -18,6 +18,10 @@ import {
 const CARD_PREVIEW_WIDTH = 344;
 const CARD_PREVIEW_HEIGHT = 482;
 
+interface CardFrontTextureOptions {
+  treatmentPaintStrength?: number;
+}
+
 type RemoteImageCacheEntry = {
   image: HTMLImageElement | null;
   promise?: Promise<void>;
@@ -64,6 +68,18 @@ const frameStylePalette: Record<
 function setupTexture(canvas: HTMLCanvasElement, repeat = false): Texture {
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
+
+  if (repeat) {
+    texture.wrapS = RepeatWrapping;
+    texture.wrapT = RepeatWrapping;
+    texture.repeat.set(1.6, 1.6);
+  }
+
+  return texture;
+}
+
+function setupDataTexture(canvas: HTMLCanvasElement, repeat = false): Texture {
+  const texture = new CanvasTexture(canvas);
 
   if (repeat) {
     texture.wrapS = RepeatWrapping;
@@ -614,12 +630,18 @@ function drawTreatmentLayer(
   maskImage: CanvasImageSource,
   accent: string,
   hue: string,
+  paintStrength = 1,
 ) {
   const width = ctx.canvas.width;
   const height = ctx.canvas.height;
+  const effectiveOpacity = Math.min(1, layer.opacity * paintStrength);
+
+  if (effectiveOpacity <= 0.01) {
+    return;
+  }
 
   if (layer.type === 'emboss') {
-    applyEmbossLayer(ctx, maskImage, layer.opacity);
+    applyEmbossLayer(ctx, maskImage, effectiveOpacity);
     return;
   }
 
@@ -646,7 +668,7 @@ function drawTreatmentLayer(
   const blendMode: GlobalCompositeOperation =
     layer.type === 'texture_sugar' || layer.type === 'sparkle_foil' ? 'lighter' : 'screen';
 
-  withMaskedLayer(ctx, maskImage, layer.opacity, drawEffect, blendMode);
+  withMaskedLayer(ctx, maskImage, effectiveOpacity, drawEffect, blendMode);
 }
 
 function drawTreatmentLayers(
@@ -655,6 +677,7 @@ function drawTreatmentLayers(
   maskImages: Array<HTMLImageElement | null>,
   accent: string,
   hue: string,
+  paintStrength = 1,
 ) {
   const effectLayers = getCardEffectLayers(card);
 
@@ -664,8 +687,163 @@ function drawTreatmentLayers(
       return;
     }
 
-    drawTreatmentLayer(ctx, layer, maskImage, accent, hue);
+    drawTreatmentLayer(ctx, layer, maskImage, accent, hue, paintStrength);
   });
+}
+
+function createMaskCanvas(width: number, height: number) {
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return { canvas, ctx: null };
+  }
+
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, width, height);
+  return { canvas, ctx };
+}
+
+function composeEffectMaskPass(
+  ctx: CanvasRenderingContext2D,
+  card: OwnedCard,
+  maskImages: Array<HTMLImageElement | null>,
+  effectTypes: ReadonlyArray<CardTreatmentEffect>,
+  options: {
+    blur?: number;
+    alphaMultiplier?: number;
+  } = {},
+) {
+  const typeSet = new Set(effectTypes);
+  const effectLayers = getCardEffectLayers(card);
+  const blur = options.blur ?? 0;
+  const alphaMultiplier = options.alphaMultiplier ?? 1;
+
+  effectLayers.forEach((layer, index) => {
+    if (!typeSet.has(layer.type)) {
+      return;
+    }
+
+    const maskImage = maskImages[index];
+    if (!maskImage) {
+      return;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, layer.opacity * alphaMultiplier);
+    ctx.filter = blur > 0 ? `blur(${blur}px)` : 'none';
+    ctx.drawImage(maskImage, 0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  });
+}
+
+function drawGlossMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['spot_gloss'], {
+    blur: 3,
+    alphaMultiplier: 0.72,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['spot_gloss'], {
+    alphaMultiplier: 0.94,
+  });
+  return canvas;
+}
+
+function drawEmbossHeightMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
+    blur: 14,
+    alphaMultiplier: 0.38,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
+    blur: 7,
+    alphaMultiplier: 0.52,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
+    blur: 2,
+    alphaMultiplier: 0.7,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
+    alphaMultiplier: 0.92,
+  });
+  return canvas;
+}
+
+function drawSugarMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['texture_sugar'], {
+    blur: 1.5,
+    alphaMultiplier: 0.94,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['texture_sugar'], {
+    alphaMultiplier: 0.9,
+  });
+  return canvas;
+}
+
+function drawSparkleMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['sparkle_foil'], {
+    blur: 1.5,
+    alphaMultiplier: 0.86,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['sparkle_foil'], {
+    alphaMultiplier: 0.98,
+  });
+  return canvas;
+}
+
+function drawPrismaticMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
+    blur: 2.5,
+    alphaMultiplier: 0.72,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
+    alphaMultiplier: 1,
+  });
+  return canvas;
+}
+
+function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['spot_holo'], {
+    blur: 2,
+    alphaMultiplier: 1,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['sparkle_foil'], {
+    blur: 1.5,
+    alphaMultiplier: 0.78,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
+    blur: 1.5,
+    alphaMultiplier: 0.92,
+  });
+  return canvas;
 }
 
 function drawPolygon(
@@ -988,6 +1166,7 @@ function drawCardFront(
   card: OwnedCard,
   artImage: HTMLImageElement | null,
   effectMaskImages: Array<HTMLImageElement | null>,
+  options: CardFrontTextureOptions = {},
 ) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -1149,7 +1328,14 @@ function drawCardFront(
   ctx.font = '600 18px Sora, sans-serif';
   ctx.fillText('FOIL', 826, 1300);
 
-  drawTreatmentLayers(ctx, card, effectMaskImages, accent, meta.hue);
+  drawTreatmentLayers(
+    ctx,
+    card,
+    effectMaskImages,
+    accent,
+    meta.hue,
+    options.treatmentPaintStrength ?? 1,
+  );
 
   addNoise(ctx, canvas.width, canvas.height, 7200);
   return canvas;
@@ -1411,10 +1597,6 @@ function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElem
       alpha = 0.68 * layer.opacity;
     } else if (layer.type === 'prismatic_edge') {
       alpha = 0.84 * layer.opacity;
-    } else if (layer.type === 'texture_sugar') {
-      alpha = 0.42 * layer.opacity;
-    } else if (layer.type === 'spot_gloss') {
-      alpha = 0.24 * layer.opacity;
     }
 
     if (alpha <= 0) {
@@ -1475,10 +1657,20 @@ export function useCardTextures(card: OwnedCard | null) {
     }
 
     return {
-      front: setupTexture(drawCardFront(card, artImage, effectMaskImages)),
+      front: setupTexture(
+        drawCardFront(card, artImage, effectMaskImages, {
+          treatmentPaintStrength: 0.12,
+        }),
+      ),
       back: setupTexture(drawCardBack(card)),
       foil: setupTexture(drawFoilLayer(card), true),
-      foilZone: setupTexture(drawHoloZoneMask(card, effectMaskImages)),
+      foilZone: setupDataTexture(drawHoloZoneMask(card, effectMaskImages)),
+      glossMask: setupDataTexture(drawGlossMaskMap(card, effectMaskImages)),
+      embossMap: setupDataTexture(drawEmbossHeightMap(card, effectMaskImages)),
+      sugarMask: setupDataTexture(drawSugarMaskMap(card, effectMaskImages)),
+      sparkleMask: setupDataTexture(drawSparkleMaskMap(card, effectMaskImages)),
+      prismMask: setupDataTexture(drawPrismaticMaskMap(card, effectMaskImages)),
+      holoTreatmentMap: setupDataTexture(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
     };
   }, [artImage, card, effectMaskImages]);
 }
@@ -1496,7 +1688,9 @@ export function useCardPreviewImage(card: OwnedCard | null) {
       return '';
     }
 
-    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages);
+    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages, {
+      treatmentPaintStrength: 0.8,
+    });
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = CARD_PREVIEW_WIDTH;
     previewCanvas.height = CARD_PREVIEW_HEIGHT;

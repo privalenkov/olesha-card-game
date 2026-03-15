@@ -23,6 +23,7 @@ import {
   Shape,
   ShapeGeometry,
   Vector2,
+  Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
 import type { OwnedCard } from '../game/types';
@@ -111,6 +112,11 @@ const FLIP_PREVIEW_LIMIT = 0.72;
 const FLIP_TRIGGER_DISTANCE = 72;
 const HOVER_TILT_X = 0.28;
 const HOVER_TILT_Y = 0.22;
+const CARD_VIEWER_LIGHTS = {
+  key: new Vector3(4.5, 7, 6),
+  fill: new Vector3(-3.5, 0.8, 5),
+  accent: new Vector3(2.8, -1.2, 4.4),
+} as const;
 const edgeHighlightVertexShader = `
   varying vec2 vUv;
   varying vec3 vWorldPosition;
@@ -124,6 +130,339 @@ const edgeHighlightVertexShader = `
     vWorldPosition = worldPosition.xyz;
     vWorldNormal = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * worldPosition;
+  }
+`;
+
+const cardSurfaceVertexShader = `
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  void main() {
+    vUv = uv;
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPosition.xyz;
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    vWorldTangent = normalize(mat3(modelMatrix) * vec3(1.0, 0.0, 0.0));
+    vWorldBitangent = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
+    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+  }
+`;
+
+const finishTreatmentFragmentShader = `
+  uniform sampler2D uSugarMap;
+  uniform sampler2D uSparkleMap;
+  uniform sampler2D uPrismMap;
+  uniform vec3 uAccent;
+  uniform vec3 uHue;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uTime;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) +
+      (c - a) * u.y * (1.0 - u.x) +
+      (d - b) * u.x * u.y;
+  }
+
+  vec3 spectrum(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
+  }
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  vec2 random2(vec2 p) {
+    return vec2(
+      hash(p + vec2(1.7, 9.2)),
+      hash(p + vec2(8.3, 2.8))
+    );
+  }
+
+  float sugarHeightField(vec2 uv) {
+    float sugarMask = texture2D(uSugarMap, uv).r;
+    float sparkleMask = texture2D(uSparkleMap, uv).r;
+    float prismMask = texture2D(uPrismMap, uv).r;
+    float noiseA = noise(uv * vec2(760.0, 1080.0));
+    float noiseB = noise(uv * vec2(460.0, 640.0) + 9.17);
+    float crystal = smoothstep(0.8, 0.995, noise(uv * vec2(132.0, 196.0) + 4.3));
+    float ridges = 0.5 + 0.5 * sin(uv.y * 180.0 + uv.x * 120.0);
+
+    return
+      sugarMask * (noiseA * 0.72 + noiseB * 0.38) +
+      sparkleMask * crystal * 0.95 +
+      prismMask * ridges * 0.34;
+  }
+
+  vec3 microNormalFromHeight(vec2 uv, vec3 baseNormal) {
+    vec2 texel = vec2(1.0 / 1024.0, 1.0 / 1536.0);
+    float hx = sugarHeightField(uv + vec2(texel.x, 0.0)) - sugarHeightField(uv - vec2(texel.x, 0.0));
+    float hy = sugarHeightField(uv + vec2(0.0, texel.y)) - sugarHeightField(uv - vec2(0.0, texel.y));
+    return normalize(
+      baseNormal +
+      vWorldTangent * (-hx * 3.4) +
+      vWorldBitangent * (-hy * 3.4)
+    );
+  }
+
+  vec4 sampleDiamondDust(vec2 uv, vec2 density, float seedOffset) {
+    vec2 scaled = uv * density;
+    vec2 cell = floor(scaled);
+    vec2 local = fract(scaled);
+    float bestDist = 100.0;
+    float bestSeed = 0.0;
+    vec2 bestRand = vec2(0.0);
+
+    for (int y = -1; y <= 1; y += 1) {
+      for (int x = -1; x <= 1; x += 1) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 cellId = cell + neighbor;
+        vec2 rand = random2(cellId + vec2(seedOffset, seedOffset * 1.37));
+        vec2 center = neighbor + mix(vec2(0.16), vec2(0.84), rand);
+        vec2 delta = center - local;
+        float dist = dot(delta, delta);
+
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestRand = rand;
+          bestSeed = hash(cellId + vec2(seedOffset * 0.43, seedOffset * 2.17));
+        }
+      }
+    }
+
+    float radius = mix(0.05, 0.16, bestRand.x);
+    float shape = 1.0 - smoothstep(radius * radius * 0.16, radius * radius, bestDist);
+    return vec4(shape, bestSeed, bestRand);
+  }
+
+  float diamondDustSpec(
+    vec4 dust,
+    vec3 baseNormal,
+    vec3 viewDir,
+    vec3 lightDir,
+    float tangentStrength,
+    float powerMin,
+    float powerMax
+  ) {
+    vec2 jitter = dust.zw * 2.0 - 1.0;
+    vec3 facetNormal = normalize(
+      baseNormal +
+      vWorldTangent * jitter.x * tangentStrength +
+      vWorldBitangent * jitter.y * tangentStrength
+    );
+    vec3 halfVector = normalize(lightDir + viewDir);
+    float specular = pow(max(dot(facetNormal, halfVector), 0.0), mix(powerMin, powerMax, dust.y));
+    return dust.x * specular;
+  }
+
+  void main() {
+    float sugarMask = texture2D(uSugarMap, vUv).r;
+    float sparkleMask = texture2D(uSparkleMap, vUv).r;
+    float prismMask = texture2D(uPrismMap, vUv).r;
+
+    if (sugarMask < 0.0002 && sparkleMask < 0.0002 && prismMask < 0.0002) {
+      discard;
+    }
+
+    vec3 baseNormal = normalize(vWorldNormal);
+    vec3 normal = microNormalFromHeight(vUv, baseNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float fresnel = pow(clamp(1.0 - max(dot(normal, viewDir), 0.0), 0.0, 1.0), 2.4);
+
+    vec3 keyLightDir = normalize(uKeyLightPos - vWorldPosition);
+    vec3 fillLightDir = normalize(uFillLightPos - vWorldPosition);
+    vec3 accentLightDir = normalize(uAccentLightPos - vWorldPosition);
+
+    float grainLarge = smoothstep(0.58, 0.95, noise(vUv * vec2(420.0, 640.0) + 5.3));
+    float crystal = smoothstep(0.78, 0.988, noise(vUv * vec2(980.0, 1320.0) + 4.3));
+    float star = smoothstep(0.9, 0.995, noise(vUv * vec2(132.0, 216.0) + 11.4));
+
+    float keyWide = specularFromLight(uKeyLightPos, normal, viewDir, 16.0);
+    float fillWide = specularFromLight(uFillLightPos, normal, viewDir, 22.0);
+    float accentWide = specularFromLight(uAccentLightPos, normal, viewDir, 18.0);
+    float accentTight = specularFromLight(uAccentLightPos, normal, viewDir, 56.0);
+
+    vec4 dustPrimary = sampleDiamondDust(vUv, vec2(170.0, 240.0), 1.7);
+    vec4 dustSecondary = sampleDiamondDust(vUv + vec2(0.011, 0.017), vec2(108.0, 148.0), 6.1);
+    vec4 dustFine = sampleDiamondDust(vUv + vec2(0.003, 0.007), vec2(230.0, 320.0), 11.4);
+
+    float sugarPrimary =
+      diamondDustSpec(dustPrimary, normal, viewDir, keyLightDir, 1.2, 44.0, 180.0) * 2.8 +
+      diamondDustSpec(dustPrimary, normal, viewDir, accentLightDir, 1.05, 36.0, 140.0) * 1.1;
+    float sugarSecondary =
+      diamondDustSpec(dustSecondary, normal, viewDir, keyLightDir, 0.92, 28.0, 110.0) * 1.6 +
+      diamondDustSpec(dustSecondary, normal, viewDir, fillLightDir, 0.88, 26.0, 96.0) * 0.8;
+    float sugarFine =
+      diamondDustSpec(dustFine, normal, viewDir, keyLightDir, 1.35, 120.0, 260.0) * 2.4 +
+      diamondDustSpec(dustFine, normal, viewDir, accentLightDir, 1.22, 96.0, 220.0) * 0.9;
+
+    float sugarSheen = sugarMask * (
+      keyWide * 0.82 +
+      fillWide * 0.56 +
+      accentWide * 0.4 +
+      fresnel * 0.28
+    ) * (0.32 + grainLarge * 0.26);
+    float sugar =
+      sugarMask * (sugarPrimary + sugarSecondary + sugarFine) +
+      sugarSheen;
+    float sparkle = sparkleMask * (
+      crystal * (keyWide * 1.55 + accentTight * 1.42) +
+      star * (keyWide * 2.9 + fillWide * 0.86 + fresnel * 0.26)
+    );
+    float prism = prismMask * (accentTight * 0.82 + keyWide * 0.56 + fresnel * 1.08);
+
+    float phase =
+      noise(vUv * vec2(24.0, 34.0)) * 0.48 +
+      fresnel * 0.34 +
+      accentTight * 0.18 +
+      uTime * 0.05;
+
+    vec3 sugarColor = mix(vec3(1.0), uAccent, 0.16);
+    vec3 sparkleColor = mix(uAccent, vec3(1.0), 0.52);
+    vec3 prismColor = mix(uHue, spectrum(phase), 0.82);
+    vec3 sugarVeil = sugarColor * sugarMask * (0.07 + keyWide * 0.16 + fresnel * 0.1);
+
+    vec3 color =
+      sugarVeil +
+      sugarColor * sugar * 1.75 +
+      sparkleColor * sparkle * 1.9 +
+      prismColor * prism * 1.45;
+    float alpha = clamp(
+      sugarMask * 0.12 +
+      sugar * 1.05 +
+      sparkle * 1.2 +
+      prism * 0.94,
+      0.0,
+      0.94
+    );
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+const holoFragmentShader = `
+  uniform sampler2D uMaskMap;
+  uniform sampler2D uZoneMap;
+  uniform sampler2D uTreatmentMap;
+  uniform sampler2D uPrismMap;
+  uniform vec3 uAccent;
+  uniform vec3 uHue;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uTime;
+  uniform float uStrength;
+  uniform float uDensity;
+  uniform float uGlint;
+  uniform float uFresnelPower;
+  uniform vec2 uPointer;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) +
+      (c - a) * u.y * (1.0 - u.x) +
+      (d - b) * u.x * u.y;
+  }
+
+  vec3 spectrum(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
+  }
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec3 normal = normalize(vWorldNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), uFresnelPower);
+
+    vec2 flowUv = uv * (1.4 + uDensity * 0.4);
+    float mask = dot(texture2D(uMaskMap, flowUv).rgb, vec3(0.333333));
+    float zone = dot(texture2D(uZoneMap, uv).rgb, vec3(0.333333));
+    float treatment = texture2D(uTreatmentMap, uv).r;
+    float prism = texture2D(uPrismMap, uv).r;
+
+    float micro = noise(
+      uv * vec2(220.0 + uDensity * 80.0, 320.0 + uDensity * 120.0) + uTime * 0.12
+    );
+    float stripe = sin(
+      uv.y * (32.0 + uDensity * 42.0) + uv.x * 22.0 + uTime * (1.1 + uStrength)
+    );
+    float angleWave = sin((uv.x + uv.y) * 18.0 + fresnel * 9.0 - uTime * 0.6);
+    float diffraction = 0.5 + 0.5 * stripe;
+    float rainbowPhase =
+      diffraction * 0.55 +
+      angleWave * 0.18 +
+      fresnel * 0.42 +
+      micro * 0.15 +
+      treatment * 0.08 +
+      prism * 0.12;
+    vec3 rainbow = spectrum(rainbowPhase + uTime * 0.03);
+
+    float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, mix(40.0, 14.0, uGlint));
+    float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, mix(54.0, 20.0, uGlint));
+    float accentGlint = specularFromLight(
+      uAccentLightPos,
+      normal,
+      viewDir,
+      mix(32.0, 12.0, uGlint)
+    );
+    float glint = keyGlint + fillGlint * 0.55 + accentGlint * 0.85;
+    float sweep = pow(
+      max(1.0 - abs(uv.x - (0.5 + uPointer.x * 0.12 + sin(uTime * 0.7) * 0.08)), 0.0),
+      12.0
+    );
+
+    float zoneIntensity = smoothstep(0.02, 0.95, max(zone, treatment * 0.92));
+    float holo = zoneIntensity * (0.16 + mask * 0.8 + treatment * 0.58 + prism * 0.36);
+    holo *= (0.16 + fresnel * (1.0 + prism * 0.42) + glint * (0.96 + treatment * 0.42) + sweep * 0.26);
+    holo *= 0.56 + diffraction * 0.34 + micro * 0.16;
+
+    vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * angleWave);
+    vec3 color = mix(tint, rainbow, 0.84 + prism * 0.08) * holo;
+    color += spectrum(rainbowPhase + 0.18) * prism * (fresnel * 0.5 + glint * 0.22);
+    float alpha = clamp(holo * (0.38 + uStrength * 0.44 + treatment * 0.12), 0.0, 0.92);
+
+    gl_FragColor = vec4(color, alpha);
   }
 `;
 
@@ -250,6 +589,7 @@ function CardRig({
   const ringRef = useRef<Mesh>(null);
   const haloRef = useRef<Mesh>(null);
   const shaderRef = useRef<ShaderMaterial>(null);
+  const finishShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
   const edgeMeshRef = useRef<Mesh>(null);
   const introRef = useRef(0);
@@ -281,10 +621,47 @@ function CardRig({
   useEffect(() => {
     introRef.current = 0;
     if (textures) {
+      textures.front.needsUpdate = true;
+      textures.back.needsUpdate = true;
+      textures.foil.needsUpdate = true;
+      textures.foilZone.needsUpdate = true;
+      textures.glossMask.needsUpdate = true;
+      textures.embossMap.needsUpdate = true;
+      textures.sugarMask.needsUpdate = true;
+      textures.sparkleMask.needsUpdate = true;
+      textures.prismMask.needsUpdate = true;
+      textures.holoTreatmentMap.needsUpdate = true;
       textures.foil.center.set(0.5, 0.5);
       textures.foil.repeat.set(1.04, 1.04);
     }
   }, [introKey, textures]);
+
+  useEffect(() => {
+    if (!textures) {
+      return;
+    }
+
+    if (shaderRef.current?.uniforms) {
+      shaderRef.current.uniforms.uMaskMap.value = textures.foil;
+      shaderRef.current.uniforms.uZoneMap.value = textures.foilZone;
+      shaderRef.current.uniforms.uTreatmentMap.value = textures.holoTreatmentMap;
+      shaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
+      shaderRef.current.uniforms.uAccent.value.set(meta.accent);
+      shaderRef.current.uniforms.uHue.value.set(meta.hue);
+      shaderRef.current.uniformsNeedUpdate = true;
+      shaderRef.current.needsUpdate = true;
+    }
+
+    if (finishShaderRef.current?.uniforms) {
+      finishShaderRef.current.uniforms.uSugarMap.value = textures.sugarMask;
+      finishShaderRef.current.uniforms.uSparkleMap.value = textures.sparkleMask;
+      finishShaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
+      finishShaderRef.current.uniforms.uAccent.value.set(meta.accent);
+      finishShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      finishShaderRef.current.uniformsNeedUpdate = true;
+      finishShaderRef.current.needsUpdate = true;
+    }
+  }, [meta.accent, meta.hue, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
@@ -377,6 +754,10 @@ function CardRig({
     shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
     shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
 
+    if (finishShaderRef.current?.uniforms) {
+      finishShaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+    }
+
     const frontFacing = Math.cos(groupRef.current.rotation.y) >= 0;
 
     if (edgeRef.current?.uniforms) {
@@ -454,10 +835,55 @@ function CardRig({
             <primitive attach="geometry" object={faceGeometry} />
             <meshPhysicalMaterial
               map={textures.front}
-              metalness={0.06}
-              roughness={0.92}
-              clearcoat={0}
-              reflectivity={0.08}
+              metalness={0.08}
+              roughness={0.8}
+              clearcoat={0.1}
+              clearcoatRoughness={0.38}
+              reflectivity={0.12}
+              bumpMap={textures.embossMap}
+              bumpScale={0.12 + finish.shimmerBoost * 0.04}
+            />
+          </mesh>
+
+          <mesh position={[0, 0, faceOffset + 0.0048]} scale={[1.001, 1.001, 1]}>
+            <primitive attach="geometry" object={faceGeometry} />
+            <meshPhysicalMaterial
+              transparent
+              depthWrite={false}
+              alphaMap={textures.glossMask}
+              opacity={0.2}
+              color="#f8fdff"
+              metalness={0}
+              roughness={0.06}
+              clearcoat={1}
+              clearcoatRoughness={0.02}
+              reflectivity={0.95}
+              bumpMap={textures.embossMap}
+              bumpScale={0.085}
+            />
+          </mesh>
+
+          <mesh position={[0, 0, faceOffset + 0.0096]} scale={[1.0018, 1.0018, 1]}>
+            <primitive attach="geometry" object={faceGeometry} />
+            <shaderMaterial
+              ref={finishShaderRef}
+              transparent
+              depthWrite={false}
+              blending={AdditiveBlending}
+              toneMapped={false}
+              uniforms={{
+                uSugarMap: { value: textures.sugarMask },
+                uSparkleMap: { value: textures.sparkleMask },
+                uPrismMap: { value: textures.prismMask },
+                uAccent: { value: new Color(meta.accent) },
+                uHue: { value: new Color(meta.hue) },
+                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
+                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
+                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
+                uTime: { value: 0 },
+              }}
+              vertexShader={cardSurfaceVertexShader}
+              fragmentShader={finishTreatmentFragmentShader}
             />
           </mesh>
 
@@ -483,106 +909,21 @@ function CardRig({
                 uTime: { value: 0 },
                 uMaskMap: { value: textures.foil },
                 uZoneMap: { value: textures.foilZone },
+                uTreatmentMap: { value: textures.holoTreatmentMap },
+                uPrismMap: { value: textures.prismMask },
                 uAccent: { value: new Color(meta.accent) },
                 uHue: { value: new Color(meta.hue) },
+                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
+                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
+                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
                 uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
                 uDensity: { value: tuning.density },
                 uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
                 uFresnelPower: { value: tuning.fresnelPower },
                 uPointer: { value: new Vector2(0, 0) },
               }}
-              vertexShader={`
-                varying vec2 vUv;
-                varying vec3 vWorldNormal;
-                varying vec3 vWorldPosition;
-
-                void main() {
-                  vUv = uv;
-                  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                  vWorldPosition = worldPosition.xyz;
-                  vWorldNormal = normalize(mat3(modelMatrix) * normal);
-                  gl_Position = projectionMatrix * viewMatrix * worldPosition;
-                }
-              `}
-              fragmentShader={`
-                uniform sampler2D uMaskMap;
-                uniform sampler2D uZoneMap;
-                uniform vec3 uAccent;
-                uniform vec3 uHue;
-                uniform float uTime;
-                uniform float uStrength;
-                uniform float uDensity;
-                uniform float uGlint;
-                uniform float uFresnelPower;
-                uniform vec2 uPointer;
-
-                varying vec2 vUv;
-                varying vec3 vWorldNormal;
-                varying vec3 vWorldPosition;
-
-                float hash(vec2 p) {
-                  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-                }
-
-                float noise(vec2 p) {
-                  vec2 i = floor(p);
-                  vec2 f = fract(p);
-                  float a = hash(i);
-                  float b = hash(i + vec2(1.0, 0.0));
-                  float c = hash(i + vec2(0.0, 1.0));
-                  float d = hash(i + vec2(1.0, 1.0));
-                  vec2 u = f * f * (3.0 - 2.0 * f);
-                  return mix(a, b, u.x) +
-                    (c - a) * u.y * (1.0 - u.x) +
-                    (d - b) * u.x * u.y;
-                }
-
-                vec3 spectrum(float t) {
-                  return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
-                }
-
-                void main() {
-                  vec2 uv = vUv;
-                  vec3 N = normalize(vWorldNormal);
-                  vec3 V = normalize(cameraPosition - vWorldPosition);
-                  float fresnel = pow(1.0 - max(dot(N, V), 0.0), uFresnelPower);
-
-                  vec2 flowUv = uv * (1.4 + uDensity * 0.4);
-                  float mask = dot(texture2D(uMaskMap, flowUv).rgb, vec3(0.333333));
-                  float zone = dot(texture2D(uZoneMap, uv).rgb, vec3(0.333333));
-                  float micro = noise(
-                    uv * vec2(220.0 + uDensity * 80.0, 320.0 + uDensity * 120.0) + uTime * 0.12
-                  );
-                  float stripe = sin(
-                    uv.y * (32.0 + uDensity * 42.0) + uv.x * 22.0 + uTime * (1.1 + uStrength)
-                  );
-                  float angleWave = sin((uv.x + uv.y) * 18.0 + fresnel * 9.0 - uTime * 0.6);
-                  float diffraction = 0.5 + 0.5 * stripe;
-                  float rainbowPhase =
-                    diffraction * 0.55 + angleWave * 0.18 + fresnel * 0.42 + micro * 0.15;
-                  vec3 rainbow = spectrum(rainbowPhase + uTime * 0.03);
-
-                  vec3 lightDir = normalize(
-                    vec3(0.25 + uPointer.x * 0.4, 0.18 + uPointer.y * 0.35, 1.0)
-                  );
-                  float glint = pow(max(dot(reflect(-V, N), lightDir), 0.0), mix(26.0, 10.0, uGlint));
-                  float sweep = pow(
-                    max(1.0 - abs(uv.x - (0.5 + uPointer.x * 0.12 + sin(uTime * 0.7) * 0.08)), 0.0),
-                    12.0
-                  );
-
-                  float zoneIntensity = smoothstep(0.02, 0.95, zone);
-                  float holo = zoneIntensity * (0.18 + mask * 0.82);
-                  holo *= (0.2 + fresnel * 1.0 + glint * 1.25 + sweep * 0.42);
-                  holo *= 0.56 + diffraction * 0.34 + micro * 0.16;
-
-                  vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * angleWave);
-                  vec3 color = mix(tint, rainbow, 0.84) * holo;
-                  float alpha = clamp(holo * (0.42 + uStrength * 0.44), 0.0, 0.88);
-
-                  gl_FragColor = vec4(color, alpha);
-                }
-              `}
+              vertexShader={cardSurfaceVertexShader}
+              fragmentShader={holoFragmentShader}
             />
           </mesh>
 

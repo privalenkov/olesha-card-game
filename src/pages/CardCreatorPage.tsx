@@ -157,6 +157,30 @@ export function CardCreatorPage() {
   }, [draft, proposal]);
 
   const previewImage = useCardPreviewImage(previewCard);
+  const viewerRenderKey = useMemo(() => {
+    if (!previewCard) {
+      return 'creator-viewer';
+    }
+
+    const visuals = previewCard.visuals ?? getDefaultCardVisuals();
+    const effectKey = (previewCard.effectLayers ?? [])
+      .map(
+        (layer) =>
+          `${layer.id}:${layer.type}:${layer.opacity}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
+      )
+      .join('|');
+
+    return [
+      previewCard.instanceId,
+      previewCard.urlImage.slice(-48),
+      previewCard.defaultFinish,
+      visuals.frameStyle,
+      visuals.accentColor,
+      visuals.effectPattern,
+      visuals.effectPlacement,
+      effectKey,
+    ].join('::');
+  }, [previewCard]);
 
   const selectedLayer = useMemo(
     () => draft?.effectLayers.find((layer) => layer.id === selectedLayerId) ?? null,
@@ -388,6 +412,7 @@ export function CardCreatorPage() {
       <div className="creator-layout">
         <div className="creator-preview">
           <CardViewerCanvas
+            key={viewerRenderKey}
             card={previewCard}
             introKey={previewCard.instanceId}
             cameraZ={10.6}

@@ -69,21 +69,21 @@ export const CARD_TREATMENT_EFFECT_OPTIONS: CardTreatmentEffect[] = [
 ];
 
 export const CARD_TREATMENT_EFFECT_LABELS: Record<CardTreatmentEffect, string> = {
-  spot_gloss: 'Локальный глянец',
-  spot_holo: 'Локальная голография',
-  texture_sugar: 'Сахарная текстура',
-  sparkle_foil: 'Искристая фольга',
-  emboss: 'Выпуклый рельеф',
-  prismatic_edge: 'Призматический кант',
+  spot_gloss: 'Глянцевая ламинация',
+  spot_holo: 'Голографическая ламинация',
+  texture_sugar: 'Алмазная пыль',
+  sparkle_foil: 'Искристая ламинация',
+  emboss: 'Рельефная ламинация',
+  prismatic_edge: 'Призматическая ламинация',
 };
 
 export const CARD_TREATMENT_EFFECT_DESCRIPTIONS: Record<CardTreatmentEffect, string> = {
-  spot_gloss: 'Чистый блеск по выбранным участкам.',
-  spot_holo: 'Радужное holographic-покрытие по маске.',
-  texture_sugar: 'Зернистое сияние как сахарный лак.',
-  sparkle_foil: 'Плотные искры и фольгированные блики.',
-  emboss: 'Фальш-рельеф с высветлением и тенью.',
-  prismatic_edge: 'Сильный призматический блик для контуров и кантов.',
+  spot_gloss: 'Локальная глянцевая ламинация по маске.',
+  spot_holo: 'Локальная радужная ламинация по выбранным зонам.',
+  texture_sugar: 'Глиттерная ламинация с мелкими переливающимися точками.',
+  sparkle_foil: 'Ламинация с яркими искрами и плотными бликами.',
+  emboss: 'Ламинация с выпуклым рельефом, который ловит свет.',
+  prismatic_edge: 'Призматический перелив для кантов и контуров.',
 };
 
 export const CARD_ACCENT_SWATCHES = [
