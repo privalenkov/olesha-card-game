@@ -148,6 +148,8 @@ function normalizeProposalPayload(
     const maskUrl = typeof layer.maskUrl === 'string' ? layer.maskUrl.trim() : '';
     const opacity =
       typeof layer.opacity === 'number' && Number.isFinite(layer.opacity) ? layer.opacity : NaN;
+    const shimmer =
+      typeof layer.shimmer === 'number' && Number.isFinite(layer.shimmer) ? layer.shimmer : 1;
 
     if (
       id.length < 6 ||
@@ -156,7 +158,8 @@ function normalizeProposalPayload(
       seenIds.has(id) ||
       seenTypes.has(type) ||
       (!isStoredAssetUrl(maskUrl) && maskUrl !== '') ||
-      !Number.isFinite(opacity)
+      !Number.isFinite(opacity) ||
+      !Number.isFinite(shimmer)
     ) {
       return null;
     }
@@ -168,6 +171,7 @@ function normalizeProposalPayload(
       type,
       maskUrl,
       opacity: Math.max(0.18, Math.min(opacity, 1)),
+      shimmer: Math.max(0.2, Math.min(shimmer, 1.4)),
     });
   }
 

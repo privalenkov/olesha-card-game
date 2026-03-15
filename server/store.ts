@@ -162,6 +162,7 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
       type: layer.type,
       maskUrl: normalizeMaskUrl(layer.maskUrl),
       opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
+      shimmer: Math.max(0.2, Math.min(layer.shimmer ?? 1, 1.4)),
     }))
     .filter((layer) => layer.id.length > 0);
 }

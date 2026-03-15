@@ -634,7 +634,8 @@ function drawTreatmentLayer(
 ) {
   const width = ctx.canvas.width;
   const height = ctx.canvas.height;
-  const effectiveOpacity = Math.min(1, layer.opacity * paintStrength);
+  const shimmerFactor = layer.type === 'texture_sugar' ? layer.shimmer : 1;
+  const effectiveOpacity = Math.min(1, layer.opacity * paintStrength * shimmerFactor);
 
   if (effectiveOpacity <= 0.01) {
     return;

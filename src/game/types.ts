@@ -33,6 +33,7 @@ export interface CardEffectLayer {
   type: CardTreatmentEffect;
   maskUrl: string;
   opacity: number;
+  shimmer: number;
 }
 
 export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
@@ -122,6 +123,7 @@ export function getDefaultEffectLayer(
     type,
     maskUrl: '',
     opacity: opacityByType[type],
+    shimmer: 1,
   };
 }
 

@@ -166,7 +166,7 @@ export function CardCreatorPage() {
     const effectKey = (previewCard.effectLayers ?? [])
       .map(
         (layer) =>
-          `${layer.id}:${layer.type}:${layer.opacity}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
+          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
       )
       .join('|');
 
@@ -751,6 +751,32 @@ export function CardCreatorPage() {
                       value={selectedLayer.opacity}
                     />
                   </label>
+
+                  {selectedLayer.type === 'texture_sugar' ? (
+                    <label className="creator-field">
+                      <span>
+                        Сила переливания: {Math.round(selectedLayer.shimmer * 100)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={1.4}
+                        min={0.2}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, shimmer: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.02}
+                        type="range"
+                        value={selectedLayer.shimmer}
+                      />
+                    </label>
+                  ) : null}
 
                   <label className="creator-field">
                     <span>Размер кисти: {brushSize}px</span>

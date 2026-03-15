@@ -26,7 +26,7 @@ import {
   Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
-import type { OwnedCard } from '../game/types';
+import type { CardTreatmentEffect, OwnedCard } from '../game/types';
 import { useCardTextures } from '../three/textures';
 
 const holoTuning = {
@@ -76,6 +76,15 @@ interface PointerPressState {
   active: boolean;
   pointerId: number | null;
   startX: number;
+}
+
+function getLayerValue(card: OwnedCard, type: CardTreatmentEffect, field: 'opacity' | 'shimmer') {
+  const layer = card.effectLayers?.find((item) => item.type === type);
+  if (!layer) {
+    return 1;
+  }
+
+  return layer[field];
 }
 
 const initialDrag: DragState = {
@@ -161,6 +170,7 @@ const finishTreatmentFragmentShader = `
   uniform vec3 uFillLightPos;
   uniform vec3 uAccentLightPos;
   uniform float uTime;
+  uniform float uSugarIntensity;
 
   varying vec2 vUv;
   varying vec3 vWorldNormal;
@@ -309,24 +319,25 @@ const finishTreatmentFragmentShader = `
     vec4 dustFine = sampleDiamondDust(vUv + vec2(0.003, 0.007), vec2(230.0, 320.0), 11.4);
 
     float sugarPrimary =
-      diamondDustSpec(dustPrimary, normal, viewDir, keyLightDir, 1.2, 44.0, 180.0) * 2.8 +
-      diamondDustSpec(dustPrimary, normal, viewDir, accentLightDir, 1.05, 36.0, 140.0) * 1.1;
+      diamondDustSpec(dustPrimary, normal, viewDir, keyLightDir, 1.2, 44.0, 180.0) * 1.72 +
+      diamondDustSpec(dustPrimary, normal, viewDir, accentLightDir, 1.05, 36.0, 140.0) * 0.66;
     float sugarSecondary =
-      diamondDustSpec(dustSecondary, normal, viewDir, keyLightDir, 0.92, 28.0, 110.0) * 1.6 +
-      diamondDustSpec(dustSecondary, normal, viewDir, fillLightDir, 0.88, 26.0, 96.0) * 0.8;
+      diamondDustSpec(dustSecondary, normal, viewDir, keyLightDir, 0.92, 28.0, 110.0) * 0.98 +
+      diamondDustSpec(dustSecondary, normal, viewDir, fillLightDir, 0.88, 26.0, 96.0) * 0.52;
     float sugarFine =
-      diamondDustSpec(dustFine, normal, viewDir, keyLightDir, 1.35, 120.0, 260.0) * 2.4 +
-      diamondDustSpec(dustFine, normal, viewDir, accentLightDir, 1.22, 96.0, 220.0) * 0.9;
+      diamondDustSpec(dustFine, normal, viewDir, keyLightDir, 1.35, 120.0, 260.0) * 1.46 +
+      diamondDustSpec(dustFine, normal, viewDir, accentLightDir, 1.22, 96.0, 220.0) * 0.56;
 
     float sugarSheen = sugarMask * (
-      keyWide * 0.82 +
-      fillWide * 0.56 +
-      accentWide * 0.4 +
-      fresnel * 0.28
-    ) * (0.32 + grainLarge * 0.26);
+      keyWide * 0.48 +
+      fillWide * 0.32 +
+      accentWide * 0.2 +
+      fresnel * 0.14
+    ) * (0.18 + grainLarge * 0.12);
     float sugar =
       sugarMask * (sugarPrimary + sugarSecondary + sugarFine) +
       sugarSheen;
+    sugar *= uSugarIntensity;
     float sparkle = sparkleMask * (
       crystal * (keyWide * 1.55 + accentTight * 1.42) +
       star * (keyWide * 2.9 + fillWide * 0.86 + fresnel * 0.26)
@@ -342,16 +353,16 @@ const finishTreatmentFragmentShader = `
     vec3 sugarColor = mix(vec3(1.0), uAccent, 0.16);
     vec3 sparkleColor = mix(uAccent, vec3(1.0), 0.52);
     vec3 prismColor = mix(uHue, spectrum(phase), 0.82);
-    vec3 sugarVeil = sugarColor * sugarMask * (0.07 + keyWide * 0.16 + fresnel * 0.1);
+    vec3 sugarVeil = sugarColor * sugarMask * (0.028 + keyWide * 0.07 + fresnel * 0.04) * uSugarIntensity;
 
     vec3 color =
       sugarVeil +
-      sugarColor * sugar * 1.75 +
+      sugarColor * sugar * 1.02 +
       sparkleColor * sparkle * 1.9 +
       prismColor * prism * 1.45;
     float alpha = clamp(
-      sugarMask * 0.12 +
-      sugar * 1.05 +
+      sugarMask * 0.045 +
+      sugar * 0.58 +
       sparkle * 1.2 +
       prism * 0.94,
       0.0,
@@ -597,6 +608,7 @@ function CardRig({
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const tuning = holoTuning[card.rarity];
+  const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
   const showDecorativeEffects = effectsPreset === 'full';
   const faceGeometry = useMemo(
     () => createRoundedFaceGeometry(CARD_FACE.width, CARD_FACE.height, CARD_BODY.radius),
@@ -658,10 +670,11 @@ function CardRig({
       finishShaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
       finishShaderRef.current.uniforms.uAccent.value.set(meta.accent);
       finishShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      finishShaderRef.current.uniforms.uSugarIntensity.value = sugarIntensity;
       finishShaderRef.current.uniformsNeedUpdate = true;
       finishShaderRef.current.needsUpdate = true;
     }
-  }, [meta.accent, meta.hue, textures]);
+  }, [meta.accent, meta.hue, sugarIntensity, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
@@ -756,6 +769,7 @@ function CardRig({
 
     if (finishShaderRef.current?.uniforms) {
       finishShaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+      finishShaderRef.current.uniforms.uSugarIntensity.value = sugarIntensity;
     }
 
     const frontFacing = Math.cos(groupRef.current.rotation.y) >= 0;
@@ -880,6 +894,7 @@ function CardRig({
                 uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
                 uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
                 uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
+                uSugarIntensity: { value: sugarIntensity },
                 uTime: { value: 0 },
               }}
               vertexShader={cardSurfaceVertexShader}
