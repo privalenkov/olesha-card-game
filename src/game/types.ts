@@ -2,8 +2,6 @@ export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'veryrare';
 
 export type CardFinish = 'standard' | 'foil' | 'prismatic';
 export type CardFrameStyle = 'aurora' | 'ember' | 'mint' | 'onyx' | 'plasma';
-export type CardEffectPattern = 'none' | 'sparkles' | 'grid' | 'waves' | 'shards';
-export type CardEffectPlacement = 'hero' | 'frame' | 'full';
 export type CardTreatmentEffect =
   | 'spot_gloss'
   | 'spot_holo'
@@ -21,11 +19,19 @@ export interface CardStats {
   humor: number;
 }
 
+export interface CardDecorativePattern {
+  svgUrl: string;
+  size: number;
+  gap: number;
+  opacity: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface CardVisuals {
   frameStyle: CardFrameStyle;
   accentColor: string;
-  effectPattern: CardEffectPattern;
-  effectPlacement: CardEffectPlacement;
+  decorativePattern: CardDecorativePattern;
 }
 
 export interface CardEffectLayer {
@@ -34,6 +40,7 @@ export interface CardEffectLayer {
   maskUrl: string;
   opacity: number;
   shimmer: number;
+  relief: number;
 }
 
 export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
@@ -42,20 +49,6 @@ export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
   'mint',
   'onyx',
   'plasma',
-];
-
-export const CARD_EFFECT_PATTERN_OPTIONS: CardEffectPattern[] = [
-  'none',
-  'sparkles',
-  'grid',
-  'waves',
-  'shards',
-];
-
-export const CARD_EFFECT_PLACEMENT_OPTIONS: CardEffectPlacement[] = [
-  'hero',
-  'frame',
-  'full',
 ];
 
 export const CARD_FINISH_OPTIONS: CardFinish[] = ['standard', 'foil', 'prismatic'];
@@ -96,12 +89,22 @@ export const CARD_ACCENT_SWATCHES = [
   '#fff17f',
 ] as const;
 
+export function getDefaultDecorativePattern(): CardDecorativePattern {
+  return {
+    svgUrl: '',
+    size: 88,
+    gap: 26,
+    opacity: 0.2,
+    offsetX: 0,
+    offsetY: 0,
+  };
+}
+
 export function getDefaultCardVisuals(): CardVisuals {
   return {
     frameStyle: 'aurora',
     accentColor: CARD_ACCENT_SWATCHES[0],
-    effectPattern: 'sparkles',
-    effectPlacement: 'hero',
+    decorativePattern: getDefaultDecorativePattern(),
   };
 }
 
@@ -124,6 +127,7 @@ export function getDefaultEffectLayer(
     maskUrl: '',
     opacity: opacityByType[type],
     shimmer: 1,
+    relief: 0,
   };
 }
 

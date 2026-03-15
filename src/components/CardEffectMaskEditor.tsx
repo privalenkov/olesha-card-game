@@ -12,6 +12,7 @@ interface CardEffectMaskEditorProps {
   disabled?: boolean;
   eraseMode: boolean;
   brushSize: number;
+  brushSoftness: number;
   layer: CardEffectLayer | null;
   previewImage: string;
   onMaskChange: (maskUrl: string) => void;
@@ -46,6 +47,7 @@ export function CardEffectMaskEditor({
   disabled = false,
   eraseMode,
   brushSize,
+  brushSoftness,
   layer,
   previewImage,
   onMaskChange,
@@ -112,6 +114,49 @@ export function CardEffectMaskEditor({
     };
   };
 
+  const stampBrush = (
+    sourceContext: CanvasRenderingContext2D,
+    point: { x: number; y: number },
+  ) => {
+    const radius = brushSize;
+    const softness = Math.max(0, Math.min(1, brushSoftness));
+    const softnessCurve = Math.pow(softness, 0.58);
+    const innerRadius = radius * Math.max(0, 1 - softnessCurve * 1.55);
+    const outerRadius = radius * (1 + softnessCurve * 0.9);
+    const color = eraseMode ? '0,0,0' : '255,255,255';
+
+    sourceContext.save();
+    sourceContext.globalCompositeOperation = eraseMode ? 'destination-out' : 'source-over';
+
+    if (softness <= 0.04) {
+      sourceContext.fillStyle = `rgba(${color},1)`;
+      sourceContext.beginPath();
+      sourceContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      sourceContext.fill();
+      sourceContext.restore();
+      return;
+    }
+
+    const gradient = sourceContext.createRadialGradient(
+      point.x,
+      point.y,
+      innerRadius,
+      point.x,
+      point.y,
+      outerRadius,
+    );
+    gradient.addColorStop(0, `rgba(${color},1)`);
+    gradient.addColorStop(0.16, `rgba(${color},0.96)`);
+    gradient.addColorStop(0.42, `rgba(${color},0.68)`);
+    gradient.addColorStop(0.72, `rgba(${color},0.24)`);
+    gradient.addColorStop(1, `rgba(${color},0)`);
+    sourceContext.fillStyle = gradient;
+    sourceContext.beginPath();
+    sourceContext.arc(point.x, point.y, outerRadius, 0, Math.PI * 2);
+    sourceContext.fill();
+    sourceContext.restore();
+  };
+
   const paintAt = (
     point: { x: number; y: number },
     previousPoint: { x: number; y: number } | null,
@@ -127,32 +172,22 @@ export function CardEffectMaskEditor({
       return;
     }
 
-    sourceContext.save();
-    sourceContext.lineCap = 'round';
-    sourceContext.lineJoin = 'round';
-    sourceContext.lineWidth = brushSize * 2;
-
-    if (eraseMode) {
-      sourceContext.globalCompositeOperation = 'destination-out';
-      sourceContext.strokeStyle = 'rgba(0,0,0,1)';
-      sourceContext.fillStyle = 'rgba(0,0,0,1)';
-    } else {
-      sourceContext.globalCompositeOperation = 'source-over';
-      sourceContext.strokeStyle = 'rgba(255,255,255,1)';
-      sourceContext.fillStyle = 'rgba(255,255,255,1)';
-    }
-
     if (previousPoint) {
-      sourceContext.beginPath();
-      sourceContext.moveTo(previousPoint.x, previousPoint.y);
-      sourceContext.lineTo(point.x, point.y);
-      sourceContext.stroke();
-    }
+      const dx = point.x - previousPoint.x;
+      const dy = point.y - previousPoint.y;
+      const distance = Math.hypot(dx, dy);
+      const steps = Math.max(1, Math.ceil(distance / Math.max(1, brushSize * 0.18)));
 
-    sourceContext.beginPath();
-    sourceContext.arc(point.x, point.y, brushSize, 0, Math.PI * 2);
-    sourceContext.fill();
-    sourceContext.restore();
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        stampBrush(sourceContext, {
+          x: previousPoint.x + dx * t,
+          y: previousPoint.y + dy * t,
+        });
+      }
+    } else {
+      stampBrush(sourceContext, point);
+    }
 
     drawOverlay(overlay, source);
     dirtyRef.current = true;

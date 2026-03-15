@@ -78,10 +78,14 @@ interface PointerPressState {
   startX: number;
 }
 
-function getLayerValue(card: OwnedCard, type: CardTreatmentEffect, field: 'opacity' | 'shimmer') {
+function getLayerValue(
+  card: OwnedCard,
+  type: CardTreatmentEffect,
+  field: 'opacity' | 'shimmer' | 'relief',
+) {
   const layer = card.effectLayers?.find((item) => item.type === type);
   if (!layer) {
-    return 1;
+    return field === 'relief' ? 0 : 1;
   }
 
   return layer[field];
@@ -164,6 +168,8 @@ const finishTreatmentFragmentShader = `
   uniform sampler2D uSugarMap;
   uniform sampler2D uSparkleMap;
   uniform sampler2D uPrismMap;
+  uniform vec3 uLayerWeights;
+  uniform vec2 uSurfaceReliefWeights;
   uniform vec3 uAccent;
   uniform vec3 uHue;
   uniform vec3 uKeyLightPos;
@@ -212,17 +218,14 @@ const finishTreatmentFragmentShader = `
   }
 
   float sugarHeightField(vec2 uv) {
-    float sugarMask = texture2D(uSugarMap, uv).r;
-    float sparkleMask = texture2D(uSparkleMap, uv).r;
-    float prismMask = texture2D(uPrismMap, uv).r;
+    float sugarMask = texture2D(uSugarMap, uv).r * uSurfaceReliefWeights.x;
+    float prismMask = texture2D(uPrismMap, uv).r * uSurfaceReliefWeights.y;
     float noiseA = noise(uv * vec2(760.0, 1080.0));
     float noiseB = noise(uv * vec2(460.0, 640.0) + 9.17);
-    float crystal = smoothstep(0.8, 0.995, noise(uv * vec2(132.0, 196.0) + 4.3));
     float ridges = 0.5 + 0.5 * sin(uv.y * 180.0 + uv.x * 120.0);
 
     return
       sugarMask * (noiseA * 0.72 + noiseB * 0.38) +
-      sparkleMask * crystal * 0.95 +
       prismMask * ridges * 0.34;
   }
 
@@ -287,10 +290,86 @@ const finishTreatmentFragmentShader = `
     return dust.x * specular;
   }
 
+  vec4 sampleSparkleFacet(vec2 uv, vec2 density, float seedOffset) {
+    vec2 scaled = uv * density;
+    vec2 cell = floor(scaled);
+    vec2 local = fract(scaled);
+    float bestDist = 100.0;
+    vec2 bestDelta = vec2(0.0);
+    float bestSeed = 0.0;
+    float bestGate = 0.0;
+
+    for (int y = -1; y <= 1; y += 1) {
+      for (int x = -1; x <= 1; x += 1) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 cellId = cell + neighbor;
+        vec2 rand = random2(cellId + vec2(seedOffset * 0.61, seedOffset * 1.91));
+        vec2 center = neighbor + mix(vec2(0.14), vec2(0.86), rand);
+        vec2 delta = local - center;
+        float dist = dot(delta, delta);
+
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestDelta = delta;
+          bestSeed = hash(cellId + vec2(seedOffset * 0.57, seedOffset * 2.41));
+          bestGate = step(0.42, rand.y);
+        }
+      }
+    }
+
+    return vec4(bestDelta, bestSeed, bestGate);
+  }
+
+  float sparkleFacetShape(vec2 delta, float seed) {
+    float angle = seed * 6.28318;
+    float cs = cos(angle);
+    float sn = sin(angle);
+    mat2 rotation = mat2(cs, -sn, sn, cs);
+    vec2 p = rotation * delta;
+    float sizeX = mix(0.065, 0.18, fract(seed * 13.17));
+    float sizeY = mix(0.04, 0.11, fract(seed * 7.31));
+    float skew = mix(-0.6, 0.6, fract(seed * 5.73));
+    p.x += p.y * skew;
+
+    float rhombus = abs(p.x) / sizeX + abs(p.y) / sizeY;
+    float body = 1.0 - smoothstep(0.72, 1.0, rhombus);
+    float mirrorRidge =
+      exp(-abs(p.y) / (sizeY * 0.34 + 0.0001)) *
+      smoothstep(1.0, 0.18, rhombus);
+    float edgeFlash = exp(-abs(rhombus - 0.82) * 12.0) * 0.18;
+
+    return body * 0.84 + mirrorRidge * 0.66 + edgeFlash;
+  }
+
+  vec3 sparkleFacetNormal(vec3 baseNormal, float seed) {
+    float angle = seed * 6.28318;
+    float tilt = mix(0.22, 0.56, fract(seed * 9.17));
+    vec2 axis = vec2(cos(angle), sin(angle));
+    return normalize(
+      baseNormal +
+      vWorldTangent * axis.x * tilt +
+      vWorldBitangent * axis.y * tilt * 0.82
+    );
+  }
+
+  float sparkleFacetSpec(
+    vec4 facet,
+    vec3 baseNormal,
+    vec3 viewDir,
+    vec3 lightDir,
+    float power
+  ) {
+    float shape = sparkleFacetShape(facet.xy, facet.z) * facet.w;
+    vec3 facetNormal = sparkleFacetNormal(baseNormal, facet.z);
+    vec3 halfVector = normalize(lightDir + viewDir);
+    float specular = pow(max(dot(facetNormal, halfVector), 0.0), power);
+    return shape * specular;
+  }
+
   void main() {
-    float sugarMask = texture2D(uSugarMap, vUv).r;
-    float sparkleMask = texture2D(uSparkleMap, vUv).r;
-    float prismMask = texture2D(uPrismMap, vUv).r;
+    float sugarMask = texture2D(uSugarMap, vUv).r * uLayerWeights.x;
+    float sparkleMask = texture2D(uSparkleMap, vUv).r * uLayerWeights.y;
+    float prismMask = texture2D(uPrismMap, vUv).r * uLayerWeights.z;
 
     if (sugarMask < 0.0002 && sparkleMask < 0.0002 && prismMask < 0.0002) {
       discard;
@@ -306,8 +385,6 @@ const finishTreatmentFragmentShader = `
     vec3 accentLightDir = normalize(uAccentLightPos - vWorldPosition);
 
     float grainLarge = smoothstep(0.58, 0.95, noise(vUv * vec2(420.0, 640.0) + 5.3));
-    float crystal = smoothstep(0.78, 0.988, noise(vUv * vec2(980.0, 1320.0) + 4.3));
-    float star = smoothstep(0.9, 0.995, noise(vUv * vec2(132.0, 216.0) + 11.4));
 
     float keyWide = specularFromLight(uKeyLightPos, normal, viewDir, 16.0);
     float fillWide = specularFromLight(uFillLightPos, normal, viewDir, 22.0);
@@ -338,9 +415,33 @@ const finishTreatmentFragmentShader = `
       sugarMask * (sugarPrimary + sugarSecondary + sugarFine) +
       sugarSheen;
     sugar *= uSugarIntensity;
+    vec4 sparkleFacetPrimary = sampleSparkleFacet(vUv + vec2(0.007, 0.011), vec2(14.0, 20.0), 3.8);
+    vec4 sparkleFacetSecondary = sampleSparkleFacet(vUv + vec2(-0.013, 0.009), vec2(10.0, 14.0), 8.4);
+    float sparkleFacetField =
+      sparkleFacetShape(sparkleFacetPrimary.xy, sparkleFacetPrimary.z) * sparkleFacetPrimary.w +
+      sparkleFacetShape(sparkleFacetSecondary.xy, sparkleFacetSecondary.z) * sparkleFacetSecondary.w * 0.72;
+    float mirrorBandCoord = dot(vUv - vec2(0.5), normalize(vec2(0.88, -0.42)));
+    float mirrorBandCenter = sin(uTime * 0.38) * 0.08;
+    float sparkleMirrorBand = pow(
+      max(1.0 - abs(mirrorBandCoord - mirrorBandCenter) * 7.2, 0.0),
+      18.0
+    );
+    float sparkleMirror = sparkleMask *
+      sparkleMirrorBand *
+      (keyWide * 0.52 + accentTight * 0.64 + fresnel * 0.18) *
+      (0.35 + sparkleFacetField * 0.4);
+    float sparkleAmbient = sparkleMask * sparkleFacetField * (
+      accentWide * 0.16 +
+      fresnel * 0.12
+    );
+    float sparkleFacets =
+      sparkleFacetSpec(sparkleFacetPrimary, normal, viewDir, keyLightDir, 36.0) * 1.56 +
+      sparkleFacetSpec(sparkleFacetPrimary, normal, viewDir, accentLightDir, 40.0) * 1.28 +
+      sparkleFacetSpec(sparkleFacetSecondary, normal, viewDir, fillLightDir, 30.0) * 0.92;
     float sparkle = sparkleMask * (
-      crystal * (keyWide * 1.55 + accentTight * 1.42) +
-      star * (keyWide * 2.9 + fillWide * 0.86 + fresnel * 0.26)
+      sparkleFacets * 1.36 +
+      sparkleMirror +
+      sparkleAmbient
     );
     float prism = prismMask * (accentTight * 0.82 + keyWide * 0.56 + fresnel * 1.08);
 
@@ -351,23 +452,21 @@ const finishTreatmentFragmentShader = `
       uTime * 0.05;
 
     vec3 sugarColor = mix(vec3(1.0), uAccent, 0.16);
-    vec3 sparkleColor = mix(uAccent, vec3(1.0), 0.52);
+    vec3 sparkleColor = mix(vec3(0.98, 0.985, 1.0), mix(uAccent, uHue, 0.24), 0.12);
     vec3 prismColor = mix(uHue, spectrum(phase), 0.82);
     vec3 sugarVeil = sugarColor * sugarMask * (0.028 + keyWide * 0.07 + fresnel * 0.04) * uSugarIntensity;
 
     vec3 color =
       sugarVeil +
-      sugarColor * sugar * 1.02 +
-      sparkleColor * sparkle * 1.9 +
-      prismColor * prism * 1.45;
-    float alpha = clamp(
-      sugarMask * 0.045 +
-      sugar * 0.58 +
-      sparkle * 1.2 +
-      prism * 0.94,
-      0.0,
-      0.94
-    );
+      sugarColor * sugar * 0.98 +
+      sparkleColor * sparkle * 1.54 +
+      prismColor * prism * 1.32;
+    float sugarAlpha = clamp(sugarMask * 0.04 + sugar * 0.44, 0.0, 0.72);
+    float sparkleAlpha = clamp(sparkle * 0.78, 0.0, 0.78);
+    float prismAlpha = clamp(prism * 0.7, 0.0, 0.82);
+    float alpha =
+      1.0 - (1.0 - sugarAlpha) * (1.0 - sparkleAlpha) * (1.0 - prismAlpha);
+    alpha = min(alpha, 0.94);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -600,7 +699,9 @@ function CardRig({
   const ringRef = useRef<Mesh>(null);
   const haloRef = useRef<Mesh>(null);
   const shaderRef = useRef<ShaderMaterial>(null);
-  const finishShaderRef = useRef<ShaderMaterial>(null);
+  const sugarFinishShaderRef = useRef<ShaderMaterial>(null);
+  const sparkleFinishShaderRef = useRef<ShaderMaterial>(null);
+  const prismFinishShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
   const edgeMeshRef = useRef<Mesh>(null);
   const introRef = useRef(0);
@@ -609,6 +710,14 @@ function CardRig({
   const finish = finishMeta[card.finish];
   const tuning = holoTuning[card.rarity];
   const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
+  const sugarLayerWeights = useMemo(() => new Vector3(1, 0, 0), []);
+  const sparkleLayerWeights = useMemo(() => new Vector3(0, 1, 0), []);
+  const prismLayerWeights = useMemo(() => new Vector3(0, 0, 1), []);
+  const sugarReliefWeights = useMemo(() => new Vector2(1, 0), []);
+  const sparkleReliefWeights = useMemo(() => new Vector2(0, 0), []);
+  const prismReliefWeights = useMemo(() => new Vector2(0, 1), []);
+  const surfaceNormalScale = useMemo(() => new Vector2(0.16, 0.16), []);
+  const surfaceClearcoatScale = useMemo(() => new Vector2(0.24, 0.24), []);
   const showDecorativeEffects = effectsPreset === 'full';
   const faceGeometry = useMemo(
     () => createRoundedFaceGeometry(CARD_FACE.width, CARD_FACE.height, CARD_BODY.radius),
@@ -639,6 +748,7 @@ function CardRig({
       textures.foilZone.needsUpdate = true;
       textures.glossMask.needsUpdate = true;
       textures.embossMap.needsUpdate = true;
+      textures.surfaceNormalMap.needsUpdate = true;
       textures.sugarMask.needsUpdate = true;
       textures.sparkleMask.needsUpdate = true;
       textures.prismMask.needsUpdate = true;
@@ -664,16 +774,18 @@ function CardRig({
       shaderRef.current.needsUpdate = true;
     }
 
-    if (finishShaderRef.current?.uniforms) {
-      finishShaderRef.current.uniforms.uSugarMap.value = textures.sugarMask;
-      finishShaderRef.current.uniforms.uSparkleMap.value = textures.sparkleMask;
-      finishShaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
-      finishShaderRef.current.uniforms.uAccent.value.set(meta.accent);
-      finishShaderRef.current.uniforms.uHue.value.set(meta.hue);
-      finishShaderRef.current.uniforms.uSugarIntensity.value = sugarIntensity;
-      finishShaderRef.current.uniformsNeedUpdate = true;
-      finishShaderRef.current.needsUpdate = true;
-    }
+    [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uSugarMap.value = textures.sugarMask;
+        material.uniforms.uSparkleMap.value = textures.sparkleMask;
+        material.uniforms.uPrismMap.value = textures.prismMask;
+        material.uniforms.uAccent.value.set(meta.accent);
+        material.uniforms.uHue.value.set(meta.hue);
+        material.uniforms.uSugarIntensity.value = sugarIntensity;
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
   }, [meta.accent, meta.hue, sugarIntensity, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
@@ -767,10 +879,12 @@ function CardRig({
     shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
     shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
 
-    if (finishShaderRef.current?.uniforms) {
-      finishShaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-      finishShaderRef.current.uniforms.uSugarIntensity.value = sugarIntensity;
-    }
+    [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uTime.value = state.clock.elapsedTime;
+        material.uniforms.uSugarIntensity.value = sugarIntensity;
+      });
 
     const frontFacing = Math.cos(groupRef.current.rotation.y) >= 0;
 
@@ -817,10 +931,10 @@ function CardRig({
             <meshPhysicalMaterial
               color="#090b0f"
               metalness={0.22}
-              roughness={0.48}
-              clearcoat={1}
-              clearcoatRoughness={0.12}
-              reflectivity={0.28}
+              roughness={0.58}
+              clearcoat={0.8}
+              clearcoatRoughness={0.18}
+              reflectivity={0.18}
               iridescence={0.02 + finish.shimmerBoost * 0.03}
               iridescenceIOR={1.08}
             />
@@ -850,12 +964,14 @@ function CardRig({
             <meshPhysicalMaterial
               map={textures.front}
               metalness={0.08}
-              roughness={0.8}
+              roughness={0.84}
               clearcoat={0.1}
-              clearcoatRoughness={0.38}
-              reflectivity={0.12}
-              bumpMap={textures.embossMap}
-              bumpScale={0.12 + finish.shimmerBoost * 0.04}
+              clearcoatRoughness={0.28}
+              reflectivity={0.07}
+              normalMap={textures.surfaceNormalMap}
+              normalScale={surfaceNormalScale}
+              clearcoatNormalMap={textures.surfaceNormalMap}
+              clearcoatNormalScale={surfaceClearcoatScale}
             />
           </mesh>
 
@@ -865,22 +981,20 @@ function CardRig({
               transparent
               depthWrite={false}
               alphaMap={textures.glossMask}
-              opacity={0.2}
+              opacity={0.14}
               color="#f8fdff"
               metalness={0}
-              roughness={0.06}
-              clearcoat={1}
-              clearcoatRoughness={0.02}
-              reflectivity={0.95}
-              bumpMap={textures.embossMap}
-              bumpScale={0.085}
+              roughness={0.14}
+              clearcoat={0.82}
+              clearcoatRoughness={0.08}
+              reflectivity={0.7}
             />
           </mesh>
 
-          <mesh position={[0, 0, faceOffset + 0.0096]} scale={[1.0018, 1.0018, 1]}>
+          <mesh position={[0, 0, faceOffset + 0.0092]} scale={[1.0018, 1.0018, 1]}>
             <primitive attach="geometry" object={faceGeometry} />
             <shaderMaterial
-              ref={finishShaderRef}
+              ref={sugarFinishShaderRef}
               transparent
               depthWrite={false}
               blending={AdditiveBlending}
@@ -889,6 +1003,62 @@ function CardRig({
                 uSugarMap: { value: textures.sugarMask },
                 uSparkleMap: { value: textures.sparkleMask },
                 uPrismMap: { value: textures.prismMask },
+                uLayerWeights: { value: sugarLayerWeights },
+                uSurfaceReliefWeights: { value: sugarReliefWeights },
+                uAccent: { value: new Color(meta.accent) },
+                uHue: { value: new Color(meta.hue) },
+                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
+                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
+                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
+                uSugarIntensity: { value: sugarIntensity },
+                uTime: { value: 0 },
+              }}
+              vertexShader={cardSurfaceVertexShader}
+              fragmentShader={finishTreatmentFragmentShader}
+            />
+          </mesh>
+
+          <mesh position={[0, 0, faceOffset + 0.0096]} scale={[1.0018, 1.0018, 1]}>
+            <primitive attach="geometry" object={faceGeometry} />
+            <shaderMaterial
+              ref={sparkleFinishShaderRef}
+              transparent
+              depthWrite={false}
+              blending={AdditiveBlending}
+              toneMapped={false}
+              uniforms={{
+                uSugarMap: { value: textures.sugarMask },
+                uSparkleMap: { value: textures.sparkleMask },
+                uPrismMap: { value: textures.prismMask },
+                uLayerWeights: { value: sparkleLayerWeights },
+                uSurfaceReliefWeights: { value: sparkleReliefWeights },
+                uAccent: { value: new Color(meta.accent) },
+                uHue: { value: new Color(meta.hue) },
+                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
+                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
+                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
+                uSugarIntensity: { value: sugarIntensity },
+                uTime: { value: 0 },
+              }}
+              vertexShader={cardSurfaceVertexShader}
+              fragmentShader={finishTreatmentFragmentShader}
+            />
+          </mesh>
+
+          <mesh position={[0, 0, faceOffset + 0.01]} scale={[1.0018, 1.0018, 1]}>
+            <primitive attach="geometry" object={faceGeometry} />
+            <shaderMaterial
+              ref={prismFinishShaderRef}
+              transparent
+              depthWrite={false}
+              blending={AdditiveBlending}
+              toneMapped={false}
+              uniforms={{
+                uSugarMap: { value: textures.sugarMask },
+                uSparkleMap: { value: textures.sparkleMask },
+                uPrismMap: { value: textures.prismMask },
+                uLayerWeights: { value: prismLayerWeights },
+                uSurfaceReliefWeights: { value: prismReliefWeights },
                 uAccent: { value: new Color(meta.accent) },
                 uHue: { value: new Color(meta.hue) },
                 uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },

@@ -13,8 +13,6 @@ import { buildPreviewOwnedCard } from '../game/cardDraft';
 import { useGame } from '../game/GameContext';
 import {
   CARD_ACCENT_SWATCHES,
-  CARD_EFFECT_PATTERN_OPTIONS,
-  CARD_EFFECT_PLACEMENT_OPTIONS,
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
   CARD_TREATMENT_EFFECT_OPTIONS,
@@ -71,6 +69,7 @@ export function CardCreatorPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [brushSize, setBrushSize] = useState(18);
+  const [brushSoftness, setBrushSoftness] = useState(0.5);
   const [eraseMode, setEraseMode] = useState(false);
   const [adminRarity, setAdminRarity] = useState<Rarity>('common');
   const [adminEffects, setAdminEffects] = useState<CardTreatmentEffect[]>([]);
@@ -166,7 +165,7 @@ export function CardCreatorPage() {
     const effectKey = (previewCard.effectLayers ?? [])
       .map(
         (layer) =>
-          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
+          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.relief}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
       )
       .join('|');
 
@@ -176,8 +175,13 @@ export function CardCreatorPage() {
       previewCard.defaultFinish,
       visuals.frameStyle,
       visuals.accentColor,
-      visuals.effectPattern,
-      visuals.effectPlacement,
+      visuals.decorativePattern.svgUrl.length,
+      visuals.decorativePattern.svgUrl.slice(-48),
+      visuals.decorativePattern.size,
+      visuals.decorativePattern.gap,
+      visuals.decorativePattern.opacity,
+      visuals.decorativePattern.offsetX,
+      visuals.decorativePattern.offsetY,
       effectKey,
     ].join('::');
   }, [previewCard]);
@@ -202,6 +206,12 @@ export function CardCreatorPage() {
 
   async function materializeDraftAssets(currentDraft: ProposalEditorPayload) {
     const uploadedLayers = [...currentDraft.effectLayers];
+    let decorativePatternSvgUrl = currentDraft.visuals.decorativePattern.svgUrl;
+
+    if (isDataUrl(decorativePatternSvgUrl)) {
+      const uploaded = await uploadCardArt(decorativePatternSvgUrl);
+      decorativePatternSvgUrl = uploaded.url;
+    }
 
     for (let index = 0; index < uploadedLayers.length; index += 1) {
       const layer = uploadedLayers[index];
@@ -218,6 +228,13 @@ export function CardCreatorPage() {
 
     return {
       ...currentDraft,
+      visuals: {
+        ...currentDraft.visuals,
+        decorativePattern: {
+          ...currentDraft.visuals.decorativePattern,
+          svgUrl: decorativePatternSvgUrl,
+        },
+      },
       effectLayers: uploadedLayers,
     };
   }
@@ -281,6 +298,57 @@ export function CardCreatorPage() {
       setStatusMessage('Изображение загружено.');
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить изображение.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDecorativePatternChange(file: File | null) {
+    if (!file || !draft) {
+      return;
+    }
+
+    if (file.type !== 'image/svg+xml' && !file.name.toLowerCase().endsWith('.svg')) {
+      setStatusMessage('Для декоративного паттерна нужен SVG.');
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const localDataUrl = await fileToDataUrl(file);
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              visuals: {
+                ...current.visuals,
+                decorativePattern: {
+                  ...current.visuals.decorativePattern,
+                  svgUrl: localDataUrl,
+                },
+              },
+            }
+          : current,
+      );
+      const uploaded = await uploadCardArt(localDataUrl);
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              visuals: {
+                ...current.visuals,
+                decorativePattern: {
+                  ...current.visuals.decorativePattern,
+                  svgUrl: uploaded.url,
+                },
+              },
+            }
+          : current,
+      );
+      setStatusMessage('SVG паттерн загружен.');
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить SVG паттерн.');
     } finally {
       setSaving(false);
     }
@@ -524,52 +592,168 @@ export function CardCreatorPage() {
 
             <div className="creator-row">
               <label className="creator-field">
-                <span>Декоративный паттерн</span>
-                <select
-                  disabled={isLocked}
+                <span>SVG декоративного паттерна</span>
+                <input
+                  accept=".svg,image/svg+xml"
+                  disabled={isLocked || saving}
                   onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        effectPattern:
-                          event.target.value as ProposalEditorPayload['visuals']['effectPattern'],
-                      },
-                    }))
+                    void handleDecorativePatternChange(event.target.files?.[0] ?? null)
                   }
-                  value={draft.visuals.effectPattern}
-                >
-                  {CARD_EFFECT_PATTERN_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                  type="file"
+                />
               </label>
 
               <label className="creator-field">
-                <span>Зона декоративного паттерна</span>
-                <select
+                <span>
+                  Статус паттерна:{' '}
+                  {draft.visuals.decorativePattern.svgUrl ? 'SVG загружен' : 'SVG еще не загружен'}
+                </span>
+                <button
+                  className="action-button"
+                  disabled={isLocked || !draft.visuals.decorativePattern.svgUrl}
+                  onClick={() =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        decorativePattern: {
+                          ...current.visuals.decorativePattern,
+                          svgUrl: '',
+                        },
+                      },
+                    }))
+                  }
+                  type="button"
+                >
+                  Очистить SVG
+                </button>
+              </label>
+            </div>
+
+            <div className="creator-row">
+              <label className="creator-field">
+                <span>Размер паттерна: {Math.round(draft.visuals.decorativePattern.size)} px</span>
+                <input
                   disabled={isLocked}
+                  max={260}
+                  min={24}
                   onChange={(event) =>
                     updateDraft((current) => ({
                       ...current,
                       visuals: {
                         ...current.visuals,
-                        effectPlacement:
-                          event.target.value as ProposalEditorPayload['visuals']['effectPlacement'],
+                        decorativePattern: {
+                          ...current.visuals.decorativePattern,
+                          size: Number(event.target.value),
+                        },
                       },
                     }))
                   }
-                  value={draft.visuals.effectPlacement}
-                >
-                  {CARD_EFFECT_PLACEMENT_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                  step={2}
+                  type="range"
+                  value={draft.visuals.decorativePattern.size}
+                />
               </label>
+
+              <label className="creator-field">
+                <span>Отступ между элементами: {Math.round(draft.visuals.decorativePattern.gap)} px</span>
+                <input
+                  disabled={isLocked}
+                  max={220}
+                  min={0}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        decorativePattern: {
+                          ...current.visuals.decorativePattern,
+                          gap: Number(event.target.value),
+                        },
+                      },
+                    }))
+                  }
+                  step={2}
+                  type="range"
+                  value={draft.visuals.decorativePattern.gap}
+                />
+              </label>
+            </div>
+
+            <div className="creator-row">
+              <label className="creator-field">
+                <span>
+                  Прозрачность паттерна: {Math.round(draft.visuals.decorativePattern.opacity * 100)}%
+                </span>
+                <input
+                  disabled={isLocked}
+                  max={1}
+                  min={0}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        decorativePattern: {
+                          ...current.visuals.decorativePattern,
+                          opacity: Number(event.target.value),
+                        },
+                      },
+                    }))
+                  }
+                  step={0.02}
+                  type="range"
+                  value={draft.visuals.decorativePattern.opacity}
+                />
+              </label>
+
+              <label className="creator-field">
+                <span>Смещение X: {Math.round(draft.visuals.decorativePattern.offsetX)} px</span>
+                <input
+                  disabled={isLocked}
+                  max={220}
+                  min={-220}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        decorativePattern: {
+                          ...current.visuals.decorativePattern,
+                          offsetX: Number(event.target.value),
+                        },
+                      },
+                    }))
+                  }
+                  step={2}
+                  type="range"
+                  value={draft.visuals.decorativePattern.offsetX}
+                />
+              </label>
+            </div>
+
+            <div className="creator-field">
+              <span>Смещение Y: {Math.round(draft.visuals.decorativePattern.offsetY)} px</span>
+              <input
+                disabled={isLocked}
+                max={320}
+                min={-320}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    visuals: {
+                      ...current.visuals,
+                      decorativePattern: {
+                        ...current.visuals.decorativePattern,
+                        offsetY: Number(event.target.value),
+                      },
+                    },
+                  }))
+                }
+                step={2}
+                type="range"
+                value={draft.visuals.decorativePattern.offsetY}
+              />
             </div>
 
             <div className="creator-field">
@@ -728,29 +912,31 @@ export function CardCreatorPage() {
             {selectedLayer ? (
               <div className="creator-layer-panel">
                 <div className="creator-row">
-                  <label className="creator-field">
-                    <span>
-                      Интенсивность: {Math.round(selectedLayer.opacity * 100)}%
-                    </span>
-                    <input
-                      disabled={isLocked}
-                      max={1}
-                      min={0.2}
-                      onChange={(event) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          effectLayers: current.effectLayers.map((layer) =>
-                            layer.id === selectedLayer.id
-                              ? { ...layer, opacity: Number(event.target.value) }
-                              : layer,
-                          ),
-                        }))
-                      }
-                      step={0.02}
-                      type="range"
-                      value={selectedLayer.opacity}
-                    />
-                  </label>
+                  {selectedLayer.type !== 'emboss' ? (
+                    <label className="creator-field">
+                      <span>
+                        Интенсивность: {Math.round(selectedLayer.opacity * 100)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={1}
+                        min={0.2}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, opacity: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.02}
+                        type="range"
+                        value={selectedLayer.opacity}
+                      />
+                    </label>
+                  ) : null}
 
                   {selectedLayer.type === 'texture_sugar' ? (
                     <label className="creator-field">
@@ -778,6 +964,37 @@ export function CardCreatorPage() {
                     </label>
                   ) : null}
 
+                  {selectedLayer.type === 'emboss' ? (
+                    <label className="creator-field">
+                      <span>
+                        Рельеф:{' '}
+                        {selectedLayer.relief === 0
+                          ? 'нейтрально'
+                          : selectedLayer.relief > 0
+                            ? `выпуклость ${Math.round(selectedLayer.relief * 100)}%`
+                            : `вдавленность ${Math.round(Math.abs(selectedLayer.relief) * 100)}%`}
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={1}
+                        min={-1}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, relief: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.02}
+                        type="range"
+                        value={selectedLayer.relief}
+                      />
+                    </label>
+                  ) : null}
+
                   <label className="creator-field">
                     <span>Размер кисти: {brushSize}px</span>
                     <input
@@ -788,6 +1005,19 @@ export function CardCreatorPage() {
                       step={1}
                       type="range"
                       value={brushSize}
+                    />
+                  </label>
+
+                  <label className="creator-field">
+                    <span>Мягкость кисти: {Math.round(brushSoftness * 100)}%</span>
+                    <input
+                      disabled={isLocked}
+                      max={1}
+                      min={0}
+                      onChange={(event) => setBrushSoftness(Number(event.target.value))}
+                      step={0.02}
+                      type="range"
+                      value={brushSoftness}
                     />
                   </label>
                 </div>
@@ -828,6 +1058,7 @@ export function CardCreatorPage() {
 
                 <CardEffectMaskEditor
                   brushSize={brushSize}
+                  brushSoftness={brushSoftness}
                   disabled={isLocked}
                   eraseMode={eraseMode}
                   layer={selectedLayer}

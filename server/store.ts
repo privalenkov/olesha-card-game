@@ -7,6 +7,7 @@ import type {
   AdminCatalogCard,
   AdminUserRecord,
   AuthUser,
+  CardDecorativePattern,
   CardEffectLayer,
   CardProposal,
   CardDefinition,
@@ -45,8 +46,7 @@ interface CardRow {
   creator_name: string | null;
   visual_frame_style: CardVisuals['frameStyle'] | null;
   visual_accent_color: string | null;
-  visual_effect_pattern: CardVisuals['effectPattern'] | null;
-  visual_effect_placement: CardVisuals['effectPlacement'] | null;
+  visual_pattern_json: string | null;
   effect_layers_json: string | null;
 }
 
@@ -85,8 +85,7 @@ interface ProposalRow {
   default_finish: CardFinish;
   visual_frame_style: CardVisuals['frameStyle'];
   visual_accent_color: string;
-  visual_effect_pattern: CardVisuals['effectPattern'];
-  visual_effect_placement: CardVisuals['effectPlacement'];
+  visual_pattern_json: string;
   allowed_effects_json: string;
   max_effect_layers: number;
   effect_layers_json: string;
@@ -123,6 +122,8 @@ interface AdminUserRow {
 }
 
 const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
+const LEGACY_VISUAL_EFFECT_PATTERN = 'none';
+const LEGACY_VISUAL_EFFECT_PLACEMENT = 'frame';
 
 function isUniqueConstraintError(error: unknown): error is Error & { code?: string } {
   return error instanceof Error && 'code' in error && (error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE';
@@ -140,14 +141,41 @@ function normalizeMaskUrl(url: string): string {
   return url.trim();
 }
 
+function normalizeDecorativePattern(pattern?: Partial<CardDecorativePattern> | null): CardDecorativePattern {
+  const defaults = getDefaultCardVisuals().decorativePattern;
+
+  return {
+    svgUrl: typeof pattern?.svgUrl === 'string' ? normalizeMaskUrl(pattern.svgUrl) : defaults.svgUrl,
+    size:
+      typeof pattern?.size === 'number' && Number.isFinite(pattern.size)
+        ? Math.max(20, Math.min(pattern.size, 320))
+        : defaults.size,
+    gap:
+      typeof pattern?.gap === 'number' && Number.isFinite(pattern.gap)
+        ? Math.max(0, Math.min(pattern.gap, 320))
+        : defaults.gap,
+    opacity:
+      typeof pattern?.opacity === 'number' && Number.isFinite(pattern.opacity)
+        ? Math.max(0, Math.min(pattern.opacity, 1))
+        : defaults.opacity,
+    offsetX:
+      typeof pattern?.offsetX === 'number' && Number.isFinite(pattern.offsetX)
+        ? Math.max(-1024, Math.min(pattern.offsetX, 1024))
+        : defaults.offsetX,
+    offsetY:
+      typeof pattern?.offsetY === 'number' && Number.isFinite(pattern.offsetY)
+        ? Math.max(-1536, Math.min(pattern.offsetY, 1536))
+        : defaults.offsetY,
+  };
+}
+
 function normalizeVisuals(visuals?: CardVisuals | null): CardVisuals {
   const defaults = getDefaultCardVisuals();
 
   return {
     frameStyle: visuals?.frameStyle ?? defaults.frameStyle,
     accentColor: visuals?.accentColor ?? defaults.accentColor,
-    effectPattern: visuals?.effectPattern ?? defaults.effectPattern,
-    effectPlacement: visuals?.effectPlacement ?? defaults.effectPlacement,
+    decorativePattern: normalizeDecorativePattern(visuals?.decorativePattern),
   };
 }
 
@@ -163,6 +191,7 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
       maskUrl: normalizeMaskUrl(layer.maskUrl),
       opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
       shimmer: Math.max(0.2, Math.min(layer.shimmer ?? 1, 1.4)),
+      relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
     }))
     .filter((layer) => layer.id.length > 0);
 }
@@ -183,6 +212,19 @@ function parseJsonArray<T>(value: string | null | undefined, fallback: T[]): T[]
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed) ? (parsed as T[]) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonObject<T extends object>(value: string | null | undefined, fallback: T): T {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'object' && parsed !== null ? (parsed as T) : fallback;
   } catch {
     return fallback;
   }
@@ -529,6 +571,18 @@ function getFinish(rarity: Rarity): CardFinish {
 }
 
 function toCardDefinition(row: CardRow): CardDefinition {
+  const visuals =
+    row.visual_frame_style && row.visual_accent_color
+      ? normalizeVisuals({
+          frameStyle: row.visual_frame_style,
+          accentColor: row.visual_accent_color,
+          decorativePattern: parseJsonObject<CardDecorativePattern>(
+            row.visual_pattern_json,
+            getDefaultCardVisuals().decorativePattern,
+          ),
+        })
+      : undefined;
+
   return {
     id: row.id,
     title: row.title,
@@ -545,18 +599,7 @@ function toCardDefinition(row: CardRow): CardDefinition {
     defaultFinish: row.default_finish ?? undefined,
     creatorName: row.creator_name ?? null,
     effectLayers: normalizeEffectLayers(parseJsonArray<CardEffectLayer>(row.effect_layers_json, [])),
-    visuals:
-      row.visual_frame_style &&
-      row.visual_accent_color &&
-      row.visual_effect_pattern &&
-      row.visual_effect_placement
-        ? {
-            frameStyle: row.visual_frame_style,
-            accentColor: row.visual_accent_color,
-            effectPattern: row.visual_effect_pattern,
-            effectPlacement: row.visual_effect_placement,
-          }
-        : undefined,
+    visuals,
   };
 }
 
@@ -582,12 +625,14 @@ function toCardProposal(row: ProposalRow): CardProposal {
     description: row.description,
     urlImage: row.url_image,
     defaultFinish: row.default_finish,
-    visuals: {
+    visuals: normalizeVisuals({
       frameStyle: row.visual_frame_style,
       accentColor: row.visual_accent_color,
-      effectPattern: row.visual_effect_pattern,
-      effectPlacement: row.visual_effect_placement,
-    },
+      decorativePattern: parseJsonObject<CardDecorativePattern>(
+        row.visual_pattern_json,
+        getDefaultCardVisuals().decorativePattern,
+      ),
+    }),
     allowedEffects: parseJsonArray<CardTreatmentEffect>(row.allowed_effects_json, []),
     maxEffectLayers: row.max_effect_layers,
     effectLayers: normalizeEffectLayers(
@@ -736,6 +781,7 @@ export function createGameStore(config: ServerConfig) {
       visual_accent_color text,
       visual_effect_pattern text,
       visual_effect_placement text,
+      visual_pattern_json text not null default '{}',
       effect_layers_json text not null default '[]',
       is_active integer not null default 1,
       updated_at text not null
@@ -755,6 +801,7 @@ export function createGameStore(config: ServerConfig) {
       visual_accent_color text not null,
       visual_effect_pattern text not null,
       visual_effect_placement text not null,
+      visual_pattern_json text not null default '{}',
       allowed_effects_json text not null default '[]',
       max_effect_layers integer not null default 0,
       effect_layers_json text not null default '[]',
@@ -857,6 +904,7 @@ export function createGameStore(config: ServerConfig) {
     ['visual_accent_color', 'text'],
     ['visual_effect_pattern', 'text'],
     ['visual_effect_placement', 'text'],
+    ['visual_pattern_json', "text not null default '{}'"],
     ['effect_layers_json', "text not null default '[]'"],
   ] as const;
 
@@ -867,11 +915,17 @@ export function createGameStore(config: ServerConfig) {
   }
 
   db.prepare('update card_definitions set is_active = 0 where creator_name is null').run();
+  db.exec(`
+    update card_definitions
+    set visual_pattern_json = '{}'
+    where visual_pattern_json is null or trim(visual_pattern_json) = ''
+  `);
 
   const proposalColumns = db
     .prepare(`pragma table_info(card_proposals)`)
     .all() as Array<{ name: string }>;
   const requiredProposalColumns = [
+    ['visual_pattern_json', "text not null default '{}'"],
     ['allowed_effects_json', "text not null default '[]'"],
     ['max_effect_layers', 'integer not null default 0'],
     ['effect_layers_json', "text not null default '[]'"],
@@ -883,6 +937,11 @@ export function createGameStore(config: ServerConfig) {
     }
   }
 
+  db.exec(`
+    update card_proposals
+    set visual_pattern_json = '{}'
+    where visual_pattern_json is null or trim(visual_pattern_json) = ''
+  `);
   db.exec(`
     update card_proposals
     set allowed_effects_json = '[]'
@@ -908,11 +967,11 @@ export function createGameStore(config: ServerConfig) {
     insert into card_definitions (
       id, title, url_image, rarity, description, power, cringe, fame, rarity_score, humor,
       default_finish, creator_name, visual_frame_style, visual_accent_color,
-      visual_effect_pattern, visual_effect_placement, effect_layers_json, is_active, updated_at
+      visual_pattern_json, effect_layers_json, is_active, updated_at
     ) values (
       @id, @title, @url_image, @rarity, @description, @power, @cringe, @fame, @rarity_score, @humor,
       @default_finish, @creator_name, @visual_frame_style, @visual_accent_color,
-      @visual_effect_pattern, @visual_effect_placement, @effect_layers_json, 1, @updated_at
+      @visual_pattern_json, @effect_layers_json, 1, @updated_at
     )
     on conflict(id) do update set
       title = excluded.title,
@@ -928,8 +987,7 @@ export function createGameStore(config: ServerConfig) {
       creator_name = excluded.creator_name,
       visual_frame_style = excluded.visual_frame_style,
       visual_accent_color = excluded.visual_accent_color,
-      visual_effect_pattern = excluded.visual_effect_pattern,
-      visual_effect_placement = excluded.visual_effect_placement,
+      visual_pattern_json = excluded.visual_pattern_json,
       effect_layers_json = excluded.effect_layers_json,
       is_active = 1,
       updated_at = excluded.updated_at
@@ -999,8 +1057,7 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.creator_name,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
-      card_definitions.visual_effect_pattern,
-      card_definitions.visual_effect_placement,
+      card_definitions.visual_pattern_json,
       card_definitions.effect_layers_json,
       owned_cards.instance_id,
       owned_cards.acquired_at,
@@ -1016,7 +1073,7 @@ export function createGameStore(config: ServerConfig) {
     select
       id, title, url_image, rarity, description, power, cringe, fame, rarity_score, humor,
       default_finish, creator_name, visual_frame_style, visual_accent_color,
-      visual_effect_pattern, visual_effect_placement, effect_layers_json
+      visual_pattern_json, effect_layers_json
     from card_definitions
     where is_active = 1
   `);
@@ -1024,9 +1081,9 @@ export function createGameStore(config: ServerConfig) {
     insert into card_proposals (
       id, creator_user_id, creator_name, rarity, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
-      visual_effect_placement, allowed_effects_json, max_effect_layers, effect_layers_json,
+      visual_effect_placement, visual_pattern_json, allowed_effects_json, max_effect_layers, effect_layers_json,
       created_at, updated_at, submitted_at, approved_at, approved_card_definition_id
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1063,8 +1120,7 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.creator_name,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
-      card_definitions.visual_effect_pattern,
-      card_definitions.visual_effect_placement,
+      card_definitions.visual_pattern_json,
       card_definitions.effect_layers_json,
       card_definitions.updated_at,
       count(owned_cards.instance_id) as total_owned,
@@ -1112,8 +1168,7 @@ export function createGameStore(config: ServerConfig) {
       default_finish = @default_finish,
       visual_frame_style = @visual_frame_style,
       visual_accent_color = @visual_accent_color,
-      visual_effect_pattern = @visual_effect_pattern,
-      visual_effect_placement = @visual_effect_placement,
+      visual_pattern_json = @visual_pattern_json,
       effect_layers_json = @effect_layers_json,
       updated_at = @updated_at
     where id = @id and status = 'draft'
@@ -1274,8 +1329,9 @@ export function createGameStore(config: ServerConfig) {
       defaultFinish,
       visuals.frameStyle,
       visuals.accentColor,
-      visuals.effectPattern,
-      visuals.effectPlacement,
+      LEGACY_VISUAL_EFFECT_PATTERN,
+      LEGACY_VISUAL_EFFECT_PLACEMENT,
+      JSON.stringify(visuals.decorativePattern),
       JSON.stringify(grant.allowedEffects),
       grant.maxEffectLayers,
       JSON.stringify([]),
@@ -1308,8 +1364,7 @@ export function createGameStore(config: ServerConfig) {
       default_finish: payload.defaultFinish,
       visual_frame_style: visuals.frameStyle,
       visual_accent_color: visuals.accentColor,
-      visual_effect_pattern: visuals.effectPattern,
-      visual_effect_placement: visuals.effectPlacement,
+      visual_pattern_json: JSON.stringify(visuals.decorativePattern),
       effect_layers_json: JSON.stringify(effectLayers),
       updated_at: new Date().toISOString(),
     }) as ProposalRow | undefined;
@@ -1397,8 +1452,7 @@ export function createGameStore(config: ServerConfig) {
       creator_name: existing.creator_name,
       visual_frame_style: existing.visual_frame_style,
       visual_accent_color: existing.visual_accent_color,
-      visual_effect_pattern: existing.visual_effect_pattern,
-      visual_effect_placement: existing.visual_effect_placement,
+      visual_pattern_json: existing.visual_pattern_json,
       effect_layers_json: existing.effect_layers_json,
       updated_at: approvedAt,
     });

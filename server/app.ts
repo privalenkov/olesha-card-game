@@ -5,12 +5,11 @@ import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
 import {
-  CARD_EFFECT_PATTERN_OPTIONS,
-  CARD_EFFECT_PLACEMENT_OPTIONS,
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
   CARD_TREATMENT_EFFECT_OPTIONS,
   getDefaultCardVisuals,
+  type CardDecorativePattern,
   type AdminProposalOverridePayload,
   type ApiErrorResponse,
   type AuthUser,
@@ -62,7 +61,7 @@ function isAdminUser(user: AuthUser | null): boolean {
 }
 
 function isStoredAssetUrl(value: string) {
-  return /^\/uploads\/[a-zA-Z0-9-]+\.(png|jpg|jpeg|webp)$/u.test(value);
+  return /^\/uploads\/[a-zA-Z0-9-]+\.(png|jpg|jpeg|webp|svg)$/u.test(value);
 }
 
 function normalizeProposalPayload(
@@ -92,28 +91,45 @@ function normalizeProposalPayload(
     CARD_FRAME_STYLE_OPTIONS.includes(visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
       ? (visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
       : defaults.frameStyle;
-  const effectPattern =
-    typeof visuals?.effectPattern === 'string' &&
-    CARD_EFFECT_PATTERN_OPTIONS.includes(
-      visuals.effectPattern as (typeof CARD_EFFECT_PATTERN_OPTIONS)[number],
-    )
-      ? (visuals.effectPattern as (typeof CARD_EFFECT_PATTERN_OPTIONS)[number])
-      : defaults.effectPattern;
-  const effectPlacement =
-    typeof visuals?.effectPlacement === 'string' &&
-    CARD_EFFECT_PLACEMENT_OPTIONS.includes(
-      visuals.effectPlacement as (typeof CARD_EFFECT_PLACEMENT_OPTIONS)[number],
-    )
-      ? (visuals.effectPlacement as (typeof CARD_EFFECT_PLACEMENT_OPTIONS)[number])
-      : defaults.effectPlacement;
   const accentColor =
     typeof visuals?.accentColor === 'string' &&
     /^#[0-9a-fA-F]{6}$/u.test(visuals.accentColor.trim())
       ? visuals.accentColor.trim()
       : defaults.accentColor;
+  const decorativePattern =
+    typeof visuals?.decorativePattern === 'object' && visuals.decorativePattern !== null
+      ? (visuals.decorativePattern as Record<string, unknown>)
+      : null;
+  const decorativePatternDefaults = defaults.decorativePattern;
+  const decorativePatternSvgUrl =
+    typeof decorativePattern?.svgUrl === 'string' ? decorativePattern.svgUrl.trim() : '';
+  const decorativePatternSize =
+    typeof decorativePattern?.size === 'number' && Number.isFinite(decorativePattern.size)
+      ? decorativePattern.size
+      : decorativePatternDefaults.size;
+  const decorativePatternGap =
+    typeof decorativePattern?.gap === 'number' && Number.isFinite(decorativePattern.gap)
+      ? decorativePattern.gap
+      : decorativePatternDefaults.gap;
+  const decorativePatternOpacity =
+    typeof decorativePattern?.opacity === 'number' && Number.isFinite(decorativePattern.opacity)
+      ? decorativePattern.opacity
+      : decorativePatternDefaults.opacity;
+  const decorativePatternOffsetX =
+    typeof decorativePattern?.offsetX === 'number' && Number.isFinite(decorativePattern.offsetX)
+      ? decorativePattern.offsetX
+      : decorativePatternDefaults.offsetX;
+  const decorativePatternOffsetY =
+    typeof decorativePattern?.offsetY === 'number' && Number.isFinite(decorativePattern.offsetY)
+      ? decorativePattern.offsetY
+      : decorativePatternDefaults.offsetY;
   const rawEffectLayers = Array.isArray(payload.effectLayers) ? payload.effectLayers : null;
 
   if (title.length < 2 || title.length > 80) {
+    return null;
+  }
+
+  if (!isStoredAssetUrl(decorativePatternSvgUrl) && decorativePatternSvgUrl !== '') {
     return null;
   }
 
@@ -150,6 +166,10 @@ function normalizeProposalPayload(
       typeof layer.opacity === 'number' && Number.isFinite(layer.opacity) ? layer.opacity : NaN;
     const shimmer =
       typeof layer.shimmer === 'number' && Number.isFinite(layer.shimmer) ? layer.shimmer : 1;
+    const relief =
+      typeof layer.relief === 'number' && Number.isFinite(layer.relief)
+        ? layer.relief
+        : 0;
 
     if (
       id.length < 6 ||
@@ -159,7 +179,8 @@ function normalizeProposalPayload(
       seenTypes.has(type) ||
       (!isStoredAssetUrl(maskUrl) && maskUrl !== '') ||
       !Number.isFinite(opacity) ||
-      !Number.isFinite(shimmer)
+      !Number.isFinite(shimmer) ||
+      !Number.isFinite(relief)
     ) {
       return null;
     }
@@ -172,6 +193,7 @@ function normalizeProposalPayload(
       maskUrl,
       opacity: Math.max(0.18, Math.min(opacity, 1)),
       shimmer: Math.max(0.2, Math.min(shimmer, 1.4)),
+      relief: Math.max(-1, Math.min(relief, 1)),
     });
   }
 
@@ -183,8 +205,14 @@ function normalizeProposalPayload(
     visuals: {
       frameStyle,
       accentColor,
-      effectPattern,
-      effectPlacement,
+      decorativePattern: {
+        svgUrl: decorativePatternSvgUrl,
+        size: Math.max(20, Math.min(decorativePatternSize, 320)),
+        gap: Math.max(0, Math.min(decorativePatternGap, 320)),
+        opacity: Math.max(0, Math.min(decorativePatternOpacity, 1)),
+        offsetX: Math.max(-1024, Math.min(decorativePatternOffsetX, 1024)),
+        offsetY: Math.max(-1536, Math.min(decorativePatternOffsetY, 1536)),
+      } satisfies CardDecorativePattern,
     },
     effectLayers,
   };
@@ -238,7 +266,9 @@ function parseImageDataUrl(value: unknown) {
     return null;
   }
 
-  const match = value.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/u);
+  const match = value.match(
+    /^data:(image\/(?:png|jpeg|webp|svg\+xml));base64,([A-Za-z0-9+/=]+)$/u,
+  );
 
   if (!match) {
     return null;
@@ -577,13 +607,17 @@ export async function buildApp() {
     const parsed = parseImageDataUrl(payload?.dataUrl);
 
     if (!parsed) {
-      reply.code(400).send(apiError('INVALID_IMAGE', 'Нужен PNG, JPEG или WEBP размером до 5 МБ.'));
+      reply
+        .code(400)
+        .send(apiError('INVALID_IMAGE', 'Нужен PNG, JPEG, WEBP или SVG размером до 5 МБ.'));
       return;
     }
 
     const extension =
       parsed.mimeType === 'image/png'
         ? 'png'
+        : parsed.mimeType === 'image/svg+xml'
+          ? 'svg'
         : parsed.mimeType === 'image/webp'
           ? 'webp'
           : 'jpg';

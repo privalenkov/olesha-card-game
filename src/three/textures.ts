@@ -20,6 +20,7 @@ const CARD_PREVIEW_HEIGHT = 482;
 
 interface CardFrontTextureOptions {
   treatmentPaintStrength?: number;
+  includeTreatmentLayers?: boolean;
 }
 
 type RemoteImageCacheEntry = {
@@ -294,126 +295,56 @@ function getCardEffectLayers(card: OwnedCard): CardEffectLayer[] {
   return card.effectLayers ?? [];
 }
 
-function applyEffectPlacementClip(
+function clipDecorativePatternOutsideHero(
   ctx: CanvasRenderingContext2D,
-  placement: CardVisuals['effectPlacement'],
   heroX: number,
   heroY: number,
   heroWidth: number,
   heroHeight: number,
 ) {
-  if (placement === 'full') {
-    return;
-  }
-
   const clipPath = new Path2D();
-
-  if (placement === 'hero') {
-    clipPath.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
-    ctx.clip(clipPath);
-    return;
-  }
-
   clipPath.rect(0, 0, 1024, 1536);
   clipPath.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
   ctx.clip(clipPath, 'evenodd');
 }
 
-function drawVisualEffectPattern(
+function positiveModulo(value: number, step: number) {
+  return ((value % step) + step) % step;
+}
+
+function drawDecorativePattern(
   ctx: CanvasRenderingContext2D,
-  pattern: CardVisuals['effectPattern'],
-  accentColor: string,
+  decorativePatternImage: HTMLImageElement | null,
+  pattern: CardVisuals['decorativePattern'],
+  heroX: number,
+  heroY: number,
+  heroWidth: number,
+  heroHeight: number,
 ) {
-  if (pattern === 'none') {
+  if (!decorativePatternImage || !pattern.svgUrl || pattern.opacity <= 0.001) {
     return;
   }
 
+  const naturalWidth = Math.max(decorativePatternImage.width, 1);
+  const naturalHeight = Math.max(decorativePatternImage.height, 1);
+  const longestSide = Math.max(naturalWidth, naturalHeight, 1);
+  const drawWidth = Math.max(10, (naturalWidth / longestSide) * pattern.size);
+  const drawHeight = Math.max(10, (naturalHeight / longestSide) * pattern.size);
+  const stepX = Math.max(drawWidth + pattern.gap, 1);
+  const stepY = Math.max(drawHeight + pattern.gap, 1);
+  const startX = -drawWidth + positiveModulo(pattern.offsetX, stepX);
+  const startY = -drawHeight + positiveModulo(pattern.offsetY, stepY);
+
   ctx.save();
+  clipDecorativePatternOutsideHero(ctx, heroX, heroY, heroWidth, heroHeight);
+  ctx.globalAlpha = pattern.opacity;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
-  if (pattern === 'sparkles') {
-    for (let index = 0; index < 26; index += 1) {
-      const x = 86 + ((index * 61) % 860);
-      const y = 106 + ((index * 97) % 1260);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate((Math.PI / 4) * (index % 4));
-      ctx.fillStyle = index % 2 === 0 ? `${accentColor}d8` : 'rgba(255,255,255,0.62)';
-      ctx.fillRect(-1.3, -14, 2.6, 28);
-      ctx.fillRect(-14, -1.3, 28, 2.6);
-      ctx.restore();
+  for (let y = startY; y < ctx.canvas.height + stepY; y += stepY) {
+    for (let x = startX; x < ctx.canvas.width + stepX; x += stepX) {
+      ctx.drawImage(decorativePatternImage, x, y, drawWidth, drawHeight);
     }
-  }
-
-  if (pattern === 'grid') {
-    ctx.strokeStyle = `${accentColor}70`;
-    ctx.lineWidth = 2;
-
-    for (let x = 72; x <= 952; x += 72) {
-      ctx.beginPath();
-      ctx.moveTo(x, 72);
-      ctx.lineTo(x, 1464);
-      ctx.stroke();
-    }
-
-    for (let y = 72; y <= 1464; y += 72) {
-      ctx.beginPath();
-      ctx.moveTo(72, y);
-      ctx.lineTo(952, y);
-      ctx.stroke();
-    }
-  }
-
-  if (pattern === 'waves') {
-    for (let band = 0; band < 8; band += 1) {
-      ctx.beginPath();
-      for (let step = 0; step <= 1024; step += 12) {
-        const x = step;
-        const y = 140 + band * 156 + Math.sin(step * 0.02 + band * 0.8) * 24;
-        if (step === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      ctx.strokeStyle = band % 2 === 0 ? `${accentColor}96` : 'rgba(255,255,255,0.32)';
-      ctx.lineWidth = 6;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    }
-  }
-
-  if (pattern === 'shards') {
-    const shards = [
-      [
-        [86, 132],
-        [292, 84],
-        [248, 314],
-      ],
-      [
-        [642, 126],
-        [928, 194],
-        [782, 394],
-      ],
-      [
-        [104, 842],
-        [318, 754],
-        [344, 1084],
-      ],
-      [
-        [616, 716],
-        [910, 794],
-        [748, 1136],
-      ],
-    ];
-
-    shards.forEach((shape, index) =>
-      drawPolygon(
-        ctx,
-        shape as Array<[number, number]>,
-        index % 2 === 0 ? `${accentColor}b4` : 'rgba(255,255,255,0.38)',
-        1,
-      ),
-    );
   }
 
   ctx.restore();
@@ -533,24 +464,72 @@ function drawSparkleFoilEffect(
   height: number,
   accent: string,
 ) {
-  for (let index = 0; index < 84; index += 1) {
-    const x = 30 + ((index * 113) % (width - 60));
-    const y = 30 + ((index * 173) % (height - 60));
+  const foilVeil = ctx.createLinearGradient(width * 0.12, 0, width * 0.88, height);
+  foilVeil.addColorStop(0, 'rgba(255,255,255,0)');
+  foilVeil.addColorStop(0.22, 'rgba(255,255,255,0.08)');
+  foilVeil.addColorStop(0.5, `${accent}42`);
+  foilVeil.addColorStop(0.72, 'rgba(255,255,255,0.14)');
+  foilVeil.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = foilVeil;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (let index = 0; index < 28; index += 1) {
+    const x = 56 + ((index * 149) % (width - 112));
+    const y = 56 + ((index * 227) % (height - 112));
+    const shardWidth = 16 + ((index * 23) % 26);
+    const shardHeight = 10 + ((index * 17) % 16);
+    const skew = -6 + ((index * 11) % 12);
+    const rotation = -0.88 + (index % 7) * 0.26;
+
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate((Math.PI / 4) * (index % 4));
-    ctx.fillStyle = index % 3 === 0 ? `${accent}d8` : 'rgba(255,255,255,0.88)';
-    ctx.fillRect(-1.8, -20, 3.6, 40);
-    ctx.fillRect(-20, -1.8, 40, 3.6);
+    ctx.rotate(rotation);
+
+    const shardGradient = ctx.createLinearGradient(-shardWidth, -shardHeight, shardWidth, shardHeight);
+    shardGradient.addColorStop(0, 'rgba(255,255,255,0)');
+    shardGradient.addColorStop(0.28, index % 3 === 0 ? `${accent}8c` : 'rgba(255,255,255,0.18)');
+    shardGradient.addColorStop(0.52, 'rgba(255,255,255,0.96)');
+    shardGradient.addColorStop(0.74, index % 2 === 0 ? `${accent}58` : 'rgba(255,255,255,0.22)');
+    shardGradient.addColorStop(1, 'rgba(255,255,255,0)');
+
+    ctx.fillStyle = shardGradient;
+    ctx.beginPath();
+    ctx.moveTo(-shardWidth * 0.58, -shardHeight * 0.08);
+    ctx.lineTo(-shardWidth * 0.14, -shardHeight * 0.56);
+    ctx.lineTo(shardWidth * 0.62, -shardHeight * 0.18);
+    ctx.lineTo(shardWidth * 0.22 + skew, shardHeight * 0.56);
+    ctx.lineTo(-shardWidth * 0.5, shardHeight * 0.2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
     ctx.restore();
   }
 
-  const rainbow = ctx.createLinearGradient(width * 0.15, 0, width * 0.85, height);
-  rainbow.addColorStop(0, 'rgba(127,237,255,0.38)');
-  rainbow.addColorStop(0.5, 'rgba(255,255,255,0.22)');
-  rainbow.addColorStop(1, `${accent}7a`);
-  ctx.fillStyle = rainbow;
-  ctx.fillRect(0, 0, width, height);
+  for (let index = 0; index < 7; index += 1) {
+    const x = width * 0.08 + index * (width * 0.13);
+    const beamWidth = 12 + (index % 3) * 4;
+    const beam = ctx.createLinearGradient(0, -height * 0.24, 0, height * 0.24);
+    beam.addColorStop(0, 'rgba(255,255,255,0)');
+    beam.addColorStop(0.42, 'rgba(255,255,255,0.08)');
+    beam.addColorStop(0.5, index % 2 === 0 ? `${accent}88` : 'rgba(255,255,255,0.66)');
+    beam.addColorStop(0.58, 'rgba(255,255,255,0.08)');
+    beam.addColorStop(1, 'rgba(255,255,255,0)');
+
+    ctx.save();
+    ctx.translate(x, height * (0.18 + (index % 4) * 0.16));
+    ctx.rotate(-0.54 + (index % 3) * 0.16);
+    ctx.fillStyle = beam;
+    ctx.fillRect(-beamWidth / 2, -height * 0.28, beamWidth, height * 0.56);
+    ctx.restore();
+  }
+
+  ctx.restore();
 }
 
 function drawPrismaticEdgeEffect(
@@ -574,56 +553,6 @@ function drawPrismaticEdgeEffect(
   ctx.strokeRect(18, 18, width - 36, height - 36);
 }
 
-function applyEmbossLayer(
-  ctx: CanvasRenderingContext2D,
-  maskImage: CanvasImageSource,
-  opacity: number,
-) {
-  const width = ctx.canvas.width;
-  const height = ctx.canvas.height;
-  const highlightCanvas = createCanvas(width, height);
-  const shadowCanvas = createCanvas(width, height);
-  const fillCanvas = createCanvas(width, height);
-  const highlightContext = highlightCanvas.getContext('2d');
-  const shadowContext = shadowCanvas.getContext('2d');
-  const fillContext = fillCanvas.getContext('2d');
-
-  if (!highlightContext || !shadowContext || !fillContext) {
-    return;
-  }
-
-  highlightContext.filter = 'blur(3px)';
-  highlightContext.drawImage(maskImage, -6, -6, width, height);
-  highlightContext.globalCompositeOperation = 'source-in';
-  highlightContext.fillStyle = 'rgba(255,255,255,0.9)';
-  highlightContext.fillRect(0, 0, width, height);
-
-  shadowContext.filter = 'blur(4px)';
-  shadowContext.drawImage(maskImage, 7, 7, width, height);
-  shadowContext.globalCompositeOperation = 'source-in';
-  shadowContext.fillStyle = 'rgba(4,8,16,0.9)';
-  shadowContext.fillRect(0, 0, width, height);
-
-  fillContext.drawImage(maskImage, 0, 0, width, height);
-  fillContext.globalCompositeOperation = 'source-in';
-  const fillGradient = fillContext.createLinearGradient(0, 0, width, height);
-  fillGradient.addColorStop(0, 'rgba(255,255,255,0.18)');
-  fillGradient.addColorStop(1, 'rgba(0,0,0,0.16)');
-  fillContext.fillStyle = fillGradient;
-  fillContext.fillRect(0, 0, width, height);
-
-  ctx.save();
-  ctx.globalAlpha = opacity * 0.42;
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.drawImage(shadowCanvas, 0, 0);
-  ctx.globalCompositeOperation = 'screen';
-  ctx.drawImage(highlightCanvas, 0, 0);
-  ctx.globalAlpha = opacity * 0.35;
-  ctx.globalCompositeOperation = 'overlay';
-  ctx.drawImage(fillCanvas, 0, 0);
-  ctx.restore();
-}
-
 function drawTreatmentLayer(
   ctx: CanvasRenderingContext2D,
   layer: CardEffectLayer,
@@ -642,7 +571,6 @@ function drawTreatmentLayer(
   }
 
   if (layer.type === 'emboss') {
-    applyEmbossLayer(ctx, maskImage, effectiveOpacity);
     return;
   }
 
@@ -667,7 +595,7 @@ function drawTreatmentLayer(
   };
 
   const blendMode: GlobalCompositeOperation =
-    layer.type === 'texture_sugar' || layer.type === 'sparkle_foil' ? 'lighter' : 'screen';
+    layer.type === 'texture_sugar' || layer.type === 'sparkle_foil' ? 'screen' : 'screen';
 
   withMaskedLayer(ctx, maskImage, effectiveOpacity, drawEffect, blendMode);
 }
@@ -754,27 +682,148 @@ function drawGlossMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | 
   return canvas;
 }
 
+const EMBOSS_HEIGHT_MARGIN = 18;
+const EMBOSS_NORMAL_INTENSITY = 5.2;
+
 function drawEmbossHeightMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
   const { canvas, ctx } = createMaskCanvas(1024, 1536);
   if (!ctx) {
     return canvas;
   }
 
+  const effectLayers = getCardEffectLayers(card);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  // Build a softer height profile so strong deboss/emboss keeps readable highlights
+  // instead of turning into a hard clipped step.
   composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
-    blur: 14,
-    alphaMultiplier: 0.38,
+    blur: 5,
+    alphaMultiplier: 1,
   });
   composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
-    blur: 7,
-    alphaMultiplier: 0.52,
+    blur: 1.5,
+    alphaMultiplier: 1,
   });
-  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
-    blur: 2,
-    alphaMultiplier: 0.7,
-  });
-  composeEffectMaskPass(ctx, card, maskImages, ['emboss'], {
-    alphaMultiplier: 0.92,
-  });
+
+  return canvas;
+}
+
+function drawBaseSurfaceHeightMap(card: OwnedCard) {
+  const width = 1024;
+  const height = 1536;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return canvas;
+  }
+
+  // Keep the base card surface neutral so the card stays smooth
+  // unless an explicit emboss layer adds relief.
+  ctx.fillStyle = 'rgb(128, 128, 128)';
+  ctx.fillRect(0, 0, width, height);
+  return canvas;
+}
+
+function getEmbossRelief(card: OwnedCard) {
+  return (
+    getCardEffectLayers(card).find((layer) => layer.type === 'emboss')?.relief ??
+    0
+  );
+}
+
+function drawSurfaceHeightMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const baseCanvas = drawBaseSurfaceHeightMap(card);
+  const embossHeightMap = drawEmbossHeightMap(card, maskImages);
+  const relief = getEmbossRelief(card);
+
+  if (Math.abs(relief) < 0.001) {
+    return baseCanvas;
+  }
+
+  const canvas = createCanvas(baseCanvas.width, baseCanvas.height);
+  const ctx = canvas.getContext('2d');
+  const baseContext = baseCanvas.getContext('2d');
+  const embossContext = embossHeightMap.getContext('2d');
+
+  if (!ctx || !baseContext || !embossContext) {
+    return baseCanvas;
+  }
+
+  const baseImage = baseContext.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
+  const embossImage = embossContext.getImageData(0, 0, embossHeightMap.width, embossHeightMap.height);
+  const output = ctx.createImageData(baseCanvas.width, baseCanvas.height);
+  const baseData = baseImage.data;
+  const embossData = embossImage.data;
+  const outputData = output.data;
+  const reliefDirection = Math.sign(relief);
+  const reliefAmount = Math.abs(relief);
+  const minHeight = EMBOSS_HEIGHT_MARGIN;
+  const maxHeight = 255 - EMBOSS_HEIGHT_MARGIN;
+
+  for (let index = 0; index < baseData.length; index += 4) {
+    const baseValue = baseData[index];
+    const embossValue = embossData[index] / 255;
+    const maxDelta =
+      reliefDirection >= 0 ? maxHeight - baseValue : baseValue - minHeight;
+    const value = baseValue + embossValue * maxDelta * reliefAmount * reliefDirection;
+
+    outputData[index] = value;
+    outputData[index + 1] = value;
+    outputData[index + 2] = value;
+    outputData[index + 3] = 255;
+  }
+
+  ctx.putImageData(output, 0, 0);
+  return canvas;
+}
+
+function drawNormalMapFromHeight(heightCanvas: HTMLCanvasElement, intensity = 1) {
+  const canvas = createCanvas(heightCanvas.width, heightCanvas.height);
+  const ctx = canvas.getContext('2d');
+  const sourceContext = heightCanvas.getContext('2d');
+
+  if (!ctx || !sourceContext) {
+    return canvas;
+  }
+
+  const source = sourceContext.getImageData(0, 0, heightCanvas.width, heightCanvas.height);
+  const output = ctx.createImageData(heightCanvas.width, heightCanvas.height);
+  const width = heightCanvas.width;
+  const height = heightCanvas.height;
+  const sourceData = source.data;
+  const outputData = output.data;
+
+  const sample = (x: number, y: number) => {
+    const clampedX = Math.max(0, Math.min(width - 1, x));
+    const clampedY = Math.max(0, Math.min(height - 1, y));
+    const index = (clampedY * width + clampedX) * 4;
+    return sourceData[index] / 255;
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const left = sample(x - 1, y);
+      const right = sample(x + 1, y);
+      const up = sample(x, y - 1);
+      const down = sample(x, y + 1);
+      const dx = (right - left) * intensity;
+      const dy = (down - up) * intensity;
+      const nx = -dx;
+      const ny = -dy;
+      const nz = 1;
+      const length = Math.hypot(nx, ny, nz) || 1;
+      const index = (y * width + x) * 4;
+
+      outputData[index] = ((nx / length) * 0.5 + 0.5) * 255;
+      outputData[index + 1] = ((ny / length) * 0.5 + 0.5) * 255;
+      outputData[index + 2] = ((nz / length) * 0.5 + 0.5) * 255;
+      outputData[index + 3] = sourceData[index];
+    }
+  }
+
+  ctx.putImageData(output, 0, 0);
   return canvas;
 }
 
@@ -835,10 +884,6 @@ function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLIma
   composeEffectMaskPass(ctx, card, maskImages, ['spot_holo'], {
     blur: 2,
     alphaMultiplier: 1,
-  });
-  composeEffectMaskPass(ctx, card, maskImages, ['sparkle_foil'], {
-    blur: 1.5,
-    alphaMultiplier: 0.78,
   });
   composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
     blur: 1.5,
@@ -1167,6 +1212,7 @@ function drawCardFront(
   card: OwnedCard,
   artImage: HTMLImageElement | null,
   effectMaskImages: Array<HTMLImageElement | null>,
+  decorativePatternImage: HTMLImageElement | null,
   options: CardFrontTextureOptions = {},
 ) {
   const canvas = document.createElement('canvas');
@@ -1255,10 +1301,15 @@ function drawCardFront(
   ctx.fillRect(0, 0, canvas.width, 460);
   ctx.restore();
 
-  ctx.save();
-  applyEffectPlacementClip(ctx, visuals.effectPlacement, heroX, heroY, heroWidth, heroHeight);
-  drawVisualEffectPattern(ctx, visuals.effectPattern, accent);
-  ctx.restore();
+  drawDecorativePattern(
+    ctx,
+    decorativePatternImage,
+    visuals.decorativePattern,
+    heroX,
+    heroY,
+    heroWidth,
+    heroHeight,
+  );
 
   ctx.fillStyle = accent;
   ctx.font = '700 32px Space Grotesk, sans-serif';
@@ -1329,14 +1380,16 @@ function drawCardFront(
   ctx.font = '600 18px Sora, sans-serif';
   ctx.fillText('FOIL', 826, 1300);
 
-  drawTreatmentLayers(
-    ctx,
-    card,
-    effectMaskImages,
-    accent,
-    meta.hue,
-    options.treatmentPaintStrength ?? 1,
-  );
+  if (options.includeTreatmentLayers ?? true) {
+    drawTreatmentLayers(
+      ctx,
+      card,
+      effectMaskImages,
+      accent,
+      meta.hue,
+      options.treatmentPaintStrength ?? 1,
+    );
+  }
 
   addNoise(ctx, canvas.width, canvas.height, 7200);
   return canvas;
@@ -1594,8 +1647,6 @@ function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElem
 
     if (layer.type === 'spot_holo') {
       alpha = 0.78 * layer.opacity;
-    } else if (layer.type === 'sparkle_foil') {
-      alpha = 0.68 * layer.opacity;
     } else if (layer.type === 'prismatic_edge') {
       alpha = 0.84 * layer.opacity;
     }
@@ -1646,6 +1697,7 @@ export function usePackTexture(face: 'front' | 'back') {
 
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
     [card],
@@ -1657,27 +1709,34 @@ export function useCardTextures(card: OwnedCard | null) {
       return null;
     }
 
+    const embossHeightMap = drawEmbossHeightMap(card, effectMaskImages);
+    const surfaceHeightMap = drawSurfaceHeightMap(card, effectMaskImages);
+
     return {
       front: setupTexture(
-        drawCardFront(card, artImage, effectMaskImages, {
-          treatmentPaintStrength: 0.12,
+        drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
+          includeTreatmentLayers: false,
         }),
       ),
       back: setupTexture(drawCardBack(card)),
       foil: setupTexture(drawFoilLayer(card), true),
       foilZone: setupDataTexture(drawHoloZoneMask(card, effectMaskImages)),
       glossMask: setupDataTexture(drawGlossMaskMap(card, effectMaskImages)),
-      embossMap: setupDataTexture(drawEmbossHeightMap(card, effectMaskImages)),
+      embossMap: setupDataTexture(embossHeightMap),
+      surfaceNormalMap: setupDataTexture(
+        drawNormalMapFromHeight(surfaceHeightMap, EMBOSS_NORMAL_INTENSITY),
+      ),
       sugarMask: setupDataTexture(drawSugarMaskMap(card, effectMaskImages)),
       sparkleMask: setupDataTexture(drawSparkleMaskMap(card, effectMaskImages)),
       prismMask: setupDataTexture(drawPrismaticMaskMap(card, effectMaskImages)),
       holoTreatmentMap: setupDataTexture(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
     };
-  }, [artImage, card, effectMaskImages]);
+  }, [artImage, card, decorativePatternImage, effectMaskImages]);
 }
 
 export function useCardPreviewImage(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
     [card],
@@ -1689,7 +1748,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
       return '';
     }
 
-    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages, {
+    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
       treatmentPaintStrength: 0.8,
     });
     const previewCanvas = document.createElement('canvas');
@@ -1707,5 +1766,5 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     } catch {
       return card.urlImage;
     }
-  }, [artImage, card, effectMaskImages]);
+  }, [artImage, card, decorativePatternImage, effectMaskImages]);
 }
