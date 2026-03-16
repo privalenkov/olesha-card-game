@@ -73,7 +73,7 @@ function ProposalRow({
             Принять
           </button>
           <button className="action-button" disabled={busy} onClick={onDelete} type="button">
-            Удалить
+            Отклонить
           </button>
         </div>
       </div>
@@ -152,6 +152,8 @@ export function AdminProposalsPage() {
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rejectingProposal, setRejectingProposal] = useState<CardProposal | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const rarityBreakdown = useMemo(() => {
     const totalCards = cards.length;
 
@@ -207,12 +209,43 @@ export function AdminProposalsPage() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setActiveCard(null);
+        setRejectingProposal(null);
+        setRejectionReason('');
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  async function confirmRejection() {
+    if (!rejectingProposal) {
+      return;
+    }
+
+    const reason = rejectionReason.trim();
+
+    if (reason.length < 6 || reason.length > 280) {
+      setError('Причина отказа должна быть длиной от 6 до 280 символов.');
+      return;
+    }
+
+    setBusyId(rejectingProposal.id);
+
+    try {
+      await deleteProposal(rejectingProposal.id, reason);
+      setProposals((current) => current.filter((item) => item.id !== rejectingProposal.id));
+      setRejectingProposal(null);
+      setRejectionReason('');
+      setError(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : 'Не удалось отклонить предложение.',
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   if (!isAdmin) {
     return (
@@ -298,19 +331,9 @@ export function AdminProposalsPage() {
                   }
                 }}
                 onDelete={async () => {
-                  setBusyId(proposal.id);
-
-                  try {
-                    await deleteProposal(proposal.id);
-                    setProposals((current) => current.filter((item) => item.id !== proposal.id));
-                    setError(null);
-                  } catch (deleteError) {
-                    setError(
-                      deleteError instanceof Error ? deleteError.message : 'Не удалось удалить предложение.',
-                    );
-                  } finally {
-                    setBusyId(null);
-                  }
+                  setRejectingProposal(proposal);
+                  setRejectionReason('');
+                  setError(null);
                 }}
                 proposal={proposal}
               />
@@ -385,6 +408,64 @@ export function AdminProposalsPage() {
               scaleMultiplier={0.7}
               effectsPreset="full"
             />
+          </div>
+        </div>
+      ) : null}
+
+      {rejectingProposal ? (
+        <div
+          className="admin-dialog-backdrop"
+          onClick={() => {
+            if (busyId !== rejectingProposal.id) {
+              setRejectingProposal(null);
+              setRejectionReason('');
+            }
+          }}
+          role="presentation"
+        >
+          <div
+            className="admin-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-rejection-title"
+          >
+            <div className="admin-dialog__head">
+              <strong id="admin-rejection-title">Отклонить карточку</strong>
+              <span>{rejectingProposal.title}</span>
+            </div>
+            <label className="creator-field">
+              <span>Причина отказа</span>
+              <textarea
+                autoFocus
+                maxLength={280}
+                onChange={(event) => setRejectionReason(event.target.value)}
+                placeholder="Напиши коротко и по делу, что нужно исправить автору."
+                rows={5}
+                value={rejectionReason}
+              />
+            </label>
+            <div className="admin-dialog__actions">
+              <button
+                className="action-button"
+                disabled={busyId === rejectingProposal.id}
+                onClick={() => {
+                  setRejectingProposal(null);
+                  setRejectionReason('');
+                }}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="action-button action-button--solid"
+                disabled={busyId === rejectingProposal.id}
+                onClick={() => void confirmRejection()}
+                type="button"
+              >
+                Отклонить с причиной
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

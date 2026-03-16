@@ -4,19 +4,29 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react';
 import {
   ApiError,
   EMPTY_REMOTE_GAME_STATE,
+  fetchNotifications,
   fetchSessionState,
   formatResetCountdown,
+  markNotificationRead,
   requestNicknameUpdate,
   requestLogout,
   requestPackOpen,
 } from './api';
-import type { AuthUser, RemoteGameState, SessionState, OwnedCard } from './types';
+import type { AppNotification, AuthUser, RemoteGameState, SessionState, OwnedCard } from './types';
+
+interface NotifyPayload {
+  kind: AppNotification['kind'];
+  title: string;
+  message: string;
+  proposalId?: string | null;
+}
 
 interface GameContextValue {
   status: 'loading' | 'ready';
@@ -28,11 +38,14 @@ interface GameContextValue {
   remainingPacks: number;
   timeUntilReset: string;
   error: string | null;
+  notifications: AppNotification[];
   openPack: () => Promise<OwnedCard[] | null>;
   refresh: () => Promise<void>;
   login: () => void;
   logout: () => Promise<void>;
   updateNickname: (name: string) => Promise<boolean>;
+  dismissNotification: (notificationId: string) => Promise<void>;
+  notify: (payload: NotifyPayload) => void;
 }
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -49,7 +62,11 @@ export function GameProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<'loading' | 'ready'>('loading');
   const [session, setSession] = useState<SessionState>(emptySessionState);
   const [error, setError] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const activeNotificationIdsRef = useRef(new Set<string>());
+  const remoteNotificationIdsRef = useRef(new Set<string>());
+  const notificationTimersRef = useRef(new Map<string, number>());
 
   const applySession = useCallback((nextSession: SessionState) => {
     setSession(nextSession);
@@ -95,6 +112,145 @@ export function GameProvider({ children }: PropsWithChildren) {
     return () => window.clearTimeout(timer);
   }, [error]);
 
+  const clearNotificationTimer = useCallback((notificationId: string) => {
+    const timer = notificationTimersRef.current.get(notificationId);
+
+    if (timer) {
+      window.clearTimeout(timer);
+      notificationTimersRef.current.delete(notificationId);
+    }
+  }, []);
+
+  const dismissNotification = useCallback(
+    async (notificationId: string) => {
+      clearNotificationTimer(notificationId);
+      activeNotificationIdsRef.current.delete(notificationId);
+      const isRemoteNotification = remoteNotificationIdsRef.current.has(notificationId);
+      remoteNotificationIdsRef.current.delete(notificationId);
+      setNotifications((current) => current.filter((item) => item.id !== notificationId));
+
+      if (!isRemoteNotification) {
+        return;
+      }
+
+      try {
+        await markNotificationRead(notificationId);
+      } catch (requestError) {
+        if (requestError instanceof ApiError && requestError.error === 'UNAUTHORIZED') {
+          await refresh();
+        }
+      }
+    },
+    [clearNotificationTimer, refresh],
+  );
+
+  const enqueueNotifications = useCallback(
+    (incoming: AppNotification[], source: 'local' | 'remote') => {
+      const nextItems = incoming.filter((item) => !activeNotificationIdsRef.current.has(item.id));
+
+      if (nextItems.length === 0) {
+        return;
+      }
+
+      for (const item of nextItems) {
+        activeNotificationIdsRef.current.add(item.id);
+
+        if (source === 'remote') {
+          remoteNotificationIdsRef.current.add(item.id);
+          continue;
+        }
+
+        const timer = window.setTimeout(() => {
+          void dismissNotification(item.id);
+        }, 7000);
+        notificationTimersRef.current.set(item.id, timer);
+      }
+
+      setNotifications((current) =>
+        [...current, ...nextItems].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+      );
+    },
+    [dismissNotification],
+  );
+
+  const notify = useCallback(
+    (payload: NotifyPayload) => {
+      const id =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `local-${crypto.randomUUID()}`
+          : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      enqueueNotifications(
+        [
+          {
+            id,
+            kind: payload.kind,
+            title: payload.title,
+            message: payload.message,
+            proposalId: payload.proposalId ?? null,
+            cardInstanceId: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        'local',
+      );
+    },
+    [enqueueNotifications],
+  );
+
+  const clearAllNotifications = useCallback(() => {
+    notificationTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    notificationTimersRef.current.clear();
+    activeNotificationIdsRef.current.clear();
+    remoteNotificationIdsRef.current.clear();
+    setNotifications([]);
+  }, []);
+
+  const loadNotifications = useCallback(async () => {
+    if (!session.authenticated || !session.user) {
+      return;
+    }
+
+    try {
+      const response = await fetchNotifications();
+      const hasNewRemoteNotifications = response.notifications.some(
+        (item) => !activeNotificationIdsRef.current.has(item.id),
+      );
+      enqueueNotifications(response.notifications, 'remote');
+
+      if (hasNewRemoteNotifications) {
+        await refresh();
+      }
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.error === 'UNAUTHORIZED') {
+        await refresh();
+      }
+    }
+  }, [enqueueNotifications, refresh, session.authenticated, session.user]);
+
+  useEffect(() => {
+    if (!session.authenticated || !session.user) {
+      clearAllNotifications();
+      return;
+    }
+
+    void loadNotifications();
+
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [clearAllNotifications, loadNotifications, session.authenticated, session.user]);
+
+  useEffect(
+    () => () => {
+      notificationTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      notificationTimersRef.current.clear();
+    },
+    [],
+  );
+
   const login = useCallback(() => {
     window.location.assign('/api/auth/google/start');
   }, []);
@@ -113,7 +269,8 @@ export function GameProvider({ children }: PropsWithChildren) {
       user: null,
       game: null,
     }));
-  }, []);
+    clearAllNotifications();
+  }, [clearAllNotifications]);
 
   const updateNickname = useCallback(
     async (name: string) => {
@@ -222,16 +379,22 @@ export function GameProvider({ children }: PropsWithChildren) {
       remainingPacks: state.remainingPacks,
       timeUntilReset,
       error,
+      notifications,
       openPack,
       refresh,
       login,
       logout,
       updateNickname,
+      dismissNotification,
+      notify,
     }),
     [
+      dismissNotification,
       error,
       login,
       logout,
+      notifications,
+      notify,
       openPack,
       refresh,
       session,

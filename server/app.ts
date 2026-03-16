@@ -261,6 +261,21 @@ function normalizeAdminProposalOverridePayload(value: unknown): AdminProposalOve
   };
 }
 
+function normalizeProposalRejectionReason(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const reason = typeof payload.reason === 'string' ? payload.reason.trim() : '';
+
+  if (reason.length < 6 || reason.length > 280) {
+    return null;
+  }
+
+  return reason;
+}
+
 function parseImageDataUrl(value: unknown) {
   if (typeof value !== 'string') {
     return null;
@@ -448,6 +463,46 @@ export async function buildApp() {
   app.get('/api/me', async (request, reply) => {
     setNoStore(reply);
     return readSessionState(store, request);
+  });
+
+  app.get('/api/notifications', async (request, reply) => {
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      notifications: store.listUnreadNotifications(user.id),
+    });
+  });
+
+  app.post('/api/notifications/:notificationId/read', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!user) {
+      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      return;
+    }
+
+    const notificationId = (request.params as { notificationId: string }).notificationId;
+    const marked = store.markNotificationReadById(user.id, notificationId);
+
+    if (!marked) {
+      reply.code(404).send(apiError('NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ ok: true });
   });
 
   app.get('/uploads/*', async (request, reply) => {
@@ -908,8 +963,18 @@ export async function buildApp() {
       return;
     }
 
+    const reason = normalizeProposalRejectionReason(request.body);
+
+    if (!reason) {
+      reply
+        .code(400)
+        .send(apiError('INVALID_REJECTION_REASON', 'Укажи причину отказа длиной от 6 до 280 символов.'));
+      return;
+    }
+
     const proposal = store.deleteProposalById(
       (request.params as { proposalId: string }).proposalId,
+      reason,
     );
 
     if (!proposal) {

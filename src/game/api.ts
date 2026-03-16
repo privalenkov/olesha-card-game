@@ -1,5 +1,6 @@
 import type {
   AdminCatalogResult,
+  NotificationListResult,
   AdminProposalOverridePayload,
   AdminUserListResult,
   ApiErrorResponse,
@@ -74,6 +75,17 @@ export function fetchSessionState() {
   return apiRequest<SessionState>('/api/me');
 }
 
+export function fetchNotifications() {
+  return apiRequest<NotificationListResult>('/api/notifications');
+}
+
+export function markNotificationRead(notificationId: string) {
+  return apiRequest<{ ok: true }>(`/api/notifications/${notificationId}/read`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export function requestPackOpen() {
   return apiRequest<OpenPackResult>('/api/packs/open', {
     method: 'POST',
@@ -146,10 +158,10 @@ export function approveProposal(proposalId: string) {
   });
 }
 
-export function deleteProposal(proposalId: string) {
+export function deleteProposal(proposalId: string, reason: string) {
   return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}`, {
     method: 'DELETE',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ reason }),
   });
 }
 

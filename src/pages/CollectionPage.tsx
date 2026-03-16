@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CollectionCardTile } from '../components/CollectionCardTile';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { requestProposalStart } from '../game/api';
@@ -10,10 +10,12 @@ type CollectionTab = 'all' | 'duplicates';
 
 export function CollectionPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { authConfigured, authenticated, login, state } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
   const [proposalBusy, setProposalBusy] = useState(false);
+  const requestedCardInstanceId = searchParams.get('card');
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -41,6 +43,35 @@ export function CollectionPage() {
 
   const visibleCards = activeTab === 'duplicates' ? duplicateCards : state.collection;
   const duplicateCount = duplicateCards.length;
+
+  useEffect(() => {
+    if (!requestedCardInstanceId) {
+      return;
+    }
+
+    const matchingCard = state.collection.find((card) => card.instanceId === requestedCardInstanceId);
+
+    if (matchingCard) {
+      setActiveCard(matchingCard);
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('card');
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [requestedCardInstanceId, searchParams, setSearchParams, state.collection]);
+
+  function closeViewer() {
+    setActiveCard(null);
+
+    if (!requestedCardInstanceId) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('card');
+    setSearchParams(nextSearchParams, { replace: true });
+  }
 
   return (
     <div className="page page--collection page--collection-minimal">
@@ -117,10 +148,10 @@ export function CollectionPage() {
       )}
 
       {activeCard ? (
-        <div className="collection-overlay" onClick={() => setActiveCard(null)} role="presentation">
+        <div className="collection-overlay" onClick={closeViewer} role="presentation">
           <button
             className="collection-overlay__close"
-            onClick={() => setActiveCard(null)}
+            onClick={closeViewer}
             type="button"
           >
             Закрыть

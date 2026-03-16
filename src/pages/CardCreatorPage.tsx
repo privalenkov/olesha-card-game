@@ -20,6 +20,7 @@ import {
   CARD_TREATMENT_EFFECT_LABELS,
   getDefaultCardVisuals,
   getDefaultEffectLayer,
+  PROPOSAL_STATUS_LABELS,
   type CardProposal,
   type CardTreatmentEffect,
   type Rarity,
@@ -144,7 +145,7 @@ function triggerAssetDownload(url: string, fileName: string) {
 export function CardCreatorPage() {
   const { proposalId = '' } = useParams();
   const navigate = useNavigate();
-  const { authConfigured, authenticated, isAdmin, login } = useGame();
+  const { authConfigured, authenticated, isAdmin, login, notify } = useGame();
   const [proposal, setProposal] = useState<CardProposal | null>(null);
   const [draft, setDraft] = useState<ProposalEditorPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -360,6 +361,11 @@ export function CardCreatorPage() {
       setProposal(response.proposal);
       setDraft(draftFromProposal(response.proposal));
       setStatusMessage('Карточка отправлена на модерацию.');
+      notify({
+        kind: 'info',
+        title: 'Карточка отправлена',
+        message: 'Карточка ушла на модерацию. Решение придет отдельным уведомлением.',
+      });
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Не удалось отправить карточку.');
     } finally {
@@ -1246,7 +1252,8 @@ export function CardCreatorPage() {
           </div>
 
           <div className="creator-status">
-            <span>Статус: {proposal.status}</span>
+            <span>Статус: {PROPOSAL_STATUS_LABELS[proposal.status]}</span>
+            {proposal.rejectionReason ? <span>Причина отказа: {proposal.rejectionReason}</span> : null}
             {statusMessage ? <span>{statusMessage}</span> : null}
           </div>
         </div>

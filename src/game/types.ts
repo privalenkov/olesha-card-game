@@ -10,6 +10,7 @@ export type CardTreatmentEffect =
   | 'emboss'
   | 'prismatic_edge';
 export type ProposalStatus = 'draft' | 'pending' | 'approved' | 'deleted';
+export type AppNotificationKind = 'info' | 'success' | 'error';
 
 export interface CardStats {
   power: number;
@@ -78,6 +79,13 @@ export const CARD_TREATMENT_EFFECT_DESCRIPTIONS: Record<CardTreatmentEffect, str
   sparkle_foil: 'Ламинация с яркими искрами и плотными бликами.',
   emboss: 'Ламинация с выпуклым рельефом, который ловит свет.',
   prismatic_edge: 'Призматический перелив для кантов и контуров.',
+};
+
+export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = {
+  draft: 'Черновик',
+  pending: 'На модерации',
+  approved: 'Принята',
+  deleted: 'Отклонена',
 };
 
 export const CARD_ACCENT_SWATCHES = [
@@ -186,6 +194,16 @@ export interface SessionState {
   game: RemoteGameState | null;
 }
 
+export interface AppNotification {
+  id: string;
+  kind: AppNotificationKind;
+  title: string;
+  message: string;
+  proposalId: string | null;
+  cardInstanceId: string | null;
+  createdAt: string;
+}
+
 export interface OpenPackResult {
   pack: OwnedCard[];
   game: RemoteGameState;
@@ -213,6 +231,7 @@ export interface CardProposal {
   updatedAt: string;
   submittedAt: string | null;
   approvedAt: string | null;
+  rejectionReason: string | null;
 }
 
 export interface ProposalEditorPayload {
@@ -239,6 +258,10 @@ export interface UpdateProposalResult {
 
 export interface ProposalListResult {
   proposals: CardProposal[];
+}
+
+export interface NotificationListResult {
+  notifications: AppNotification[];
 }
 
 export interface UploadCardArtResult {

@@ -5,6 +5,8 @@ import Database from 'better-sqlite3';
 import { CARDS_PER_PACK, proposalRarityWeights, rarityWeights } from '../src/game/config.js';
 import type {
   AdminCatalogCard,
+  AppNotification,
+  AppNotificationKind,
   AdminUserRecord,
   AuthUser,
   CardDecorativePattern,
@@ -94,6 +96,19 @@ interface ProposalRow {
   submitted_at: string | null;
   approved_at: string | null;
   approved_card_definition_id: string | null;
+  rejection_reason: string | null;
+}
+
+interface NotificationRow {
+  id: string;
+  user_id: string;
+  kind: AppNotificationKind;
+  title: string;
+  message: string;
+  proposal_id: string | null;
+  card_instance_id: string | null;
+  created_at: string;
+  read_at: string | null;
 }
 
 interface ProposalEffectGrant {
@@ -642,6 +657,19 @@ function toCardProposal(row: ProposalRow): CardProposal {
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
     approvedAt: row.approved_at,
+    rejectionReason: row.rejection_reason,
+  };
+}
+
+function toAppNotification(row: NotificationRow): AppNotification {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    message: row.message,
+    proposalId: row.proposal_id,
+    cardInstanceId: row.card_instance_id,
+    createdAt: row.created_at,
   };
 }
 
@@ -809,7 +837,20 @@ export function createGameStore(config: ServerConfig) {
       updated_at text not null,
       submitted_at text,
       approved_at text,
-      approved_card_definition_id text references card_definitions(id)
+      approved_card_definition_id text references card_definitions(id),
+      rejection_reason text
+    );
+
+    create table if not exists user_notifications (
+      id text primary key,
+      user_id text not null references users(id) on delete cascade,
+      kind text not null,
+      title text not null,
+      message text not null,
+      proposal_id text references card_proposals(id) on delete set null,
+      card_instance_id text references owned_cards(instance_id) on delete set null,
+      created_at text not null,
+      read_at text
     );
 
     create table if not exists pack_open_events (
@@ -834,6 +875,8 @@ export function createGameStore(config: ServerConfig) {
     create index if not exists idx_sessions_expires_at on sessions(expires_at);
     create index if not exists idx_pack_open_events_user_id on pack_open_events(user_id, opened_at desc);
     create index if not exists idx_owned_cards_user_id on owned_cards(user_id, acquired_at desc);
+    create index if not exists idx_user_notifications_unread
+    on user_notifications(user_id, read_at, created_at desc);
   `);
 
   const userColumns = db.prepare(`pragma table_info(users)`).all() as Array<{ name: string }>;
@@ -929,6 +972,7 @@ export function createGameStore(config: ServerConfig) {
     ['allowed_effects_json', "text not null default '[]'"],
     ['max_effect_layers', 'integer not null default 0'],
     ['effect_layers_json', "text not null default '[]'"],
+    ['rejection_reason', 'text'],
   ] as const;
 
   for (const [columnName, columnType] of requiredProposalColumns) {
@@ -962,6 +1006,14 @@ export function createGameStore(config: ServerConfig) {
     create index if not exists idx_card_proposals_status_created_at
     on card_proposals(status, created_at desc)
   `);
+
+  const notificationColumns = db
+    .prepare(`pragma table_info(user_notifications)`)
+    .all() as Array<{ name: string }>;
+
+  if (!notificationColumns.some((column) => column.name === 'card_instance_id')) {
+    db.exec('alter table user_notifications add column card_instance_id text');
+  }
 
   const upsertCardDefinition = db.prepare(`
     insert into card_definitions (
@@ -1082,8 +1134,8 @@ export function createGameStore(config: ServerConfig) {
       id, creator_user_id, creator_name, rarity, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
       visual_effect_placement, visual_pattern_json, allowed_effects_json, max_effect_layers, effect_layers_json,
-      created_at, updated_at, submitted_at, approved_at, approved_card_definition_id
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1187,21 +1239,43 @@ export function createGameStore(config: ServerConfig) {
   `);
   const submitProposalStatement = db.prepare(`
     update card_proposals
-    set status = 'pending', submitted_at = ?, updated_at = ?
+    set status = 'pending', submitted_at = ?, updated_at = ?, rejection_reason = null
     where id = ? and status = 'draft'
     returning *
   `);
   const approveProposalStatement = db.prepare(`
     update card_proposals
-    set status = 'approved', approved_at = ?, updated_at = ?, approved_card_definition_id = ?
+    set
+      status = 'approved',
+      approved_at = ?,
+      updated_at = ?,
+      approved_card_definition_id = ?,
+      rejection_reason = null
     where id = ? and status = 'pending'
     returning *
   `);
   const markProposalDeleted = db.prepare(`
     update card_proposals
-    set status = 'deleted', updated_at = ?
-    where id = ?
+    set status = 'deleted', updated_at = ?, rejection_reason = ?
+    where id = ? and status = 'pending'
     returning *
+  `);
+  const insertNotification = db.prepare(`
+    insert into user_notifications (
+      id, user_id, kind, title, message, proposal_id, card_instance_id, created_at, read_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, null)
+  `);
+  const selectUnreadNotifications = db.prepare(`
+    select *
+    from user_notifications
+    where user_id = ? and read_at is null
+    order by datetime(created_at) asc, id asc
+    limit 20
+  `);
+  const markNotificationRead = db.prepare(`
+    update user_notifications
+    set read_at = ?
+    where id = ? and user_id = ? and read_at is null
   `);
   const deactivateCardDefinition = db.prepare(`
     update card_definitions
@@ -1302,6 +1376,37 @@ export function createGameStore(config: ServerConfig) {
     deleteSessionByHash.run(hashToken(token, config.sessionSecret));
   }
 
+  function createNotification(
+    userId: string,
+    kind: AppNotificationKind,
+    title: string,
+    message: string,
+    proposalId: string | null,
+    cardInstanceId: string | null,
+    createdAt = new Date().toISOString(),
+  ) {
+    insertNotification.run(
+      randomUUID(),
+      userId,
+      kind,
+      title,
+      message,
+      proposalId,
+      cardInstanceId,
+      createdAt,
+    );
+  }
+
+  function listUnreadNotifications(userId: string): AppNotification[] {
+    return selectUnreadNotifications
+      .all(userId)
+      .map((row) => toAppNotification(row as NotificationRow));
+  }
+
+  function markNotificationReadById(userId: string, notificationId: string) {
+    return markNotificationRead.run(new Date().toISOString(), notificationId, userId).changes > 0;
+  }
+
   function startCardProposal(user: AuthUser): CardProposal {
     const existing = selectLatestActiveProposalByUser.get(user.id) as ProposalRow | undefined;
 
@@ -1337,6 +1442,7 @@ export function createGameStore(config: ServerConfig) {
       JSON.stringify([]),
       now,
       now,
+      null,
       null,
       null,
       null,
@@ -1436,48 +1542,117 @@ export function createGameStore(config: ServerConfig) {
       existing.approved_card_definition_id ?? createProposalCardId(existing.title, existing.id);
     const stats = generateStatsForProposal(existing.rarity, existing.id);
     const approvedAt = new Date().toISOString();
+    const creatorRewardPackNumber = Math.max(
+      (selectMaxPackNumber.get(existing.creator_user_id) as { packNumber: number }).packNumber ?? 0,
+      1,
+    );
+    const creatorRewardInstanceId = randomUUID();
+    const creatorRewardFinish = existing.default_finish;
+    const creatorRewardSeed = Math.random();
 
-    upsertCardDefinition.run({
-      id: approvedCardId,
-      title: existing.title,
-      url_image: normalizeCardImageUrl(existing.url_image),
-      rarity: existing.rarity,
-      description: existing.description,
-      power: stats.power,
-      cringe: stats.cringe,
-      fame: stats.fame,
-      rarity_score: stats.rarityScore,
-      humor: stats.humor,
-      default_finish: existing.default_finish,
-      creator_name: existing.creator_name,
-      visual_frame_style: existing.visual_frame_style,
-      visual_accent_color: existing.visual_accent_color,
-      visual_pattern_json: existing.visual_pattern_json,
-      effect_layers_json: existing.effect_layers_json,
-      updated_at: approvedAt,
-    });
+    db.exec('BEGIN IMMEDIATE');
 
-    const row = approveProposalStatement.get(
-      approvedAt,
-      approvedAt,
-      approvedCardId,
-      proposalId,
-    ) as ProposalRow | undefined;
+    try {
+      upsertCardDefinition.run({
+        id: approvedCardId,
+        title: existing.title,
+        url_image: normalizeCardImageUrl(existing.url_image),
+        rarity: existing.rarity,
+        description: existing.description,
+        power: stats.power,
+        cringe: stats.cringe,
+        fame: stats.fame,
+        rarity_score: stats.rarityScore,
+        humor: stats.humor,
+        default_finish: existing.default_finish,
+        creator_name: existing.creator_name,
+        visual_frame_style: existing.visual_frame_style,
+        visual_accent_color: existing.visual_accent_color,
+        visual_pattern_json: existing.visual_pattern_json,
+        effect_layers_json: existing.effect_layers_json,
+        updated_at: approvedAt,
+      });
 
-    return row ? toCardProposal(row) : null;
+      const row = approveProposalStatement.get(
+        approvedAt,
+        approvedAt,
+        approvedCardId,
+        proposalId,
+      ) as ProposalRow | undefined;
+
+      if (!row) {
+        db.exec('ROLLBACK');
+        return null;
+      }
+
+      insertOwnedCard.run(
+        creatorRewardInstanceId,
+        existing.creator_user_id,
+        approvedCardId,
+        approvedAt,
+        creatorRewardPackNumber,
+        creatorRewardFinish,
+        creatorRewardSeed,
+      );
+
+      createNotification(
+        existing.creator_user_id,
+        'success',
+        'Ваша карточка принята',
+        `Ваша карточка «${existing.title}» прошла модерацию, добавлена в игру и уже находится в вашей коллекции.`,
+        existing.id,
+        creatorRewardInstanceId,
+        approvedAt,
+      );
+
+      db.exec('COMMIT');
+      return toCardProposal(row);
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
-  function deleteProposalById(proposalId: string): CardProposal | null {
+  function deleteProposalById(proposalId: string, rejectionReason: string): CardProposal | null {
     const existing = selectProposalById.get(proposalId) as ProposalRow | undefined;
 
-    if (!existing || existing.status === 'deleted' || existing.status === 'approved') {
+    if (!existing || existing.status !== 'pending') {
       return null;
     }
 
     const timestamp = new Date().toISOString();
+    const normalizedReason = rejectionReason.trim();
 
-    const row = markProposalDeleted.get(timestamp, proposalId) as ProposalRow | undefined;
-    return row ? toCardProposal(row) : null;
+    db.exec('BEGIN IMMEDIATE');
+
+    try {
+      const row = markProposalDeleted.get(
+        timestamp,
+        normalizedReason,
+        proposalId,
+      ) as ProposalRow | undefined;
+
+      if (!row) {
+        db.exec('ROLLBACK');
+        return null;
+      }
+
+      createNotification(
+        existing.creator_user_id,
+        'error',
+        'Ваша карточка отклонена',
+        `Ваша карточка «${existing.title}» не прошла модерацию. Причина: ${normalizedReason}`,
+        existing.id,
+        null,
+        timestamp,
+      );
+
+      db.exec('COMMIT');
+      return toCardProposal(row);
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   function openPackForUser(userId: string, now = new Date()): OpenPackResult {
@@ -1550,6 +1725,8 @@ export function createGameStore(config: ServerConfig) {
     listAdminProposals,
     listAdminCards,
     listAdminUsers,
+    listUnreadNotifications,
+    markNotificationReadById,
     approveProposalById,
     deleteProposalById,
   };
