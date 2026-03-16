@@ -350,6 +350,36 @@ function drawDecorativePattern(
   ctx.restore();
 }
 
+function drawDecorativePatternMask(
+  card: OwnedCard,
+  decorativePatternImage: HTMLImageElement | null,
+) {
+  const canvas = createCanvas(1024, 1536);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return canvas;
+  }
+
+  const visuals = getCardVisuals(card);
+  const heroX = 78;
+  const heroY = 78;
+  const heroWidth = canvas.width - 156;
+  const heroHeight = 344;
+
+  drawDecorativePattern(
+    ctx,
+    decorativePatternImage,
+    visuals.decorativePattern,
+    heroX,
+    heroY,
+    heroWidth,
+    heroHeight,
+  );
+
+  return canvas;
+}
+
 function createCanvas(width: number, height: number) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -1767,4 +1797,22 @@ export function useCardPreviewImage(card: OwnedCard | null) {
       return card.urlImage;
     }
   }, [artImage, card, decorativePatternImage, effectMaskImages]);
+}
+
+export function useDecorativePatternMaskImage(card: OwnedCard | null) {
+  const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
+
+  return useMemo(() => {
+    if (!card) {
+      return '';
+    }
+
+    const sourceCanvas = drawDecorativePatternMask(card, decorativePatternImage);
+
+    try {
+      return sourceCanvas.toDataURL('image/png');
+    } catch {
+      return '';
+    }
+  }, [card, decorativePatternImage]);
 }

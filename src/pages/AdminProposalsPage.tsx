@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { rarityMeta } from '../game/config';
 import {
   approveProposal,
@@ -16,6 +17,7 @@ import type {
   AdminCatalogCard,
   AdminUserRecord,
   CardProposal,
+  OwnedCard,
   Rarity,
 } from '../game/types';
 import { useCardPreviewImage } from '../three/textures';
@@ -26,11 +28,13 @@ const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare']
 function ProposalRow({
   proposal,
   busy,
+  onOpen,
   onApprove,
   onDelete,
 }: {
   proposal: CardProposal;
   busy: boolean;
+  onOpen: (card: OwnedCard) => void;
   onApprove: () => void;
   onDelete: () => void;
 }) {
@@ -39,7 +43,20 @@ function ProposalRow({
 
   return (
     <article className="proposal-card">
-      <img alt={proposal.title} className="proposal-card__image" src={previewImage} />
+      <img
+        alt={proposal.title}
+        className="proposal-card__image"
+        onClick={() => onOpen(previewCard)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpen(previewCard);
+          }
+        }}
+        role="button"
+        src={previewImage}
+        tabIndex={0}
+      />
       <div className="proposal-card__body">
         <strong>{proposal.title}</strong>
         <span>
@@ -64,13 +81,32 @@ function ProposalRow({
   );
 }
 
-function AdminCatalogRow({ item }: { item: AdminCatalogCard }) {
+function AdminCatalogRow({
+  item,
+  onOpen,
+}: {
+  item: AdminCatalogCard;
+  onOpen: (card: OwnedCard) => void;
+}) {
   const previewCard = useMemo(() => buildPreviewCardFromDefinition(item.card), [item.card]);
   const previewImage = useCardPreviewImage(previewCard);
 
   return (
     <article className="proposal-card">
-      <img alt={item.card.title} className="proposal-card__image" src={previewImage} />
+      <img
+        alt={item.card.title}
+        className="proposal-card__image"
+        onClick={() => onOpen(previewCard)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpen(previewCard);
+          }
+        }}
+        role="button"
+        src={previewImage}
+        tabIndex={0}
+      />
       <div className="proposal-card__body">
         <strong>{item.card.title}</strong>
         <span>
@@ -110,6 +146,7 @@ function AdminUserRow({ user }: { user: AdminUserRecord }) {
 export function AdminProposalsPage() {
   const { isAdmin } = useGame();
   const [tab, setTab] = useState<AdminTab>('proposals');
+  const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [proposals, setProposals] = useState<CardProposal[]>([]);
   const [cards, setCards] = useState<AdminCatalogCard[]>([]);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
@@ -165,6 +202,17 @@ export function AdminProposalsPage() {
       cancelled = true;
     };
   }, [isAdmin]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveCard(null);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   if (!isAdmin) {
     return (
@@ -231,6 +279,7 @@ export function AdminProposalsPage() {
               <ProposalRow
                 key={proposal.id}
                 busy={busyId === proposal.id}
+                onOpen={setActiveCard}
                 onApprove={async () => {
                   setBusyId(proposal.id);
 
@@ -291,7 +340,7 @@ export function AdminProposalsPage() {
 
               <div className="admin-grid">
                 {cards.map((item) => (
-                  <AdminCatalogRow key={item.card.id} item={item} />
+                  <AdminCatalogRow key={item.card.id} item={item} onOpen={setActiveCard} />
                 ))}
               </div>
             </>
@@ -312,6 +361,31 @@ export function AdminProposalsPage() {
               <strong>Пользователей пока нет</strong>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {activeCard ? (
+        <div className="collection-overlay" onClick={() => setActiveCard(null)} role="presentation">
+          <button
+            className="collection-overlay__close"
+            onClick={() => setActiveCard(null)}
+            type="button"
+          >
+            Закрыть
+          </button>
+          <div
+            className="collection-overlay__viewer"
+            onClick={(event) => event.stopPropagation()}
+            role="presentation"
+          >
+            <CardViewerCanvas
+              card={activeCard}
+              introKey={activeCard.instanceId}
+              cameraZ={10.6}
+              scaleMultiplier={0.7}
+              effectsPreset="full"
+            />
+          </div>
         </div>
       ) : null}
     </section>

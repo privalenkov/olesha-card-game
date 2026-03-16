@@ -135,7 +135,7 @@ export function CollectionPage() {
               introKey={activeCard.instanceId}
               cameraZ={10.6}
               scaleMultiplier={0.7}
-              effectsPreset="diagnostic"
+              effectsPreset="full"
             />
           </div>
         </div>

@@ -25,7 +25,7 @@ import {
   type Rarity,
   type ProposalEditorPayload,
 } from '../game/types';
-import { useCardPreviewImage } from '../three/textures';
+import { useCardPreviewImage, useDecorativePatternMaskImage } from '../three/textures';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -43,6 +43,58 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Не удалось загрузить изображение маски.'));
+    image.src = src;
+  });
+}
+
+async function normalizeImportedMaskDataUrl(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1536;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    throw new Error('Не удалось подготовить маску.');
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  let hasTransparency = false;
+
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] < 250) {
+      hasTransparency = true;
+      break;
+    }
+  }
+
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3] / 255;
+    const luminance =
+      (data[index] / 255) * 0.2126 +
+      (data[index + 1] / 255) * 0.7152 +
+      (data[index + 2] / 255) * 0.0722;
+    const maskAlpha = hasTransparency ? alpha : luminance * alpha;
+
+    data[index] = 255;
+    data[index + 1] = 255;
+    data[index + 2] = 255;
+    data[index + 3] = Math.round(Math.max(0, Math.min(1, maskAlpha)) * 255);
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
 function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
   return {
     title: proposal.title,
@@ -56,6 +108,37 @@ function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
 
 function isDataUrl(value: string) {
   return value.startsWith('data:image/');
+}
+
+function inferAssetExtension(url: string, fallback: string) {
+  if (url.startsWith('data:image/svg+xml')) {
+    return 'svg';
+  }
+
+  if (url.startsWith('data:image/png')) {
+    return 'png';
+  }
+
+  if (url.startsWith('data:image/webp')) {
+    return 'webp';
+  }
+
+  if (url.startsWith('data:image/jpeg')) {
+    return 'jpg';
+  }
+
+  const match = url.match(/\.([a-z0-9]+)(?:$|\?)/iu);
+  return match?.[1]?.toLowerCase() ?? fallback;
+}
+
+function triggerAssetDownload(url: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export function CardCreatorPage() {
@@ -156,6 +239,7 @@ export function CardCreatorPage() {
   }, [draft, proposal]);
 
   const previewImage = useCardPreviewImage(previewCard);
+  const decorativePatternMaskImage = useDecorativePatternMaskImage(previewCard);
   const viewerRenderKey = useMemo(() => {
     if (!previewCard) {
       return 'creator-viewer';
@@ -354,6 +438,34 @@ export function CardCreatorPage() {
     }
   }
 
+  async function handleEffectMaskUpload(file: File | null, layerId: string) {
+    if (!file || !draft) {
+      return;
+    }
+
+    if (
+      !/^image\/(?:png|jpeg|webp|svg\+xml)$/u.test(file.type) &&
+      !/\.(?:png|jpe?g|webp|svg)$/iu.test(file.name)
+    ) {
+      setStatusMessage('Для маски нужен PNG, JPEG, WEBP или SVG.');
+      return;
+    }
+
+    try {
+      const localDataUrl = await fileToDataUrl(file);
+      const normalizedMaskUrl = await normalizeImportedMaskDataUrl(localDataUrl);
+      updateDraft((current) => ({
+        ...current,
+        effectLayers: current.effectLayers.map((layer) =>
+          layer.id === layerId ? { ...layer, maskUrl: normalizedMaskUrl } : layer,
+        ),
+      }));
+      setStatusMessage('Маска загружена в слой.');
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить маску.');
+    }
+  }
+
   function updateDraft(transform: (current: ProposalEditorPayload) => ProposalEditorPayload) {
     setDraft((current) => (current ? transform(current) : current));
   }
@@ -485,7 +597,7 @@ export function CardCreatorPage() {
             introKey={previewCard.instanceId}
             cameraZ={10.6}
             scaleMultiplier={0.7}
-            effectsPreset="diagnostic"
+            effectsPreset="full"
           />
         </div>
 
@@ -608,26 +720,45 @@ export function CardCreatorPage() {
                   Статус паттерна:{' '}
                   {draft.visuals.decorativePattern.svgUrl ? 'SVG загружен' : 'SVG еще не загружен'}
                 </span>
-                <button
-                  className="action-button"
-                  disabled={isLocked || !draft.visuals.decorativePattern.svgUrl}
-                  onClick={() =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        decorativePattern: {
-                          ...current.visuals.decorativePattern,
-                          svgUrl: '',
+                <div className="creator-tools">
+                  <button
+                    className="action-button"
+                    disabled={!decorativePatternMaskImage}
+                    onClick={() =>
+                      triggerAssetDownload(
+                        decorativePatternMaskImage,
+                        'decorative-pattern-mask.png',
+                      )
+                    }
+                    type="button"
+                  >
+                    Скачать паттерн
+                  </button>
+                  <button
+                    className="action-button"
+                    disabled={isLocked || !draft.visuals.decorativePattern.svgUrl}
+                    onClick={() =>
+                      updateDraft((current) => ({
+                        ...current,
+                        visuals: {
+                          ...current.visuals,
+                          decorativePattern: {
+                            ...current.visuals.decorativePattern,
+                            svgUrl: '',
+                          },
                         },
-                      },
-                    }))
-                  }
-                  type="button"
-                >
-                  Очистить SVG
-                </button>
+                      }))
+                    }
+                    type="button"
+                  >
+                    Очистить SVG
+                  </button>
+                </div>
               </label>
+            </div>
+
+            <div className="creator-field">
+              <span>SVG будет повторяться по всей карточке, кроме области изображения.</span>
             </div>
 
             <div className="creator-row">
@@ -1041,6 +1172,22 @@ export function CardCreatorPage() {
                   </button>
                   <button
                     className="action-button"
+                    disabled={!selectedLayer.maskUrl}
+                    onClick={() =>
+                      triggerAssetDownload(
+                        selectedLayer.maskUrl,
+                        `${selectedLayer.type}-mask.${inferAssetExtension(
+                          selectedLayer.maskUrl,
+                          'png',
+                        )}`,
+                      )
+                    }
+                    type="button"
+                  >
+                    Скачать маску
+                  </button>
+                  <button
+                    className="action-button"
                     disabled={isLocked}
                     onClick={() =>
                       updateDraft((current) => ({
@@ -1054,6 +1201,28 @@ export function CardCreatorPage() {
                   >
                     Очистить маску
                   </button>
+                </div>
+
+                <div className="creator-row">
+                  <label className="creator-field">
+                    <span>Загрузить готовую маску</span>
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={isLocked}
+                      onChange={(event) =>
+                        void handleEffectMaskUpload(event.target.files?.[0] ?? null, selectedLayer.id)
+                      }
+                      type="file"
+                    />
+                  </label>
+
+                  <div className="creator-field">
+                    <span>Подсказка по размеру</span>
+                    <small>
+                      Лучше загружать маску в пропорции карточки: 688x964 px для редактора или
+                      1024x1536 px для максимально четкого рендера. Белое включает ламинацию.
+                    </small>
+                  </div>
                 </div>
 
                 <CardEffectMaskEditor

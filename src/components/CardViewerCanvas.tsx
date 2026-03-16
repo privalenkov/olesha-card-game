@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Vignette } from '@react-three/postprocessing';
 import { Float, Sparkles } from '@react-three/drei';
 import {
   AdditiveBlending,
@@ -123,12 +123,13 @@ const CARD_FACE = {
 
 const FLIP_PREVIEW_LIMIT = 0.72;
 const FLIP_TRIGGER_DISTANCE = 72;
-const HOVER_TILT_X = 0.28;
-const HOVER_TILT_Y = 0.22;
+const HOVER_TILT_X = 0.42;
+const HOVER_TILT_Y = 0.34;
 const CARD_VIEWER_LIGHTS = {
-  key: new Vector3(4.5, 7, 6),
-  fill: new Vector3(-3.5, 0.8, 5),
-  accent: new Vector3(2.8, -1.2, 4.4),
+  key: new Vector3(3.9, 6.2, 7.6),
+  fill: new Vector3(-5.4, 1.4, 5.8),
+  accent: new Vector3(2.4, -2.2, 7.2),
+  rim: new Vector3(-4.6, 2.8, -5.4),
 } as const;
 const edgeHighlightVertexShader = `
   varying vec2 vUv;
@@ -718,7 +719,8 @@ function CardRig({
   const prismReliefWeights = useMemo(() => new Vector2(0, 1), []);
   const surfaceNormalScale = useMemo(() => new Vector2(0.16, 0.16), []);
   const surfaceClearcoatScale = useMemo(() => new Vector2(0.24, 0.24), []);
-  const showDecorativeEffects = effectsPreset === 'full';
+  const showDecorativeEffects = false;
+  const showPostProcessing = effectsPreset === 'full';
   const faceGeometry = useMemo(
     () => createRoundedFaceGeometry(CARD_FACE.width, CARD_FACE.height, CARD_BODY.radius),
     [],
@@ -907,10 +909,32 @@ function CardRig({
 
   return (
     <>
-      <ambientLight intensity={1.1} />
-      <directionalLight position={[4.5, 7, 6]} intensity={2.6} color="#fff8ec" />
-      <pointLight position={[-3.5, 0.8, 5]} intensity={12} color={meta.hue} />
-      <pointLight position={[2.8, -1.2, 4.4]} intensity={10} color={meta.accent} />
+      <ambientLight intensity={0.36} color="#e8eff8" />
+      <hemisphereLight intensity={0.78} color="#f6fbff" groundColor="#151923" />
+      <directionalLight
+        position={[CARD_VIEWER_LIGHTS.key.x, CARD_VIEWER_LIGHTS.key.y, CARD_VIEWER_LIGHTS.key.z]}
+        intensity={2.9}
+        color="#fff1dd"
+      />
+      <directionalLight
+        position={[CARD_VIEWER_LIGHTS.rim.x, CARD_VIEWER_LIGHTS.rim.y, CARD_VIEWER_LIGHTS.rim.z]}
+        intensity={1.05}
+        color="#9ecbff"
+      />
+      <pointLight
+        position={[CARD_VIEWER_LIGHTS.fill.x, CARD_VIEWER_LIGHTS.fill.y, CARD_VIEWER_LIGHTS.fill.z]}
+        intensity={14}
+        distance={18}
+        decay={2}
+        color="#cfe4ff"
+      />
+      <pointLight
+        position={[CARD_VIEWER_LIGHTS.accent.x, CARD_VIEWER_LIGHTS.accent.y, CARD_VIEWER_LIGHTS.accent.z]}
+        intensity={10}
+        distance={16}
+        decay={2}
+        color={meta.accent}
+      />
 
       {showDecorativeEffects ? (
         <mesh ref={ringRef} position={[0, 0.04, -1.24]}>
@@ -1127,24 +1151,19 @@ function CardRig({
       </Float>
 
       {showDecorativeEffects ? (
-        <>
-          <Sparkles
-            count={card.rarity === 'veryrare' ? 54 : card.rarity === 'epic' ? 40 : 24}
-            scale={[5.4, 5.4, 3.2]}
-            size={card.rarity === 'common' ? 1.8 : 2.6}
-            speed={0.26 + finish.shimmerBoost * 0.2}
-            color={meta.accent}
-          />
+        <Sparkles
+          count={card.rarity === 'veryrare' ? 54 : card.rarity === 'epic' ? 40 : 24}
+          scale={[5.4, 5.4, 3.2]}
+          size={card.rarity === 'common' ? 1.8 : 2.6}
+          speed={0.26 + finish.shimmerBoost * 0.2}
+          color={meta.accent}
+        />
+      ) : null}
 
-          <EffectComposer>
-            <Bloom
-              intensity={0.9 + finish.shimmerBoost * 0.32}
-              luminanceThreshold={0.18}
-              mipmapBlur
-            />
-            <Vignette eskil={false} offset={0.16} darkness={0.78} />
-          </EffectComposer>
-        </>
+      {showPostProcessing ? (
+        <EffectComposer>
+          <Vignette eskil={false} offset={0.24} darkness={0.36} />
+        </EffectComposer>
       ) : null}
     </>
   );
