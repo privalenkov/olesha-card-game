@@ -25,6 +25,10 @@ function createMaskCanvas() {
   return canvas;
 }
 
+function getMaskContext(canvas: HTMLCanvasElement) {
+  return canvas.getContext('2d', { willReadFrequently: true });
+}
+
 function drawOverlay(
   target: HTMLCanvasElement,
   source: HTMLCanvasElement,
@@ -74,7 +78,7 @@ export function CardEffectMaskEditor({
     overlay.width = MASK_EDITOR_WIDTH;
     overlay.height = MASK_EDITOR_HEIGHT;
 
-    const sourceContext = source.getContext('2d');
+    const sourceContext = getMaskContext(source);
     if (!sourceContext) {
       return;
     }
@@ -118,43 +122,63 @@ export function CardEffectMaskEditor({
     sourceContext: CanvasRenderingContext2D,
     point: { x: number; y: number },
   ) => {
-    const radius = brushSize;
+    const radius = Math.max(1, brushSize);
     const softness = Math.max(0, Math.min(1, brushSoftness));
-    const softnessCurve = Math.pow(softness, 0.58);
-    const innerRadius = radius * Math.max(0, 1 - softnessCurve * 1.55);
-    const outerRadius = radius * (1 + softnessCurve * 0.9);
-    const color = eraseMode ? '0,0,0' : '255,255,255';
+    const softnessCurve = Math.pow(softness, 0.72);
+    const outerRadius = radius;
+    const innerRadius =
+      softness <= 0.04 ? radius : radius * Math.max(0, 1 - softnessCurve);
+    const minX = Math.max(0, Math.floor(point.x - outerRadius - 1));
+    const minY = Math.max(0, Math.floor(point.y - outerRadius - 1));
+    const maxX = Math.min(MASK_EDITOR_WIDTH, Math.ceil(point.x + outerRadius + 1));
+    const maxY = Math.min(MASK_EDITOR_HEIGHT, Math.ceil(point.y + outerRadius + 1));
+    const width = Math.max(0, maxX - minX);
+    const height = Math.max(0, maxY - minY);
 
-    sourceContext.save();
-    sourceContext.globalCompositeOperation = eraseMode ? 'destination-out' : 'source-over';
-
-    if (softness <= 0.04) {
-      sourceContext.fillStyle = `rgba(${color},1)`;
-      sourceContext.beginPath();
-      sourceContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
-      sourceContext.fill();
-      sourceContext.restore();
+    if (width === 0 || height === 0) {
       return;
     }
 
-    const gradient = sourceContext.createRadialGradient(
-      point.x,
-      point.y,
-      innerRadius,
-      point.x,
-      point.y,
-      outerRadius,
-    );
-    gradient.addColorStop(0, `rgba(${color},1)`);
-    gradient.addColorStop(0.16, `rgba(${color},0.96)`);
-    gradient.addColorStop(0.42, `rgba(${color},0.68)`);
-    gradient.addColorStop(0.72, `rgba(${color},0.24)`);
-    gradient.addColorStop(1, `rgba(${color},0)`);
-    sourceContext.fillStyle = gradient;
-    sourceContext.beginPath();
-    sourceContext.arc(point.x, point.y, outerRadius, 0, Math.PI * 2);
-    sourceContext.fill();
-    sourceContext.restore();
+    const imageData = sourceContext.getImageData(minX, minY, width, height);
+    const data = imageData.data;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const pixelX = minX + x + 0.5;
+        const pixelY = minY + y + 0.5;
+        const distance = Math.hypot(pixelX - point.x, pixelY - point.y);
+
+        if (distance > outerRadius) {
+          continue;
+        }
+
+        let alpha = 1;
+
+        if (softness > 0.04 && distance > innerRadius) {
+          const t = (distance - innerRadius) / Math.max(outerRadius - innerRadius, 0.0001);
+          const smoothstep = t * t * (3 - 2 * t);
+          alpha = 1 - smoothstep;
+        }
+
+        const index = (y * width + x) * 4;
+        const targetAlpha = Math.round(alpha * 255);
+
+        if (eraseMode) {
+          data[index + 3] = Math.max(
+            0,
+            Math.round(data[index + 3] * (1 - alpha)),
+          );
+          continue;
+        }
+
+        data[index] = 255;
+        data[index + 1] = 255;
+        data[index + 2] = 255;
+        data[index + 3] = Math.max(data[index + 3], targetAlpha);
+      }
+    }
+
+    sourceContext.putImageData(imageData, minX, minY);
   };
 
   const paintAt = (
@@ -167,7 +191,7 @@ export function CardEffectMaskEditor({
       return;
     }
 
-    const sourceContext = source.getContext('2d');
+    const sourceContext = getMaskContext(source);
     if (!sourceContext) {
       return;
     }
