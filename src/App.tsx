@@ -1,13 +1,25 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { ReleaseNotesModal } from './components/ReleaseNotesModal';
 import { GameProvider } from './game/GameContext';
 import { useGame } from './game/GameContext';
 import { CardCreatorPage } from './pages/CardCreatorPage';
 import { HomePage } from './pages/HomePage';
 import { CollectionPage } from './pages/CollectionPage';
 import { AdminProposalsPage } from './pages/AdminProposalsPage';
+import { RELEASE_NOTES_STORAGE_KEY, RELEASE_NOTES_VERSION } from './releaseNotes';
+
+function hasSeenCurrentReleaseNotes() {
+  try {
+    return window.localStorage.getItem(RELEASE_NOTES_STORAGE_KEY) === RELEASE_NOTES_VERSION;
+  } catch {
+    return false;
+  }
+}
 
 function AppShell() {
   const navigate = useNavigate();
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const {
     authConfigured,
     authenticated,
@@ -21,8 +33,28 @@ function AppShell() {
     user,
   } = useGame();
 
+  useEffect(() => {
+    if (hasSeenCurrentReleaseNotes()) {
+      return;
+    }
+
+    setReleaseNotesOpen(true);
+  }, []);
+
+  function closeReleaseNotes() {
+    try {
+      window.localStorage.setItem(RELEASE_NOTES_STORAGE_KEY, RELEASE_NOTES_VERSION);
+    } catch {
+      // Ignore localStorage failures and just close the modal for this session.
+    }
+
+    setReleaseNotesOpen(false);
+  }
+
   return (
     <div className="app-shell">
+      {releaseNotesOpen ? <ReleaseNotesModal onClose={closeReleaseNotes} /> : null}
+
       <div aria-atomic="false" aria-live="polite" className="app-notifications">
         {notifications.map((notification) => (
           <article
