@@ -473,6 +473,82 @@ const finishTreatmentFragmentShader = `
   }
 `;
 
+const glossFragmentShader = `
+  uniform sampler2D uGlossMap;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uGlossiness;
+  uniform vec2 uPointer;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    vec3 halfVector = normalize(lightDir + viewDir);
+    return pow(max(dot(normal, halfVector), 0.0), power);
+  }
+
+  void main() {
+    float mask = texture2D(uGlossMap, vUv).r;
+    float glossiness = clamp(uGlossiness, 0.0, 1.0);
+
+    if (mask < 0.0002 || glossiness < 0.001) {
+      discard;
+    }
+
+    vec3 normal = normalize(vWorldNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float fresnel = pow(
+      clamp(1.0 - max(dot(normal, viewDir), 0.0), 0.0, 1.0),
+      mix(3.2, 4.8, glossiness)
+    );
+
+    float tightPower = mix(36.0, 120.0, glossiness);
+    float widePower = mix(8.0, 24.0, glossiness);
+
+    float keyTight = specularFromLight(uKeyLightPos, normal, viewDir, tightPower);
+    float fillTight = specularFromLight(uFillLightPos, normal, viewDir, tightPower * 0.9);
+    float accentTight = specularFromLight(uAccentLightPos, normal, viewDir, tightPower * 1.14);
+    float keyWide = specularFromLight(uKeyLightPos, normal, viewDir, widePower);
+    float fillWide = specularFromLight(uFillLightPos, normal, viewDir, widePower * 0.92);
+    float accentWide = specularFromLight(uAccentLightPos, normal, viewDir, widePower * 1.08);
+
+    vec2 sweepAxis = normalize(vec2(0.86, -0.5));
+    vec2 sweepCenter = vec2(0.5 + uPointer.x * 0.16, 0.5 - uPointer.y * 0.1);
+    float sweepCoord = dot(vUv - sweepCenter, sweepAxis);
+    float broadSweep = pow(
+      max(1.0 - abs(sweepCoord) * mix(3.2, 2.2, glossiness), 0.0),
+      mix(1.6, 3.2, glossiness)
+    );
+    float crispSweep = pow(
+      max(1.0 - abs(sweepCoord) * mix(9.0, 6.2, glossiness), 0.0),
+      mix(4.0, 9.0, glossiness)
+    );
+    float sweep =
+      broadSweep * (0.36 + 0.46 * glossiness) +
+      crispSweep * (0.18 + 0.38 * glossiness);
+
+    float highlight =
+      keyTight * 1.18 +
+      fillTight * 0.4 +
+      accentTight * 1.34 +
+      keyWide * 0.34 +
+      fillWide * 0.2 +
+      accentWide * 0.28 +
+      fresnel * (0.12 + glossiness * 0.22) +
+      sweep * (0.32 + keyWide * 0.58 + accentWide * 0.42 + fresnel * 0.34);
+    highlight *= glossiness;
+
+    float alpha = clamp(mask * highlight * mix(0.56, 0.94, glossiness), 0.0, 0.92);
+    vec3 color = vec3(1.0) * highlight * mask * (0.94 + glossiness * 0.22);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
 const holoFragmentShader = `
   uniform sampler2D uMaskMap;
   uniform sampler2D uZoneMap;
@@ -700,6 +776,7 @@ function CardRig({
   const ringRef = useRef<Mesh>(null);
   const haloRef = useRef<Mesh>(null);
   const shaderRef = useRef<ShaderMaterial>(null);
+  const glossShaderRef = useRef<ShaderMaterial>(null);
   const sugarFinishShaderRef = useRef<ShaderMaterial>(null);
   const sparkleFinishShaderRef = useRef<ShaderMaterial>(null);
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
@@ -710,6 +787,7 @@ function CardRig({
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const tuning = holoTuning[card.rarity];
+  const glossiness = MathUtils.clamp(getLayerValue(card, 'spot_gloss', 'shimmer'), 0, 1);
   const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
   const sugarLayerWeights = useMemo(() => new Vector3(1, 0, 0), []);
   const sparkleLayerWeights = useMemo(() => new Vector3(0, 1, 0), []);
@@ -776,6 +854,13 @@ function CardRig({
       shaderRef.current.needsUpdate = true;
     }
 
+    if (glossShaderRef.current?.uniforms) {
+      glossShaderRef.current.uniforms.uGlossMap.value = textures.glossMask;
+      glossShaderRef.current.uniforms.uGlossiness.value = glossiness;
+      glossShaderRef.current.uniformsNeedUpdate = true;
+      glossShaderRef.current.needsUpdate = true;
+    }
+
     [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
@@ -788,7 +873,7 @@ function CardRig({
         material.uniformsNeedUpdate = true;
         material.needsUpdate = true;
       });
-  }, [meta.accent, meta.hue, sugarIntensity, textures]);
+  }, [glossiness, meta.accent, meta.hue, sugarIntensity, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
@@ -880,6 +965,10 @@ function CardRig({
     shaderRef.current.uniforms.uDensity.value = tuning.density;
     shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
     shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
+
+    if (glossShaderRef.current?.uniforms) {
+      glossShaderRef.current.uniforms.uPointer.value.copy(pointer);
+    }
 
     [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
@@ -1001,17 +1090,22 @@ function CardRig({
 
           <mesh position={[0, 0, faceOffset + 0.0048]} scale={[1.001, 1.001, 1]}>
             <primitive attach="geometry" object={faceGeometry} />
-            <meshPhysicalMaterial
+            <shaderMaterial
+              ref={glossShaderRef}
               transparent
               depthWrite={false}
-              alphaMap={textures.glossMask}
-              opacity={0.14}
-              color="#f8fdff"
-              metalness={0}
-              roughness={0.14}
-              clearcoat={0.82}
-              clearcoatRoughness={0.08}
-              reflectivity={0.7}
+              blending={AdditiveBlending}
+              toneMapped={false}
+              uniforms={{
+                uGlossMap: { value: textures.glossMask },
+                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
+                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
+                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
+                uGlossiness: { value: glossiness },
+                uPointer: { value: new Vector2(0, 0) },
+              }}
+              vertexShader={cardSurfaceVertexShader}
+              fragmentShader={glossFragmentShader}
             />
           </mesh>
 

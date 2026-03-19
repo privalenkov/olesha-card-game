@@ -8,6 +8,7 @@ import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
   CARD_TREATMENT_EFFECT_OPTIONS,
+  clampEffectShimmer,
   getDefaultCardVisuals,
   type CardDecorativePattern,
   type AdminProposalOverridePayload,
@@ -196,7 +197,7 @@ function normalizeProposalPayload(
       type,
       maskUrl,
       opacity: Math.max(0.18, Math.min(opacity, 1)),
-      shimmer: Math.max(0.2, Math.min(shimmer, 1.4)),
+      shimmer: clampEffectShimmer(type, shimmer),
       relief: Math.max(-1, Math.min(relief, 1)),
     });
   }

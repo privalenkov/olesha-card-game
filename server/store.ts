@@ -23,7 +23,7 @@ import type {
   Rarity,
   RemoteGameState,
 } from '../src/game/types.js';
-import { getDefaultCardVisuals } from '../src/game/types.js';
+import { clampEffectShimmer, getDefaultCardVisuals } from '../src/game/types.js';
 import type { ServerConfig } from './config.js';
 import { getDayKey, getNextResetAt } from './time.js';
 
@@ -397,7 +397,7 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
       type: layer.type,
       maskUrl: normalizeMaskUrl(layer.maskUrl),
       opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
-      shimmer: Math.max(0.2, Math.min(layer.shimmer ?? 1, 1.4)),
+      shimmer: clampEffectShimmer(layer.type, layer.shimmer ?? 1),
       relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
     }))
     .filter((layer) => layer.id.length > 0);

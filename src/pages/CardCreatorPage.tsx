@@ -1075,6 +1075,32 @@ export function CardCreatorPage() {
                     </label>
                   ) : null}
 
+                  {selectedLayer.type === 'spot_gloss' ? (
+                    <label className="creator-field">
+                      <span>
+                        Глянцевость: {Math.round(selectedLayer.shimmer * 100)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={1}
+                        min={0}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, shimmer: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.01}
+                        type="range"
+                        value={selectedLayer.shimmer}
+                      />
+                    </label>
+                  ) : null}
+
                   {selectedLayer.type === 'texture_sugar' ? (
                     <label className="creator-field">
                       <span>

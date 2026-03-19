@@ -600,7 +600,7 @@ function drawTreatmentLayer(
     return;
   }
 
-  if (layer.type === 'emboss') {
+  if (layer.type === 'emboss' || layer.type === 'spot_gloss') {
     return;
   }
 

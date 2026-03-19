@@ -116,6 +116,14 @@ export function getDefaultCardVisuals(): CardVisuals {
   };
 }
 
+export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {
+  if (type === 'spot_gloss') {
+    return Math.max(0, Math.min(shimmer, 1));
+  }
+
+  return Math.max(0.2, Math.min(shimmer, 1.4));
+}
+
 export function getDefaultEffectLayer(
   type: CardTreatmentEffect,
   id = '',
@@ -134,7 +142,7 @@ export function getDefaultEffectLayer(
     type,
     maskUrl: '',
     opacity: opacityByType[type],
-    shimmer: 1,
+    shimmer: type === 'spot_gloss' ? 0.6 : 1,
     relief: 0,
   };
 }
