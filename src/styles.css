@@ -432,6 +432,18 @@ button {
   cursor: grabbing;
 }
 
+.pack-carousel__active-hitbox {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: clamp(220px, 28vw, 400px);
+  height: clamp(360px, 62vh, 620px);
+  transform: translate(-50%, -50%);
+  touch-action: none;
+  cursor: pointer;
+}
+
 .pack-ritual__reveal-shell {
   padding-top: 58px;
   padding-bottom: 110px;

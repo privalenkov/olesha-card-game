@@ -985,6 +985,9 @@ function CardRig({
 
   useEffect(() => {
     introRef.current = skipIntroAnimation ? 1 : 0;
+  }, [introKey, skipIntroAnimation]);
+
+  useEffect(() => {
     if (textures) {
       textures.front.needsUpdate = true;
       textures.back.needsUpdate = true;
@@ -1000,7 +1003,7 @@ function CardRig({
       textures.foil.center.set(0.5, 0.5);
       textures.foil.repeat.set(1.04, 1.04);
     }
-  }, [introKey, skipIntroAnimation, textures]);
+  }, [introKey, textures]);
 
   useEffect(() => {
     stackEntryRef.current = enterFromStackAnimation ? 1 : 0;

@@ -3,6 +3,7 @@ import { useGame } from '../game/GameContext';
 import type { OwnedCard, Rarity } from '../game/types';
 import { CardViewerCanvas } from './CardViewerCanvas';
 import { PackCarouselScene, PackScene } from './PackScene';
+import { preloadCardTextureAssets } from '../three/textures';
 
 type ExperienceStage = 'hero' | 'preparing' | 'carousel' | 'tear' | 'opening' | 'revealing' | 'complete';
 type RevealState = 'charging' | 'impact' | 'awaiting_flip' | 'revealed' | 'launching' | 'complete';
@@ -32,7 +33,7 @@ interface CarouselSwipeGesture {
   startY: number;
   lastStepX: number;
   moved: boolean;
-  mode: 'rotate' | 'flip';
+  mode: 'carousel' | 'pack';
 }
 
 interface RevealProfile {
@@ -68,7 +69,7 @@ const initialCarouselSwipeGesture: CarouselSwipeGesture = {
   startY: 0,
   lastStepX: 0,
   moved: false,
-  mode: 'rotate',
+  mode: 'carousel',
 };
 const revealProfiles: Record<Rarity, RevealProfile> = {
   common: {
@@ -447,15 +448,6 @@ export function PackExperience() {
     return withinCenterX && withinLowerHalf;
   }
 
-  function isCenteredPackTapZone(bounds: DOMRect, clientX: number, clientY: number) {
-    const localX = clientX - bounds.left;
-    const localY = clientY - bounds.top;
-    const withinCenterX = localX >= bounds.width * 0.28 && localX <= bounds.width * 0.72;
-    const withinCenterY = localY >= bounds.height * 0.16 && localY <= bounds.height * 0.82;
-
-    return withinCenterX && withinCenterY;
-  }
-
   function beginHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
     if (stage !== 'hero' && stage !== 'preparing') {
       return;
@@ -516,8 +508,6 @@ export function PackExperience() {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const mode = isCenteredPackFlipZone(bounds, event.clientX, event.clientY) ? 'flip' : 'rotate';
     event.currentTarget.setPointerCapture(event.pointerId);
     setCarouselInteracting(true);
     carouselSwipeRef.current = {
@@ -527,7 +517,27 @@ export function PackExperience() {
       startY: event.clientY,
       lastStepX: event.clientX,
       moved: false,
-      mode,
+      mode: 'carousel',
+    };
+    setCarouselDragging(false);
+  }
+
+  function beginCarouselPackSwipe(event: ReactPointerEvent<HTMLDivElement>) {
+    if (stage !== 'carousel') {
+      return;
+    }
+
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setCarouselInteracting(true);
+    carouselSwipeRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastStepX: event.clientX,
+      moved: false,
+      mode: 'pack',
     };
     setCarouselDragging(false);
   }
@@ -542,7 +552,14 @@ export function PackExperience() {
     const deltaX = event.clientX - swipe.startX;
     const deltaY = event.clientY - swipe.startY;
 
-    if (swipe.mode === 'flip') {
+    if (swipe.mode === 'pack') {
+      event.stopPropagation();
+      if (Math.abs(deltaX) > 14) {
+        carouselSwipeRef.current = {
+          ...swipe,
+          moved: true,
+        };
+      }
       setCarouselFlipPreview(clamp(deltaX / 180, -1, 1) * PACK_FLIP_PREVIEW_LIMIT);
       return;
     }
@@ -578,24 +595,19 @@ export function PackExperience() {
 
     const deltaX = event.clientX - swipe.startX;
     const deltaY = event.clientY - swipe.startY;
-    const bounds = event.currentTarget.getBoundingClientRect();
 
-    if (swipe.mode === 'flip') {
+    if (swipe.mode === 'pack') {
+      event.stopPropagation();
       if (Math.abs(deltaX) > PACK_FLIP_TRIGGER_DISTANCE && Math.abs(deltaY) < 96) {
         rotateCarouselPack(carouselIndex, deltaX > 0 ? Math.PI : -Math.PI);
+        carouselSuppressClickUntilRef.current = Date.now() + 220;
+      } else if (!swipe.moved && Math.abs(deltaX) < 18 && Math.abs(deltaY) < 18) {
+        setStage('tear');
         carouselSuppressClickUntilRef.current = Date.now() + 220;
       }
       setCarouselFlipPreview(0);
     } else if (!swipe.moved && Math.abs(deltaX) > 56 && Math.abs(deltaX) > Math.abs(deltaY) + 10) {
       stepCarousel(deltaX < 0 ? 1 : -1);
-      carouselSuppressClickUntilRef.current = Date.now() + 220;
-    } else if (
-      !swipe.moved &&
-      Math.abs(deltaX) < 18 &&
-      Math.abs(deltaY) < 18 &&
-      isCenteredPackTapZone(bounds, event.clientX, event.clientY)
-    ) {
-      setStage('tear');
       carouselSuppressClickUntilRef.current = Date.now() + 220;
     }
 
@@ -665,6 +677,7 @@ export function PackExperience() {
       return;
     }
 
+    void preloadCardTextureAssets(pack);
     setOpenedPack(pack);
     openingTimerRef.current = window.setTimeout(() => {
       openingTimerRef.current = null;
@@ -926,6 +939,14 @@ export function PackExperience() {
                   setStage('tear');
                 }}
                 rotationOffsets={visualPackRotationOffsets}
+              />
+
+              <div
+                className="pack-carousel__active-hitbox"
+                onPointerCancel={endCarouselSwipe}
+                onPointerDown={beginCarouselPackSwipe}
+                onPointerMove={moveCarouselSwipe}
+                onPointerUp={endCarouselSwipe}
               />
             </div>
           </div>

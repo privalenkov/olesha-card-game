@@ -31,6 +31,18 @@ type RemoteImageCacheEntry = {
 
 const remoteImageCache = new Map<string, RemoteImageCacheEntry>();
 
+function getCardRemoteAssetUrls(card: OwnedCard | null) {
+  if (!card) {
+    return [];
+  }
+
+  return [
+    card.urlImage,
+    card.visuals?.decorativePattern.svgUrl ?? '',
+    ...getCardEffectLayers(card).map((layer) => layer.maskUrl),
+  ].filter(Boolean);
+}
+
 const frameStylePalette: Record<
   CardFrameStyle,
   {
@@ -267,6 +279,22 @@ function useRemoteImages(urls: string[]) {
       }),
     [urls, version],
   );
+}
+
+export function preloadCardTextureAssets(cards: OwnedCard[] | OwnedCard | null) {
+  const list = Array.isArray(cards) ? cards : cards ? [cards] : [];
+  const urls = Array.from(new Set(list.flatMap((card) => getCardRemoteAssetUrls(card))));
+
+  if (urls.length === 0) {
+    return Promise.resolve();
+  }
+
+  const pending = urls.map((url) => {
+    const entry = ensureRemoteImage(url);
+    return entry.status === 'loading' && entry.promise ? entry.promise : Promise.resolve();
+  });
+
+  return Promise.allSettled(pending).then(() => undefined);
 }
 
 function addNoise(
