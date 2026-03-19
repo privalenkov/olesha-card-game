@@ -1,7 +1,6 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
-import { Float, Sparkles } from '@react-three/drei';
+import { Float } from '@react-three/drei';
 import {
   AdditiveBlending,
   Color,
@@ -10,22 +9,46 @@ import {
   Mesh,
   MeshBasicMaterial,
   Shape,
+  type Texture,
 } from 'three';
 import { rarityMeta } from '../game/config';
 import type { OwnedCard } from '../game/types';
 import { usePackTexture } from '../three/textures';
+import {
+  SharedViewerLighting,
+  SharedViewerPostProcessing,
+  VIEWER_BASE_TILT_X,
+  VIEWER_CANVAS_DPR,
+  VIEWER_CANVAS_FOV,
+  VIEWER_HOVER_TILT_X,
+  VIEWER_HOVER_TILT_Y,
+  VIEWER_IDLE_ROLL_AMPLITUDE,
+  VIEWER_IDLE_ROLL_SPEED,
+} from './viewerSceneProfile';
 
-type PackPhase = 'sealed' | 'tearing' | 'burst' | 'revealing' | 'finished';
+export type PackPhase = 'sealed' | 'tearing' | 'burst' | 'revealing' | 'finished';
 
 interface PackSceneProps {
-  face: 'front' | 'back';
   phase: PackPhase;
   tearProgress: number;
-  flipProgress: number;
+  dragPreview?: number;
+  hoverEnabled?: boolean;
+  rotationOffset?: number;
   tearAnchor: number;
   tearDirection: 1 | -1;
   cards: OwnedCard[] | null;
   focusIndex: number;
+  offsetY?: number;
+  packScale?: number;
+}
+
+interface PackCarouselSceneProps {
+  activeIndex: number;
+  orbitIndex: number;
+  rotationOffsets: number[];
+  dragPreview?: number;
+  hoverEnabled?: boolean;
+  onPackClick?: (index: number) => void;
 }
 
 const PACK_WIDTH = 3.08;
@@ -34,7 +57,34 @@ const PACK_BOTTOM_CRIMP = 0.42;
 const PACK_DEPTH = 0.14;
 const TEAR_WIDTH = 3.2;
 const TEAR_HEIGHT = 0.54;
-const PACK_SCALE = 0.8;
+const DEFAULT_PACK_SCALE = 0.8;
+const CAROUSEL_TILT = 0;
+const CAROUSEL_STEP = (Math.PI * 2) / 5;
+const CAROUSEL_RADIUS = 4.5;
+const CAROUSEL_CENTER_Z = -CAROUSEL_RADIUS - 0.54;
+const PACK_ACCENT_LIGHT = '#74dbff';
+const PACK_BODY_MATERIAL = {
+  color: '#0d4c66',
+  metalness: 0.24,
+  roughness: 0.56,
+  clearcoat: 0.78,
+  clearcoatRoughness: 0.18,
+  reflectivity: 0.18,
+} as const;
+const PACK_FACE_MATERIAL = {
+  metalness: 0.08,
+  roughness: 0.84,
+  clearcoat: 0.12,
+  clearcoatRoughness: 0.28,
+  reflectivity: 0.08,
+} as const;
+const PACK_BACK_MATERIAL = {
+  metalness: 0.06,
+  roughness: 0.9,
+  clearcoat: 0.08,
+  clearcoatRoughness: 0.3,
+  reflectivity: 0.06,
+} as const;
 
 function createMainPackShape(width: number, bodyHeight: number, crimpHeight: number) {
   const halfWidth = width / 2;
@@ -205,14 +255,17 @@ function MiniCard({
 }
 
 function PackRig({
-  face,
   phase,
   tearProgress,
-  flipProgress,
+  dragPreview = 0,
+  hoverEnabled = true,
+  rotationOffset = 0,
   tearAnchor,
   tearDirection,
   cards,
   focusIndex,
+  offsetY = 0,
+  packScale = DEFAULT_PACK_SCALE,
 }: PackSceneProps) {
   const groupRef = useRef<Group>(null);
   const tearPivotRef = useRef<Group>(null);
@@ -235,29 +288,31 @@ function PackRig({
     const opened = phase !== 'sealed';
     const peelTarget = opened ? 1 : tearProgress;
     const anchorX = MathUtils.lerp(-TEAR_WIDTH * 0.28, TEAR_WIDTH * 0.28, tearAnchor);
-    const flipY = flipProgress * -1.08;
-
+    const pointerX = hoverEnabled ? state.pointer.x : 0;
+    const pointerY = hoverEnabled ? state.pointer.y : 0;
     groupRef.current.rotation.y = MathUtils.damp(
       groupRef.current.rotation.y,
-      (face === 'back' ? Math.PI : 0) + flipY,
-      4.2,
+      rotationOffset + dragPreview + pointerX * VIEWER_HOVER_TILT_Y,
+      5,
       delta,
     );
     groupRef.current.rotation.x = MathUtils.damp(
       groupRef.current.rotation.x,
-      -0.04 + state.pointer.y * 0.08,
+      -pointerY * VIEWER_HOVER_TILT_X + VIEWER_BASE_TILT_X,
       4,
       delta,
     );
     groupRef.current.rotation.z = MathUtils.damp(
       groupRef.current.rotation.z,
-      opened ? -0.025 * tearDirection : state.pointer.x * 0.03,
-      4,
+      opened && !hoverEnabled
+        ? -0.025 * tearDirection
+        : Math.sin(state.clock.elapsedTime * VIEWER_IDLE_ROLL_SPEED) * VIEWER_IDLE_ROLL_AMPLITUDE,
+      2.8,
       delta,
     );
     groupRef.current.position.y = MathUtils.damp(
       groupRef.current.position.y,
-      opened ? -0.08 : 0.02,
+      offsetY + (opened ? -0.08 : 0.02),
       3.4,
       delta,
     );
@@ -312,14 +367,10 @@ function PackRig({
 
   return (
     <>
-      <color attach="background" args={['#000000']} />
-      <ambientLight intensity={1.08} />
-      <directionalLight position={[4, 8, 8]} intensity={3.2} color="#fff3de" />
-      <pointLight position={[-4, 1, 6]} intensity={24} color="#68deff" />
-      <pointLight position={[5, -2, 4]} intensity={15} color="#ff8b5a" />
+      <SharedViewerLighting accentColor={PACK_ACCENT_LIGHT} />
 
-      <Float speed={1.15} rotationIntensity={0.14} floatIntensity={0.2}>
-        <group ref={groupRef} scale={PACK_SCALE}>
+      <Float speed={1.35} rotationIntensity={0.06} floatIntensity={0.18}>
+        <group ref={groupRef} scale={packScale}>
           <mesh position={[0, 0, -PACK_DEPTH / 2]}>
             <extrudeGeometry
               args={[
@@ -331,26 +382,16 @@ function PackRig({
                 },
               ]}
             />
-            <meshPhysicalMaterial
-              color="#0d4c66"
-              metalness={0.82}
-              roughness={0.24}
-              clearcoat={1}
-              clearcoatRoughness={0.14}
-              reflectivity={1}
-            />
+            <meshPhysicalMaterial {...PACK_BODY_MATERIAL} />
           </mesh>
 
           <mesh position={[0, 0, PACK_DEPTH / 2 + 0.006]}>
             <shapeGeometry args={[mainShape]} />
             <meshPhysicalMaterial
               map={frontTexture}
-              metalness={0.44}
-              roughness={0.18}
-              clearcoat={1}
-              clearcoatRoughness={0.12}
-              emissive="#10384d"
-              emissiveIntensity={0.16}
+              {...PACK_FACE_MATERIAL}
+              emissive="#0d2d3d"
+              emissiveIntensity={0.05}
             />
           </mesh>
 
@@ -358,22 +399,9 @@ function PackRig({
             <shapeGeometry args={[mainShape]} />
             <meshPhysicalMaterial
               map={backTexture}
-              metalness={0.38}
-              roughness={0.2}
-              clearcoat={1}
-              clearcoatRoughness={0.14}
-              emissive="#0b2230"
-              emissiveIntensity={0.14}
-            />
-          </mesh>
-
-          <mesh position={[0, 0.1, PACK_DEPTH / 2 + 0.012]}>
-            <shapeGeometry args={[mainShape]} />
-            <meshBasicMaterial
-              color="#ffffff"
-              transparent
-              opacity={0.055}
-              blending={AdditiveBlending}
+              {...PACK_BACK_MATERIAL}
+              emissive="#091c27"
+              emissiveIntensity={0.04}
             />
           </mesh>
 
@@ -390,19 +418,12 @@ function PackRig({
                     },
                   ]}
                 />
-                <meshPhysicalMaterial
-                  color="#0f5e7f"
-                  metalness={0.88}
-                  roughness={0.2}
-                  clearcoat={1}
-                  clearcoatRoughness={0.1}
-                  reflectivity={1}
-                />
+                <meshPhysicalMaterial {...PACK_BODY_MATERIAL} color="#0f5e7f" />
               </mesh>
 
               <mesh position={[0, TEAR_HEIGHT * 0.42, PACK_DEPTH / 2 + 0.01]}>
                 <shapeGeometry args={[tearShape]} />
-                <meshBasicMaterial color="#61d7f7" transparent opacity={0.24} />
+                <meshBasicMaterial color="#61d7f7" transparent opacity={0.16} />
               </mesh>
 
               <mesh position={[0, TEAR_HEIGHT * 0.28, PACK_DEPTH / 2 + 0.02]}>
@@ -420,7 +441,7 @@ function PackRig({
             <meshBasicMaterial
               color="#fff8de"
               transparent
-              opacity={0.08}
+              opacity={0.045}
               blending={AdditiveBlending}
             />
           </mesh>
@@ -438,18 +459,261 @@ function PackRig({
         </group>
       </Float>
 
-      <Sparkles
-        count={phase === 'sealed' ? 24 : 52}
-        scale={[8, 6, 5]}
-        size={phase === 'sealed' ? 1.9 : 3.3}
-        speed={0.22}
-        color="#ffefc1"
-      />
+      <SharedViewerPostProcessing />
+    </>
+  );
+}
 
-      <EffectComposer>
-        <Bloom mipmapBlur intensity={1.06} luminanceThreshold={0.2} />
-        <Vignette eskil={false} offset={0.14} darkness={0.86} />
-      </EffectComposer>
+function CarouselPack({
+  backTexture,
+  dragPreview,
+  frontTexture,
+  hoverEnabled,
+  slotAngle,
+  active,
+  index,
+  onClick,
+  mainShape,
+  tearShape,
+  rotationOffset,
+}: {
+  backTexture: Texture;
+  dragPreview: number;
+  frontTexture: Texture;
+  hoverEnabled: boolean;
+  slotAngle: number;
+  active: boolean;
+  index: number;
+  onClick?: (index: number) => void;
+  mainShape: Shape;
+  tearShape: Shape;
+  rotationOffset: number;
+}) {
+  const ref = useRef<Group>(null);
+  const [hovered, setHovered] = useState(false);
+
+  useFrame((state, delta) => {
+    if (!ref.current) {
+      return;
+    }
+
+    const targetX = Math.sin(slotAngle) * CAROUSEL_RADIUS;
+    const targetZ = Math.cos(slotAngle) * CAROUSEL_RADIUS;
+    const targetY = Math.cos(slotAngle) * 0.02 + (active ? 0.06 : 0);
+    const pointerX = active && hoverEnabled ? state.pointer.x : 0;
+    const pointerY = active && hoverEnabled ? state.pointer.y : 0;
+    const targetRotationY =
+      slotAngle + rotationOffset + (active ? dragPreview : 0) + pointerX * VIEWER_HOVER_TILT_Y;
+    const targetRotationX = active ? -pointerY * VIEWER_HOVER_TILT_X + VIEWER_BASE_TILT_X : 0;
+    const targetRotationZ = active
+      ? hoverEnabled
+        ? Math.sin(state.clock.elapsedTime * VIEWER_IDLE_ROLL_SPEED) * VIEWER_IDLE_ROLL_AMPLITUDE
+        : 0
+      : 0;
+    const targetScale = (active ? 0.8 : 0.72) + (hovered && hoverEnabled ? 0.015 : 0);
+
+    ref.current.position.x = targetX;
+    ref.current.position.y = MathUtils.damp(ref.current.position.y, targetY, 5, delta);
+    ref.current.position.z = targetZ;
+    ref.current.rotation.x =
+      active && hoverEnabled
+        ? MathUtils.damp(ref.current.rotation.x, targetRotationX, 5, delta)
+        : targetRotationX;
+    ref.current.rotation.y =
+      active && (hoverEnabled || Math.abs(dragPreview) > 0.0001)
+        ? MathUtils.damp(ref.current.rotation.y, targetRotationY, 5.4, delta)
+        : targetRotationY;
+    ref.current.rotation.z =
+      active && hoverEnabled
+        ? MathUtils.damp(ref.current.rotation.z, targetRotationZ, 5, delta)
+        : targetRotationZ;
+
+    const currentScale = ref.current.scale.x;
+    const dampedScale = MathUtils.damp(currentScale, targetScale, 5, delta);
+    ref.current.scale.setScalar(dampedScale);
+  });
+
+  return (
+    <group
+      ref={ref}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.(index);
+      }}
+      onPointerOut={(event) => {
+        event.stopPropagation();
+        setHovered(false);
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+    >
+      <mesh
+        position={[0, 0.08, PACK_DEPTH / 2 + 0.18]}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.(index);
+        }}
+      >
+        <planeGeometry args={[PACK_WIDTH * 1.18, PACK_BODY_HEIGHT + PACK_BOTTOM_CRIMP + TEAR_HEIGHT + 0.24]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
+      <mesh position={[0, -2.12, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.9, 48]} />
+        <meshBasicMaterial color="#000000" transparent opacity={active ? 0.16 : 0.1} />
+      </mesh>
+
+      <mesh position={[0, 0, -PACK_DEPTH / 2]}>
+        <extrudeGeometry
+          args={[
+            mainShape,
+            {
+              depth: PACK_DEPTH,
+              bevelEnabled: false,
+              curveSegments: 24,
+            },
+          ]}
+        />
+        <meshPhysicalMaterial {...PACK_BODY_MATERIAL} />
+      </mesh>
+
+      <mesh position={[0, 0, PACK_DEPTH / 2 + 0.006]}>
+        <shapeGeometry args={[mainShape]} />
+        <meshPhysicalMaterial
+          map={frontTexture}
+          {...PACK_FACE_MATERIAL}
+          emissive="#0d2d3d"
+          emissiveIntensity={active ? 0.07 : 0.05}
+        />
+      </mesh>
+
+      <mesh position={[0, 0, -PACK_DEPTH / 2 - 0.006]} rotation={[0, Math.PI, 0]}>
+        <shapeGeometry args={[mainShape]} />
+        <meshPhysicalMaterial
+          map={backTexture}
+          {...PACK_BACK_MATERIAL}
+          emissive="#091c27"
+          emissiveIntensity={active ? 0.055 : 0.04}
+        />
+      </mesh>
+
+      <group position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.02]}>
+        <mesh position={[0, 0, -PACK_DEPTH / 2]}>
+          <extrudeGeometry
+            args={[
+              tearShape,
+              {
+                depth: PACK_DEPTH * 0.92,
+                bevelEnabled: false,
+                curveSegments: 20,
+              },
+            ]}
+          />
+          <meshPhysicalMaterial {...PACK_BODY_MATERIAL} color="#0f5e7f" />
+        </mesh>
+
+        <mesh position={[0, TEAR_HEIGHT * 0.42, PACK_DEPTH / 2 + 0.01]}>
+          <shapeGeometry args={[tearShape]} />
+          <meshBasicMaterial color="#61d7f7" transparent opacity={0.16} />
+        </mesh>
+
+        <mesh position={[0, TEAR_HEIGHT * 0.28, PACK_DEPTH / 2 + 0.02]}>
+          <planeGeometry args={[0.72, 0.13]} />
+          <meshBasicMaterial color="#0a1419" transparent opacity={0.92} />
+        </mesh>
+      </group>
+
+      <mesh position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.12]}>
+        <planeGeometry args={[0.54, 0.06]} />
+        <meshBasicMaterial
+          color="#fff8de"
+          transparent
+          opacity={0.045}
+          blending={AdditiveBlending}
+        />
+      </mesh>
+
+    </group>
+  );
+}
+
+function PackCarouselRig({
+  activeIndex,
+  orbitIndex,
+  rotationOffsets,
+  dragPreview = 0,
+  hoverEnabled = true,
+  onPackClick,
+}: PackCarouselSceneProps) {
+  const ringRef = useRef<Group>(null);
+  const frontTexture = usePackTexture('front');
+  const backTexture = usePackTexture('back');
+  const mainShape = useMemo(
+    () => createMainPackShape(PACK_WIDTH, PACK_BODY_HEIGHT, PACK_BOTTOM_CRIMP),
+    [],
+  );
+  const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
+
+  useFrame((state, delta) => {
+    state.camera.position.x = MathUtils.damp(state.camera.position.x, 0, 4, delta);
+    state.camera.position.y = MathUtils.damp(
+      state.camera.position.y,
+      0.52,
+      4,
+      delta,
+    );
+    state.camera.lookAt(0, -0.1, -0.4);
+
+    if (!ringRef.current) {
+      return;
+    }
+
+    ringRef.current.rotation.y = MathUtils.damp(
+      ringRef.current.rotation.y,
+      -orbitIndex * CAROUSEL_STEP,
+      6.4,
+      delta,
+    );
+  });
+
+  return (
+    <>
+      <SharedViewerLighting accentColor={PACK_ACCENT_LIGHT} />
+
+      <group rotation={[CAROUSEL_TILT, 0, 0]} position={[0, -0.08, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.72, -2.2]}>
+          <circleGeometry args={[11.6, 84]} />
+          <meshBasicMaterial color="#07101a" transparent opacity={0.1} />
+        </mesh>
+
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.68, -2.1]}>
+          <circleGeometry args={[8.2, 72]} />
+          <meshBasicMaterial color="#0b1c2a" transparent opacity={0.06} />
+        </mesh>
+
+        <group ref={ringRef} position={[0, 0, CAROUSEL_CENTER_Z]}>
+          {rotationOffsets.map((rotationOffset, index) => (
+            <CarouselPack
+              key={`carousel-pack-${index}`}
+              active={index === activeIndex}
+              backTexture={backTexture}
+              dragPreview={index === activeIndex ? dragPreview : 0}
+              frontTexture={frontTexture}
+              hoverEnabled={hoverEnabled}
+              index={index}
+              mainShape={mainShape}
+              onClick={onPackClick}
+              rotationOffset={rotationOffset}
+              slotAngle={index * CAROUSEL_STEP}
+              tearShape={tearShape}
+            />
+          ))}
+        </group>
+      </group>
+
+      <SharedViewerPostProcessing />
     </>
   );
 }
@@ -457,8 +721,18 @@ function PackRig({
 export function PackScene(props: PackSceneProps) {
   return (
     <div className="pack-scene">
-      <Canvas camera={{ position: [0, 0.1, 10.9], fov: 31 }} dpr={[1, 2]}>
+      <Canvas camera={{ position: [0, 0.1, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
         <PackRig {...props} />
+      </Canvas>
+    </div>
+  );
+}
+
+export function PackCarouselScene(props: PackCarouselSceneProps) {
+  return (
+    <div className="pack-scene pack-scene--carousel">
+      <Canvas camera={{ position: [0, 0.24, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
+        <PackCarouselRig {...props} />
       </Canvas>
     </div>
   );

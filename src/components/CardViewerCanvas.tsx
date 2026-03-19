@@ -1,17 +1,18 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { EffectComposer, Vignette } from '@react-three/postprocessing';
 import { Float, Sparkles } from '@react-three/drei';
 import {
   AdditiveBlending,
   Color,
+  DoubleSide,
   ExtrudeGeometry,
   Float32BufferAttribute,
   Group,
@@ -26,8 +27,20 @@ import {
   Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
-import type { CardTreatmentEffect, OwnedCard } from '../game/types';
-import { useCardTextures } from '../three/textures';
+import type { CardTreatmentEffect, OwnedCard, Rarity } from '../game/types';
+import { useCardTextures, useStackCardBackTexture } from '../three/textures';
+import {
+  VIEWER_BASE_TILT_X,
+  SharedViewerLighting,
+  SharedViewerPostProcessing,
+  VIEWER_CANVAS_DPR,
+  VIEWER_CANVAS_FOV,
+  VIEWER_HOVER_TILT_X,
+  VIEWER_HOVER_TILT_Y,
+  VIEWER_IDLE_ROLL_AMPLITUDE,
+  VIEWER_IDLE_ROLL_SPEED,
+  VIEWER_LIGHTS,
+} from './viewerSceneProfile';
 
 const holoTuning = {
   common: {
@@ -62,8 +75,10 @@ const holoTuning = {
   },
 } as const;
 
-type ViewerEffectsPreset = 'full' | 'diagnostic';
+type ViewerEffectsPreset = 'full' | 'stack' | 'diagnostic';
 type CardSide = 'front' | 'back';
+type ViewerShakeMode = 'none' | 'rare' | 'epic' | 'veryrare';
+type ViewerImpactRarity = Extract<Rarity, 'rare' | 'epic' | 'veryrare'>;
 
 interface DragState {
   active: boolean;
@@ -123,14 +138,6 @@ const CARD_FACE = {
 
 const FLIP_PREVIEW_LIMIT = 0.72;
 const FLIP_TRIGGER_DISTANCE = 72;
-const HOVER_TILT_X = 0.42;
-const HOVER_TILT_Y = 0.34;
-const CARD_VIEWER_LIGHTS = {
-  key: new Vector3(3.9, 6.2, 7.6),
-  fill: new Vector3(-5.4, 1.4, 5.8),
-  accent: new Vector3(2.4, -2.2, 7.2),
-  rim: new Vector3(-4.6, 2.8, -5.4),
-} as const;
 const edgeHighlightVertexShader = `
   varying vec2 vUv;
   varying vec3 vWorldPosition;
@@ -755,11 +762,131 @@ function createRoundedEdgeGeometry(width: number, height: number, radius: number
   return new ShapeGeometry(outer, 24);
 }
 
+interface ImpactSplashProfile {
+  count: number;
+  reach: number;
+  verticalReach: number;
+  sizeMin: number;
+  sizeMax: number;
+  stretchMin: number;
+  stretchMax: number;
+  delaySpread: number;
+  burstWindow: number;
+  orbit: number;
+  depthSpread: number;
+  accentEvery: number;
+}
+
+interface ImpactParticleConfig {
+  angle: number;
+  radiusStart: number;
+  radiusEnd: number;
+  yLift: number;
+  size: number;
+  stretch: number;
+  spin: number;
+  delay: number;
+  depth: number;
+  orbit: number;
+  secondary: boolean;
+}
+
+const impactSplashProfiles: Record<ViewerImpactRarity, ImpactSplashProfile> = {
+  rare: {
+    count: 16,
+    reach: 2.55,
+    verticalReach: 1.1,
+    sizeMin: 0.22,
+    sizeMax: 0.38,
+    stretchMin: 1.8,
+    stretchMax: 2.7,
+    delaySpread: 0.04,
+    burstWindow: 0.18,
+    orbit: 0.18,
+    depthSpread: 0.08,
+    accentEvery: 4,
+  },
+  epic: {
+    count: 24,
+    reach: 3.15,
+    verticalReach: 1.45,
+    sizeMin: 0.24,
+    sizeMax: 0.48,
+    stretchMin: 2.1,
+    stretchMax: 3.2,
+    delaySpread: 0.055,
+    burstWindow: 0.2,
+    orbit: 0.28,
+    depthSpread: 0.12,
+    accentEvery: 3,
+  },
+  veryrare: {
+    count: 34,
+    reach: 3.9,
+    verticalReach: 1.8,
+    sizeMin: 0.26,
+    sizeMax: 0.58,
+    stretchMin: 2.4,
+    stretchMax: 3.8,
+    delaySpread: 0.075,
+    burstWindow: 0.22,
+    orbit: 0.42,
+    depthSpread: 0.16,
+    accentEvery: 2,
+  },
+};
+
+function seededUnit(seed: number) {
+  const value = Math.sin(seed * 127.1) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
+function getImpactSplashRarity(rarity: Rarity): ViewerImpactRarity | null {
+  return rarity === 'rare' || rarity === 'epic' || rarity === 'veryrare' ? rarity : null;
+}
+
+function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
+  const profile = impactSplashProfiles[rarity];
+
+  return Array.from({ length: profile.count }, (_, index): ImpactParticleConfig => {
+    const seed = index + 1;
+    const band = index % 3;
+    const angle =
+      (index / profile.count) * Math.PI * 2 + (seededUnit(seed * 1.37) - 0.5) * 0.52;
+    const radiusStart = 0.12 + seededUnit(seed * 2.11) * 0.34;
+    const radiusEnd =
+      profile.reach * (0.74 + seededUnit(seed * 3.17) * 0.42) + band * 0.16;
+
+    return {
+      angle,
+      radiusStart,
+      radiusEnd,
+      yLift: (seededUnit(seed * 4.09) - 0.5) * profile.verticalReach + (band - 1) * 0.12,
+      size: MathUtils.lerp(profile.sizeMin, profile.sizeMax, seededUnit(seed * 5.33)),
+      stretch: MathUtils.lerp(profile.stretchMin, profile.stretchMax, seededUnit(seed * 6.41)),
+      spin: (seededUnit(seed * 7.07) - 0.5) * Math.PI * 1.2,
+      delay: seededUnit(seed * 8.17) * profile.delaySpread,
+      depth: (seededUnit(seed * 9.91) - 0.5) * profile.depthSpread,
+      orbit: (seededUnit(seed * 10.73) - 0.5) * profile.orbit,
+      secondary: index % profile.accentEvery === 0,
+    };
+  });
+}
+
 function CardRig({
   card,
   introKey,
   scaleMultiplier,
+  stackBackCount,
+  activeLiftProgress,
   effectsPreset,
+  renderStackOnly,
+  enterFromStackAnimation,
+  launchExitProgress,
+  shakeMode,
+  revealImpactRarity,
+  revealImpactDurationMs,
+  skipIntroAnimation,
   flipTargetRef,
   dragPreviewRef,
   pointer,
@@ -767,12 +894,24 @@ function CardRig({
   card: OwnedCard;
   introKey: string;
   scaleMultiplier: number;
+  stackBackCount: number;
+  activeLiftProgress: number;
   effectsPreset: ViewerEffectsPreset;
+  renderStackOnly: boolean;
+  enterFromStackAnimation: boolean;
+  launchExitProgress: number;
+  shakeMode: ViewerShakeMode;
+  revealImpactRarity: ViewerImpactRarity | null;
+  revealImpactDurationMs: number;
+  skipIntroAnimation: boolean;
   flipTargetRef: MutableRefObject<number>;
   dragPreviewRef: MutableRefObject<number>;
   pointer: Vector2;
 }) {
-  const groupRef = useRef<Group>(null);
+  const outerGroupRef = useRef<Group>(null);
+  const stackGroupRef = useRef<Group>(null);
+  const activeHoverGroupRef = useRef<Group>(null);
+  const activeGroupRef = useRef<Group>(null);
   const ringRef = useRef<Mesh>(null);
   const haloRef = useRef<Mesh>(null);
   const shaderRef = useRef<ShaderMaterial>(null);
@@ -782,8 +921,18 @@ function CardRig({
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
   const edgeMeshRef = useRef<Mesh>(null);
+  const impactFlashRef = useRef<MeshBasicMaterial>(null);
+  const impactGlowRef = useRef<MeshBasicMaterial>(null);
+  const impactParticleRefs = useRef<(Group | null)[]>([]);
   const introRef = useRef(0);
+  const stackEntryRef = useRef(0);
+  const impactRef = useRef({
+    active: false,
+    progress: 1,
+    duration: 1.2,
+  });
   const textures = useCardTextures(card);
+  const stackBackTexture = useStackCardBackTexture();
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const tuning = holoTuning[card.rarity];
@@ -797,8 +946,17 @@ function CardRig({
   const prismReliefWeights = useMemo(() => new Vector2(0, 1), []);
   const surfaceNormalScale = useMemo(() => new Vector2(0.16, 0.16), []);
   const surfaceClearcoatScale = useMemo(() => new Vector2(0.24, 0.24), []);
+  const isStackPreset = effectsPreset === 'stack';
   const showDecorativeEffects = false;
   const showPostProcessing = effectsPreset === 'full';
+  const showFrontTreatments = !isStackPreset;
+  const enableEdgeHighlight = !isStackPreset;
+  const canRenderActiveCard = !renderStackOnly && Boolean(textures);
+  const impactSplashRarity = useMemo(() => getImpactSplashRarity(card.rarity), [card.rarity]);
+  const impactParticleConfigs = useMemo(
+    () => (impactSplashRarity ? createImpactParticleConfigs(impactSplashRarity) : []),
+    [impactSplashRarity],
+  );
   const faceGeometry = useMemo(
     () => createRoundedFaceGeometry(CARD_FACE.width, CARD_FACE.height, CARD_BODY.radius),
     [],
@@ -819,8 +977,14 @@ function CardRig({
   );
   const faceOffset = CARD_BODY.depth / 2 + 0.0012;
 
+  useLayoutEffect(() => {
+    if (activeGroupRef.current) {
+      activeGroupRef.current.rotation.y = flipTargetRef.current;
+    }
+  }, [introKey, flipTargetRef]);
+
   useEffect(() => {
-    introRef.current = 0;
+    introRef.current = skipIntroAnimation ? 1 : 0;
     if (textures) {
       textures.front.needsUpdate = true;
       textures.back.needsUpdate = true;
@@ -836,7 +1000,11 @@ function CardRig({
       textures.foil.center.set(0.5, 0.5);
       textures.foil.repeat.set(1.04, 1.04);
     }
-  }, [introKey, textures]);
+  }, [introKey, skipIntroAnimation, textures]);
+
+  useEffect(() => {
+    stackEntryRef.current = enterFromStackAnimation ? 1 : 0;
+  }, [enterFromStackAnimation, introKey]);
 
   useEffect(() => {
     if (!textures) {
@@ -879,56 +1047,142 @@ function CardRig({
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
   useEffect(() => () => bodyGeometry.dispose(), [bodyGeometry]);
 
+  useEffect(() => {
+    if (!revealImpactRarity) {
+      return;
+    }
+
+    impactRef.current = {
+      active: true,
+      progress: 0,
+      duration: Math.max(revealImpactDurationMs / 1000, 0.9),
+    };
+  }, [introKey, revealImpactDurationMs, revealImpactRarity]);
+
   useFrame((state, delta) => {
-    if (!groupRef.current || !shaderRef.current || !shaderRef.current.uniforms) {
+    if (!outerGroupRef.current || !activeGroupRef.current || !activeHoverGroupRef.current) {
       return;
     }
 
     introRef.current = Math.min(introRef.current + delta * 1.6, 1);
+    stackEntryRef.current = Math.max(stackEntryRef.current - delta / 0.42, 0);
     const easedIntro = 1 - (1 - introRef.current) * (1 - introRef.current);
+    const stackEntryOffset = Math.pow(stackEntryRef.current, 0.86);
     const baseFlip = flipTargetRef.current;
     const dragPreview = dragPreviewRef.current;
+    const sharedYawTarget = pointer.x * VIEWER_HOVER_TILT_Y;
+    const activeFlipTarget = baseFlip + dragPreview;
+    const shakeStrength =
+      shakeMode === 'veryrare' ? 1.25 : shakeMode === 'epic' ? 1 : shakeMode === 'rare' ? 0.8 : 0;
+    const shakeX =
+      shakeStrength > 0
+        ? Math.sin(state.clock.elapsedTime * (26 + shakeStrength * 4.5)) * 0.026 * shakeStrength
+        : 0;
+    const shakeY =
+      shakeStrength > 0
+        ? Math.cos(state.clock.elapsedTime * (23 + shakeStrength * 4)) * 0.018 * shakeStrength
+        : 0;
+    const shakeRoll =
+      shakeStrength > 0
+        ? Math.sin(state.clock.elapsedTime * (28 + shakeStrength * 5.5)) * 0.024 * shakeStrength
+        : 0;
 
-    groupRef.current.position.y = MathUtils.damp(
-      groupRef.current.position.y,
-      0.1 - (1 - easedIntro) * 1.25,
+    outerGroupRef.current.position.x = MathUtils.damp(
+      outerGroupRef.current.position.x,
+      shakeX,
+      14,
+      delta,
+    );
+    outerGroupRef.current.position.y = MathUtils.damp(
+      outerGroupRef.current.position.y,
+      0.1 - (1 - easedIntro) * 1.25 + shakeY - stackEntryOffset * 0.42 + launchExitProgress * 8.8,
       4,
       delta,
     );
-    groupRef.current.position.z = MathUtils.damp(
-      groupRef.current.position.z,
-      0.04 + easedIntro * 0.08,
+    outerGroupRef.current.position.z = MathUtils.damp(
+      outerGroupRef.current.position.z,
+      0.04 + easedIntro * 0.08 - stackEntryOffset * 0.12,
       4,
       delta,
     );
-    groupRef.current.rotation.x = MathUtils.damp(
-      groupRef.current.rotation.x,
-      -pointer.y * HOVER_TILT_X + 0.03,
+    outerGroupRef.current.rotation.x = MathUtils.damp(
+      outerGroupRef.current.rotation.x,
+      -pointer.y * VIEWER_HOVER_TILT_X + VIEWER_BASE_TILT_X,
       4,
       delta,
     );
-    groupRef.current.rotation.y = MathUtils.damp(
-      groupRef.current.rotation.y,
-      baseFlip + dragPreview + pointer.x * HOVER_TILT_Y,
-      5,
-      delta,
-    );
-    groupRef.current.rotation.z = MathUtils.damp(
-      groupRef.current.rotation.z,
-      Math.sin(state.clock.elapsedTime * 0.45) * 0.018,
+    outerGroupRef.current.rotation.z = MathUtils.damp(
+      outerGroupRef.current.rotation.z,
+      isStackPreset
+        ? shakeRoll
+        : Math.sin(state.clock.elapsedTime * VIEWER_IDLE_ROLL_SPEED) * VIEWER_IDLE_ROLL_AMPLITUDE + shakeRoll,
       2.8,
       delta,
     );
-    groupRef.current.scale.setScalar((0.82 + easedIntro * 0.18) * scaleMultiplier);
+    outerGroupRef.current.scale.setScalar((0.82 + easedIntro * 0.18) * scaleMultiplier);
 
-    const yawTilt = Math.sin(groupRef.current.rotation.y);
+    activeGroupRef.current.rotation.y = MathUtils.damp(
+      activeGroupRef.current.rotation.y,
+      activeFlipTarget,
+      5,
+      delta,
+    );
+
+    const flipMotion = Math.abs(Math.sin(activeGroupRef.current.rotation.y));
+    const stackYawTarget =
+      stackBackCount > 0 ? (flipMotion > 0.08 ? 0 : sharedYawTarget * 0.16) : 0;
+
+    if (stackGroupRef.current) {
+      stackGroupRef.current.position.z = MathUtils.damp(
+        stackGroupRef.current.position.z,
+        stackBackCount > 0 ? -0.36 - flipMotion * 0.48 : 0,
+        5.2,
+        delta,
+      );
+      stackGroupRef.current.position.y = MathUtils.damp(
+        stackGroupRef.current.position.y,
+        stackBackCount > 0 ? -flipMotion * 0.06 : 0,
+        5.2,
+        delta,
+      );
+      stackGroupRef.current.rotation.y = MathUtils.damp(
+        stackGroupRef.current.rotation.y,
+        stackYawTarget,
+        4.8,
+        delta,
+      );
+    }
+
+    const flipDepthLift = 0.28 + flipMotion * 0.92;
+    const flipVerticalLift = flipMotion * 0.22 + activeLiftProgress * 2.6;
+    activeHoverGroupRef.current.position.z = MathUtils.damp(
+      activeHoverGroupRef.current.position.z,
+      flipDepthLift,
+      5.2,
+      delta,
+    );
+    activeHoverGroupRef.current.position.y = MathUtils.damp(
+      activeHoverGroupRef.current.position.y,
+      flipVerticalLift,
+      5.2,
+      delta,
+    );
+    activeHoverGroupRef.current.rotation.y = MathUtils.damp(
+      activeHoverGroupRef.current.rotation.y,
+      sharedYawTarget,
+      5,
+      delta,
+    );
+
+    const totalYaw = activeHoverGroupRef.current.rotation.y + activeGroupRef.current.rotation.y;
+    const yawTilt = Math.sin(totalYaw);
     const edgeTilt = Math.min(
       1,
-      Math.abs(groupRef.current.rotation.x) * 2.6 + Math.abs(yawTilt) * 1.45 + Math.abs(pointer.x) * 0.35,
+      Math.abs(outerGroupRef.current.rotation.x) * 2.6 + Math.abs(yawTilt) * 1.45 + Math.abs(pointer.x) * 0.35,
     );
     const edgeTiltDirection = new Vector2(
       yawTilt + pointer.x * 0.35,
-      -groupRef.current.rotation.x + pointer.y * 0.12,
+      -outerGroupRef.current.rotation.x + pointer.y * 0.12,
     );
 
     if (showDecorativeEffects && ringRef.current) {
@@ -939,7 +1193,7 @@ function CardRig({
       ringMaterial.opacity = 0.26 + Math.sin(state.clock.elapsedTime * 1.8) * 0.04;
     }
 
-    if (textures) {
+    if (textures && showFrontTreatments) {
       textures.foil.offset.x =
         0.02 + Math.sin(state.clock.elapsedTime * (0.4 + finish.shimmerBoost * 0.22)) * 0.035;
       textures.foil.offset.y =
@@ -959,12 +1213,14 @@ function CardRig({
       );
     }
 
-    shaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-    shaderRef.current.uniforms.uPointer.value.copy(pointer);
-    shaderRef.current.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
-    shaderRef.current.uniforms.uDensity.value = tuning.density;
-    shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
-    shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
+    if (shaderRef.current?.uniforms) {
+      shaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+      shaderRef.current.uniforms.uPointer.value.copy(pointer);
+      shaderRef.current.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
+      shaderRef.current.uniforms.uDensity.value = tuning.density;
+      shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
+      shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
+    }
 
     if (glossShaderRef.current?.uniforms) {
       glossShaderRef.current.uniforms.uPointer.value.copy(pointer);
@@ -977,53 +1233,97 @@ function CardRig({
         material.uniforms.uSugarIntensity.value = sugarIntensity;
       });
 
-    const frontFacing = Math.cos(groupRef.current.rotation.y) >= 0;
+    const frontFacing = Math.cos(totalYaw) >= 0;
 
-    if (edgeRef.current?.uniforms) {
+    if (enableEdgeHighlight && edgeRef.current?.uniforms) {
       edgeRef.current.uniforms.uTime.value = state.clock.elapsedTime;
       edgeRef.current.uniforms.uTilt.value = edgeTilt;
       edgeRef.current.uniforms.uTiltDirection.value.copy(edgeTiltDirection);
       edgeRef.current.uniforms.uTint.value.set(frontFacing ? '#f7fbff' : '#eef4ff');
     }
 
-    if (edgeMeshRef.current) {
+    if (enableEdgeHighlight && edgeMeshRef.current) {
       edgeMeshRef.current.position.z = frontFacing ? faceOffset + 0.0038 : -faceOffset - 0.0038;
       edgeMeshRef.current.rotation.y = frontFacing ? 0 : Math.PI;
     }
+
+    if (impactFlashRef.current && impactGlowRef.current) {
+      if (impactRef.current.active) {
+        impactRef.current.progress = Math.min(
+          impactRef.current.progress + delta / impactRef.current.duration,
+          1,
+        );
+
+        if (impactRef.current.progress >= 1) {
+          impactRef.current.active = false;
+        }
+      }
+
+      const progress = impactRef.current.active ? impactRef.current.progress : 1;
+      const splashProfile = impactSplashRarity ? impactSplashProfiles[impactSplashRarity] : null;
+      const fillFadeStart = splashProfile
+        ? Math.min(splashProfile.delaySpread + splashProfile.burstWindow, 0.82)
+        : 0.28;
+      const fillFadeEnd = Math.min(fillFadeStart + 0.18, 0.96);
+      const fillOpacity =
+        impactRef.current.active
+          ? progress < 0.08
+            ? MathUtils.smoothstep(progress, 0, 0.08)
+            : progress < fillFadeStart
+              ? 1
+              : progress < fillFadeEnd
+                ? 1 - MathUtils.smoothstep(progress, fillFadeStart, fillFadeEnd)
+                : 0
+          : 0;
+
+      impactFlashRef.current.opacity = fillOpacity;
+      impactGlowRef.current.opacity = 0;
+      impactFlashRef.current.color.set(meta.hue);
+      impactGlowRef.current.color.set(meta.hue);
+
+      impactParticleRefs.current.forEach((particleRef, index) => {
+        const config = impactParticleConfigs[index];
+
+        if (!particleRef || !config || !splashProfile || !impactRef.current.active) {
+          if (particleRef) {
+            particleRef.visible = false;
+          }
+          return;
+        }
+
+        const localProgress = MathUtils.clamp(
+          (progress - config.delay) / Math.max(splashProfile.burstWindow, 0.001),
+          0,
+          1,
+        );
+
+        if (localProgress <= 0.001) {
+          particleRef.visible = false;
+          return;
+        }
+
+        const burst = localProgress < 1 ? 1 - MathUtils.smoothstep(localProgress, 0.72, 1) : 0;
+        const travelProgress = 1 - Math.pow(1 - localProgress, 3.2);
+        const radius = MathUtils.lerp(config.radiusStart, config.radiusEnd, travelProgress);
+        const angle = config.angle + config.orbit * travelProgress;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius * 0.58 + config.yLift * travelProgress;
+
+        particleRef.visible = burst > 0.001;
+        particleRef.position.set(x, y, faceOffset + 0.048 + config.depth);
+        particleRef.rotation.z = config.spin * travelProgress;
+        particleRef.scale.setScalar(config.size * (0.14 + burst * 1.28));
+      });
+    }
   });
 
-  if (!textures) {
+  if (!textures && !renderStackOnly) {
     return null;
   }
 
   return (
     <>
-      <ambientLight intensity={0.36} color="#e8eff8" />
-      <hemisphereLight intensity={0.78} color="#f6fbff" groundColor="#151923" />
-      <directionalLight
-        position={[CARD_VIEWER_LIGHTS.key.x, CARD_VIEWER_LIGHTS.key.y, CARD_VIEWER_LIGHTS.key.z]}
-        intensity={2.9}
-        color="#fff1dd"
-      />
-      <directionalLight
-        position={[CARD_VIEWER_LIGHTS.rim.x, CARD_VIEWER_LIGHTS.rim.y, CARD_VIEWER_LIGHTS.rim.z]}
-        intensity={1.05}
-        color="#9ecbff"
-      />
-      <pointLight
-        position={[CARD_VIEWER_LIGHTS.fill.x, CARD_VIEWER_LIGHTS.fill.y, CARD_VIEWER_LIGHTS.fill.z]}
-        intensity={14}
-        distance={18}
-        decay={2}
-        color="#cfe4ff"
-      />
-      <pointLight
-        position={[CARD_VIEWER_LIGHTS.accent.x, CARD_VIEWER_LIGHTS.accent.y, CARD_VIEWER_LIGHTS.accent.z]}
-        intensity={10}
-        distance={16}
-        decay={2}
-        color={meta.accent}
-      />
+      <SharedViewerLighting accentColor={meta.accent} />
 
       {showDecorativeEffects ? (
         <mesh ref={ringRef} position={[0, 0.04, -1.24]}>
@@ -1037,210 +1337,350 @@ function CardRig({
         </mesh>
       ) : null}
 
-      <Float speed={1.35} rotationIntensity={0.06} floatIntensity={0.18}>
-        <group ref={groupRef}>
-          <mesh>
-            <primitive attach="geometry" object={bodyGeometry} />
-            <meshPhysicalMaterial
-              color="#090b0f"
-              metalness={0.22}
-              roughness={0.58}
-              clearcoat={0.8}
-              clearcoatRoughness={0.18}
-              reflectivity={0.18}
-              iridescence={0.02 + finish.shimmerBoost * 0.03}
-              iridescenceIOR={1.08}
-            />
-          </mesh>
+      <Float
+        speed={isStackPreset ? 0 : 1.35}
+        rotationIntensity={isStackPreset ? 0 : 0.06}
+        floatIntensity={isStackPreset ? 0 : 0.18}
+      >
+        <group ref={outerGroupRef}>
+          {stackBackCount > 0 ? (
+            <group ref={stackGroupRef}>
+              {Array.from({ length: stackBackCount }, (_, index) => {
+                const stackIndex = stackBackCount - index;
+                return (
+                  <group
+                    key={`stack-back-${stackIndex}`}
+                    position={[stackIndex * 0.18, -stackIndex * 0.14, -stackIndex * 0.06]}
+                    rotation={[0, 0, stackIndex * 0.01]}
+                  >
+                    <mesh>
+                      <primitive attach="geometry" object={bodyGeometry} />
+                      <meshPhysicalMaterial
+                        color="#090b0f"
+                        metalness={0.16}
+                        roughness={0.74}
+                        clearcoat={0.18}
+                        clearcoatRoughness={0.26}
+                        reflectivity={0.08}
+                        iridescence={0}
+                      />
+                    </mesh>
 
-          <mesh ref={edgeMeshRef} position={[0, 0, faceOffset + 0.0038]} scale={[1.0045, 1.0045, 1]}>
-            <primitive attach="geometry" object={edgeGeometry} />
-            <shaderMaterial
-              ref={edgeRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              toneMapped={false}
-              uniforms={{
-                uTint: { value: new Color('#f7fbff') },
-                uTime: { value: 0 },
-                uTilt: { value: 0 },
-                uTiltDirection: { value: new Vector2(0, 0) },
-              }}
-              vertexShader={edgeHighlightVertexShader}
-              fragmentShader={edgeHighlightFragmentShader}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <meshPhysicalMaterial
-              map={textures.front}
-              metalness={0.08}
-              roughness={0.84}
-              clearcoat={0.1}
-              clearcoatRoughness={0.28}
-              reflectivity={0.07}
-              normalMap={textures.surfaceNormalMap}
-              normalScale={surfaceNormalScale}
-              clearcoatNormalMap={textures.surfaceNormalMap}
-              clearcoatNormalScale={surfaceClearcoatScale}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset + 0.0048]} scale={[1.001, 1.001, 1]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <shaderMaterial
-              ref={glossShaderRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              toneMapped={false}
-              uniforms={{
-                uGlossMap: { value: textures.glossMask },
-                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
-                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
-                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
-                uGlossiness: { value: glossiness },
-                uPointer: { value: new Vector2(0, 0) },
-              }}
-              vertexShader={cardSurfaceVertexShader}
-              fragmentShader={glossFragmentShader}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset + 0.0092]} scale={[1.0018, 1.0018, 1]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <shaderMaterial
-              ref={sugarFinishShaderRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              toneMapped={false}
-              uniforms={{
-                uSugarMap: { value: textures.sugarMask },
-                uSparkleMap: { value: textures.sparkleMask },
-                uPrismMap: { value: textures.prismMask },
-                uLayerWeights: { value: sugarLayerWeights },
-                uSurfaceReliefWeights: { value: sugarReliefWeights },
-                uAccent: { value: new Color(meta.accent) },
-                uHue: { value: new Color(meta.hue) },
-                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
-                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
-                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
-                uSugarIntensity: { value: sugarIntensity },
-                uTime: { value: 0 },
-              }}
-              vertexShader={cardSurfaceVertexShader}
-              fragmentShader={finishTreatmentFragmentShader}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset + 0.0096]} scale={[1.0018, 1.0018, 1]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <shaderMaterial
-              ref={sparkleFinishShaderRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              toneMapped={false}
-              uniforms={{
-                uSugarMap: { value: textures.sugarMask },
-                uSparkleMap: { value: textures.sparkleMask },
-                uPrismMap: { value: textures.prismMask },
-                uLayerWeights: { value: sparkleLayerWeights },
-                uSurfaceReliefWeights: { value: sparkleReliefWeights },
-                uAccent: { value: new Color(meta.accent) },
-                uHue: { value: new Color(meta.hue) },
-                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
-                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
-                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
-                uSugarIntensity: { value: sugarIntensity },
-                uTime: { value: 0 },
-              }}
-              vertexShader={cardSurfaceVertexShader}
-              fragmentShader={finishTreatmentFragmentShader}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset + 0.01]} scale={[1.0018, 1.0018, 1]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <shaderMaterial
-              ref={prismFinishShaderRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              toneMapped={false}
-              uniforms={{
-                uSugarMap: { value: textures.sugarMask },
-                uSparkleMap: { value: textures.sparkleMask },
-                uPrismMap: { value: textures.prismMask },
-                uLayerWeights: { value: prismLayerWeights },
-                uSurfaceReliefWeights: { value: prismReliefWeights },
-                uAccent: { value: new Color(meta.accent) },
-                uHue: { value: new Color(meta.hue) },
-                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
-                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
-                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
-                uSugarIntensity: { value: sugarIntensity },
-                uTime: { value: 0 },
-              }}
-              vertexShader={cardSurfaceVertexShader}
-              fragmentShader={finishTreatmentFragmentShader}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, -faceOffset]} rotation={[0, Math.PI, 0]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <meshPhysicalMaterial
-              map={textures.back}
-              metalness={0.06}
-              roughness={0.94}
-              clearcoat={0}
-              reflectivity={0.06}
-            />
-          </mesh>
-
-          <mesh position={[0, 0, faceOffset + 0.016]}>
-            <primitive attach="geometry" object={faceGeometry} />
-            <shaderMaterial
-              ref={shaderRef}
-              transparent
-              depthWrite={false}
-              blending={AdditiveBlending}
-              uniforms={{
-                uTime: { value: 0 },
-                uMaskMap: { value: textures.foil },
-                uZoneMap: { value: textures.foilZone },
-                uTreatmentMap: { value: textures.holoTreatmentMap },
-                uPrismMap: { value: textures.prismMask },
-                uAccent: { value: new Color(meta.accent) },
-                uHue: { value: new Color(meta.hue) },
-                uKeyLightPos: { value: CARD_VIEWER_LIGHTS.key.clone() },
-                uFillLightPos: { value: CARD_VIEWER_LIGHTS.fill.clone() },
-                uAccentLightPos: { value: CARD_VIEWER_LIGHTS.accent.clone() },
-                uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
-                uDensity: { value: tuning.density },
-                uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
-                uFresnelPower: { value: tuning.fresnelPower },
-                uPointer: { value: new Vector2(0, 0) },
-              }}
-              vertexShader={cardSurfaceVertexShader}
-              fragmentShader={holoFragmentShader}
-            />
-          </mesh>
-
-          {showDecorativeEffects ? (
-            <mesh ref={haloRef} position={[0, 0, -0.18]}>
-              <planeGeometry args={[3.05, 4.4]} />
-              <meshBasicMaterial
-                color={new Color(meta.hue)}
-                transparent
-                opacity={0.08}
-                blending={AdditiveBlending}
-              />
-            </mesh>
+                    <mesh position={[0, 0, faceOffset]}>
+                      <primitive attach="geometry" object={faceGeometry} />
+                      <meshPhysicalMaterial
+                        map={stackBackTexture}
+                        metalness={0.04}
+                        roughness={0.96}
+                        clearcoat={0}
+                        reflectivity={0.04}
+                        color="#ffffff"
+                        side={DoubleSide}
+                      />
+                    </mesh>
+                  </group>
+                );
+              })}
+            </group>
           ) : null}
+
+          <group ref={activeHoverGroupRef}>
+            <group ref={activeGroupRef} visible={canRenderActiveCard}>
+              {canRenderActiveCard && textures ? (
+                <>
+              <mesh>
+                <primitive attach="geometry" object={bodyGeometry} />
+                <meshPhysicalMaterial
+                  color="#090b0f"
+                  metalness={0.22}
+                  roughness={0.58}
+                  clearcoat={0.8}
+                  clearcoatRoughness={0.18}
+                  reflectivity={0.18}
+                  iridescence={0.02 + finish.shimmerBoost * 0.03}
+                  iridescenceIOR={1.08}
+                />
+              </mesh>
+
+              {enableEdgeHighlight ? (
+                <mesh
+                  ref={edgeMeshRef}
+                  position={[0, 0, faceOffset + 0.0038]}
+                  scale={[1.0045, 1.0045, 1]}
+                >
+                  <primitive attach="geometry" object={edgeGeometry} />
+                  <shaderMaterial
+                    ref={edgeRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uTint: { value: new Color('#f7fbff') },
+                      uTime: { value: 0 },
+                      uTilt: { value: 0 },
+                      uTiltDirection: { value: new Vector2(0, 0) },
+                    }}
+                    vertexShader={edgeHighlightVertexShader}
+                    fragmentShader={edgeHighlightFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {showFrontTreatments ? (
+                <>
+                  <mesh position={[0, 0, faceOffset + 0.0204]} scale={[1.004, 1.004, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <meshBasicMaterial
+                      ref={impactGlowRef}
+                      color={new Color(meta.hue)}
+                      transparent
+                      opacity={0}
+                      depthTest={false}
+                      depthWrite={false}
+                      toneMapped={false}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.0212]} scale={[1.001, 1.001, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <meshBasicMaterial
+                      ref={impactFlashRef}
+                      color={new Color(meta.hue)}
+                      transparent
+                      opacity={0}
+                      depthTest={false}
+                      depthWrite={false}
+                      toneMapped={false}
+                    />
+                  </mesh>
+
+                  {impactParticleConfigs.length > 0 ? (
+                    <group position={[0, 0, faceOffset + 0.052]}>
+                      {impactParticleConfigs.map((particle, index) => (
+                        <group
+                          key={`impact-particle-${index}`}
+                          ref={(node) => {
+                            impactParticleRefs.current[index] = node;
+                          }}
+                          visible={false}
+                        >
+                          <mesh rotation={[0, 0, particle.angle]} scale={[particle.stretch, 0.18, 1]}>
+                            <planeGeometry args={[1, 1]} />
+                            <meshBasicMaterial
+                              color={new Color(meta.hue)}
+                              depthTest={false}
+                              depthWrite={false}
+                              toneMapped={false}
+                            />
+                          </mesh>
+
+                          <mesh rotation={[0, 0, particle.angle + Math.PI * 0.25]} scale={[0.32, 0.32, 1]}>
+                            <planeGeometry args={[1, 1]} />
+                            <meshBasicMaterial
+                              color={new Color(meta.hue)}
+                              depthTest={false}
+                              depthWrite={false}
+                              toneMapped={false}
+                            />
+                          </mesh>
+
+                          {particle.secondary ? (
+                            <mesh
+                              rotation={[0, 0, particle.angle + Math.PI * 0.5]}
+                              scale={[particle.stretch * 0.64, 0.12, 1]}
+                            >
+                              <planeGeometry args={[1, 1]} />
+                              <meshBasicMaterial
+                                color={new Color(meta.hue)}
+                                depthTest={false}
+                                depthWrite={false}
+                                toneMapped={false}
+                              />
+                            </mesh>
+                          ) : null}
+                        </group>
+                      ))}
+                    </group>
+                  ) : null}
+
+                  <mesh position={[0, 0, faceOffset]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <meshPhysicalMaterial
+                      map={textures.front}
+                      metalness={0.08}
+                      roughness={0.84}
+                      clearcoat={0.1}
+                      clearcoatRoughness={0.28}
+                      reflectivity={0.07}
+                      normalMap={textures.surfaceNormalMap}
+                      normalScale={surfaceNormalScale}
+                      clearcoatNormalMap={textures.surfaceNormalMap}
+                      clearcoatNormalScale={surfaceClearcoatScale}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.0048]} scale={[1.001, 1.001, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={glossShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uGlossMap: { value: textures.glossMask },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uGlossiness: { value: glossiness },
+                        uPointer: { value: new Vector2(0, 0) },
+                      }}
+                      vertexShader={cardSurfaceVertexShader}
+                      fragmentShader={glossFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.0092]} scale={[1.0018, 1.0018, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={sugarFinishShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uSugarMap: { value: textures.sugarMask },
+                        uSparkleMap: { value: textures.sparkleMask },
+                        uPrismMap: { value: textures.prismMask },
+                        uLayerWeights: { value: sugarLayerWeights },
+                        uSurfaceReliefWeights: { value: sugarReliefWeights },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uSugarIntensity: { value: sugarIntensity },
+                        uTime: { value: 0 },
+                      }}
+                      vertexShader={cardSurfaceVertexShader}
+                      fragmentShader={finishTreatmentFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.0096]} scale={[1.0018, 1.0018, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={sparkleFinishShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uSugarMap: { value: textures.sugarMask },
+                        uSparkleMap: { value: textures.sparkleMask },
+                        uPrismMap: { value: textures.prismMask },
+                        uLayerWeights: { value: sparkleLayerWeights },
+                        uSurfaceReliefWeights: { value: sparkleReliefWeights },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uSugarIntensity: { value: sugarIntensity },
+                        uTime: { value: 0 },
+                      }}
+                      vertexShader={cardSurfaceVertexShader}
+                      fragmentShader={finishTreatmentFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.01]} scale={[1.0018, 1.0018, 1]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={prismFinishShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uSugarMap: { value: textures.sugarMask },
+                        uSparkleMap: { value: textures.sparkleMask },
+                        uPrismMap: { value: textures.prismMask },
+                        uLayerWeights: { value: prismLayerWeights },
+                        uSurfaceReliefWeights: { value: prismReliefWeights },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uSugarIntensity: { value: sugarIntensity },
+                        uTime: { value: 0 },
+                      }}
+                      vertexShader={cardSurfaceVertexShader}
+                      fragmentShader={finishTreatmentFragmentShader}
+                    />
+                  </mesh>
+                </>
+              ) : null}
+
+              <mesh position={[0, 0, -faceOffset]} rotation={[0, Math.PI, 0]}>
+                <primitive attach="geometry" object={faceGeometry} />
+                <meshPhysicalMaterial
+                  map={textures.back}
+                  metalness={0.06}
+                  roughness={0.94}
+                  clearcoat={0}
+                  reflectivity={0.06}
+                />
+              </mesh>
+
+              {showFrontTreatments ? (
+                <mesh position={[0, 0, faceOffset + 0.016]}>
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={shaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    uniforms={{
+                      uTime: { value: 0 },
+                      uMaskMap: { value: textures.foil },
+                      uZoneMap: { value: textures.foilZone },
+                      uTreatmentMap: { value: textures.holoTreatmentMap },
+                      uPrismMap: { value: textures.prismMask },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uDensity: { value: tuning.density },
+                      uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
+                      uFresnelPower: { value: tuning.fresnelPower },
+                      uPointer: { value: new Vector2(0, 0) },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={holoFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {showDecorativeEffects ? (
+                <mesh ref={haloRef} position={[0, 0, -0.18]}>
+                  <planeGeometry args={[3.05, 4.4]} />
+                  <meshBasicMaterial
+                    color={new Color(meta.hue)}
+                    transparent
+                    opacity={0.08}
+                    blending={AdditiveBlending}
+                  />
+                </mesh>
+              ) : null}
+                </>
+              ) : null}
+            </group>
+          </group>
         </group>
       </Float>
 
@@ -1255,9 +1695,7 @@ function CardRig({
       ) : null}
 
       {showPostProcessing ? (
-        <EffectComposer>
-          <Vignette eskil={false} offset={0.24} darkness={0.36} />
-        </EffectComposer>
+        <SharedViewerPostProcessing />
       ) : null}
     </>
   );
@@ -1270,18 +1708,45 @@ export function CardViewerCanvas({
   introKey,
   cameraZ = 7,
   scaleMultiplier = 1,
+  stackBackCount = 0,
+  activeLiftProgress = 0,
   effectsPreset = 'full',
+  renderStackOnly = false,
+  enterFromStackAnimation = false,
+  launchExitProgress = 0,
+  initialSide = 'front',
+  forcedSide = null,
+  interactive = true,
+  shakeMode = 'none',
+  revealImpactRarity = null,
+  revealImpactDurationMs = 0,
+  skipIntroAnimation = false,
+  onUserFlip,
 }: {
   card: OwnedCard;
   introKey: string;
   cameraZ?: number;
   scaleMultiplier?: number;
+  stackBackCount?: number;
+  activeLiftProgress?: number;
   effectsPreset?: ViewerEffectsPreset;
+  renderStackOnly?: boolean;
+  enterFromStackAnimation?: boolean;
+  launchExitProgress?: number;
+  initialSide?: CardSide;
+  forcedSide?: CardSide | null;
+  interactive?: boolean;
+  shakeMode?: ViewerShakeMode;
+  revealImpactRarity?: ViewerImpactRarity | null;
+  revealImpactDurationMs?: number;
+  skipIntroAnimation?: boolean;
+  onUserFlip?: (side: CardSide) => void;
 }) {
+  const resolvedInitialSide = forcedSide ?? initialSide;
   const suppressClickRef = useRef(false);
   const viewerRef = useRef<HTMLDivElement>(null);
-  const flipTargetRef = useRef(0);
-  const sideRef = useRef<CardSide>('front');
+  const flipTargetRef = useRef(resolvedInitialSide === 'back' ? Math.PI : 0);
+  const sideRef = useRef<CardSide>(resolvedInitialSide);
   const dragRef = useRef(initialDrag);
   const dragPreviewRef = useRef(0);
   const mousePressRef = useRef(initialPointerPress);
@@ -1296,10 +1761,17 @@ export function CardViewerCanvas({
     flipTargetRef.current = targetRotation;
   };
 
+  const getNearestSideRotation = (nextSide: CardSide, aroundRotation: number) => {
+    const sideBaseRotation = nextSide === 'back' ? Math.PI : 0;
+    const turns = Math.round((aroundRotation - sideBaseRotation) / (Math.PI * 2));
+    return sideBaseRotation + turns * Math.PI * 2;
+  };
+
   const flipInDragDirection = (deltaX: number) => {
     const nextSide = sideRef.current === 'front' ? 'back' : 'front';
     const rotationStep = deltaX > 0 ? Math.PI : -Math.PI;
     applySide(nextSide, flipTargetRef.current + rotationStep);
+    onUserFlip?.(nextSide);
   };
 
   const resetMousePress = () => {
@@ -1358,8 +1830,16 @@ export function CardViewerCanvas({
     resetDragPointer();
     dragRef.current = initialDrag;
     dragPreviewRef.current = 0;
-    applySide('front');
-  }, [introKey, pointer]);
+    applySide(initialSide);
+  }, [initialSide, introKey, pointer]);
+
+  useEffect(() => {
+    if (!forcedSide) {
+      return;
+    }
+
+    applySide(forcedSide, getNearestSideRotation(forcedSide, flipTargetRef.current));
+  }, [forcedSide]);
 
   const syncPointerFromClient = (clientX: number, clientY: number) => {
     const rect = viewerRef.current?.getBoundingClientRect();
@@ -1476,6 +1956,10 @@ export function CardViewerCanvas({
   }, [pointer]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!interactive) {
+      return;
+    }
+
     event.stopPropagation();
     syncPointer(event);
 
@@ -1499,6 +1983,10 @@ export function CardViewerCanvas({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!interactive) {
+      return;
+    }
+
     syncPointer(event);
 
     if (
@@ -1542,6 +2030,10 @@ export function CardViewerCanvas({
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!interactive) {
+      return;
+    }
+
     syncPointer(event);
 
     if (event.pointerType === 'mouse') {
@@ -1575,6 +2067,10 @@ export function CardViewerCanvas({
   };
 
   const handlePointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!interactive) {
+      return;
+    }
+
     if (event.pointerType === 'mouse') {
       resetMousePress();
 
@@ -1609,20 +2105,32 @@ export function CardViewerCanvas({
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerLeave={() => {
-        if (!dragRef.current.active && !mousePressRef.current.active) {
+        if (interactive && !dragRef.current.active && !mousePressRef.current.active) {
           pointer.set(0, 0);
         }
       }}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ touchAction: 'pan-y' }}
+      style={{ pointerEvents: interactive ? 'auto' : 'none', touchAction: interactive ? 'pan-y' : 'none' }}
     >
-      <Canvas camera={{ position: [0, 0, cameraZ], fov: 30 }} dpr={[1, 2]}>
+      <Canvas
+        camera={{ position: [0, 0, cameraZ], fov: VIEWER_CANVAS_FOV }}
+        dpr={effectsPreset === 'stack' ? 1 : VIEWER_CANVAS_DPR}
+      >
         <MemoCardRig
           card={card}
           introKey={introKey}
           scaleMultiplier={scaleMultiplier}
+          stackBackCount={stackBackCount}
+          activeLiftProgress={activeLiftProgress}
           effectsPreset={effectsPreset}
+          renderStackOnly={renderStackOnly}
+          enterFromStackAnimation={enterFromStackAnimation}
+          launchExitProgress={launchExitProgress}
+          shakeMode={shakeMode}
+          revealImpactRarity={revealImpactRarity}
+          revealImpactDurationMs={revealImpactDurationMs}
+          skipIntroAnimation={skipIntroAnimation}
           flipTargetRef={flipTargetRef}
           dragPreviewRef={dragPreviewRef}
           pointer={pointer}

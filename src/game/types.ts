@@ -229,9 +229,21 @@ export interface PublicPlayerProfile {
   avatarUrl: string | null;
 }
 
-export interface PublicShowcaseResult {
+export type CollectionFilter = 'all' | 'duplicates';
+
+export interface CollectionSummary {
+  totalCards: number;
+  duplicateCards: number;
+}
+
+export interface PublicShowcaseResult extends CollectionSummary {
   user: PublicPlayerProfile;
-  game: RemoteGameState;
+  cards: OwnedCard[];
+  filter: CollectionFilter;
+  offset: number;
+  limit: number;
+  filteredTotal: number;
+  hasMore: boolean;
 }
 
 export interface CardProposal {
@@ -330,6 +342,10 @@ export interface AdminUserRecord {
   totalCards: number;
   uniqueCards: number;
   packsOpened: number;
+  packsOpenedToday: number;
+  extraPacksGrantedToday: number;
+  remainingPacksToday: number;
+  dailyPackLimit: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,17 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { CollectionCardTile } from '../components/CollectionCardTile';
-import {
-  ApiError,
-  EMPTY_REMOTE_GAME_STATE,
-  fetchPublicShowcase,
-  requestProposalStart,
-} from '../game/api';
+import { ApiError, fetchPublicShowcase, requestProposalStart } from '../game/api';
 import { useGame } from '../game/GameContext';
-import type { OwnedCard, PublicPlayerProfile, RemoteGameState } from '../game/types';
+import type { CollectionFilter, OwnedCard, PublicPlayerProfile } from '../game/types';
 
-type CollectionTab = 'all' | 'duplicates';
+type CollectionTab = CollectionFilter;
+
+const COLLECTION_PAGE_SIZE = 16;
 
 function buildCollectionPath(playerSlug: string, searchParams?: URLSearchParams) {
   const query = searchParams?.toString();
@@ -22,18 +19,25 @@ export function CollectionPage() {
   const navigate = useNavigate();
   const { playerSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { authConfigured, authenticated, login, state, user } = useGame();
+  const { authConfigured, authenticated, login, user } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
   const [proposalBusy, setProposalBusy] = useState(false);
-  const [publicOwner, setPublicOwner] = useState<PublicPlayerProfile | null>(null);
-  const [publicState, setPublicState] = useState<RemoteGameState | null>(null);
-  const [publicStatus, setPublicStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+  const [collectionOwner, setCollectionOwner] = useState<PublicPlayerProfile | null>(null);
+  const [loadedCards, setLoadedCards] = useState<OwnedCard[]>([]);
+  const [collectionStatus, setCollectionStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle',
   );
-  const [publicError, setPublicError] = useState<string | null>(null);
+  const [collectionError, setCollectionError] = useState<string | null>(null);
+  const [totalCards, setTotalCards] = useState(0);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [hasMoreCards, setHasMoreCards] = useState(false);
+  const [loadingMoreCards, setLoadingMoreCards] = useState(false);
   const requestedCardInstanceId = searchParams.get('card');
   const activePlayerSlug = playerSlug?.trim() ?? '';
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const requestKeyRef = useRef(0);
 
   const isCurrentUsersSlug =
     Boolean(authenticated && user && activePlayerSlug) && activePlayerSlug === user?.shareSlug;
@@ -46,10 +50,133 @@ export function CollectionPage() {
           shareSlug: user.shareSlug,
           avatarUrl: user.avatarUrl,
         }
-      : publicOwner;
-  const collectionState = isOwnCollection ? state : publicState ?? EMPTY_REMOTE_GAME_STATE;
-  const collectionReady =
-    !activePlayerSlug || isOwnCollection || publicStatus === 'ready' || publicStatus === 'error';
+      : collectionOwner;
+  const collectionReady = collectionStatus === 'ready' || collectionStatus === 'error';
+
+  const resetCollectionState = useCallback(() => {
+    setCollectionOwner(null);
+    setLoadedCards([]);
+    setCollectionStatus('idle');
+    setCollectionError(null);
+    setTotalCards(0);
+    setDuplicateCount(0);
+    setFilteredTotal(0);
+    setHasMoreCards(false);
+    setLoadingMoreCards(false);
+  }, []);
+
+  const applyCollectionResponse = useCallback(
+    (
+      response: Awaited<ReturnType<typeof fetchPublicShowcase>>,
+      mode: 'replace' | 'append',
+    ) => {
+      setCollectionOwner(response.user);
+      setTotalCards(response.totalCards);
+      setDuplicateCount(response.duplicateCards);
+      setFilteredTotal(response.filteredTotal);
+      setHasMoreCards(response.hasMore);
+      setCollectionStatus('ready');
+      setCollectionError(null);
+
+      if (mode === 'replace') {
+        setLoadedCards(response.cards);
+        return;
+      }
+
+      setLoadedCards((currentCards) => {
+        const seen = new Set(currentCards.map((card) => card.instanceId));
+        const nextCards = response.cards.filter((card) => !seen.has(card.instanceId));
+        return [...currentCards, ...nextCards];
+      });
+    },
+    [],
+  );
+
+  const loadCollectionPage = useCallback(
+    async ({
+      offset,
+      mode,
+      requestKey = requestKeyRef.current,
+    }: {
+      offset: number;
+      mode: 'replace' | 'append';
+      requestKey?: number;
+    }) => {
+      if (!activePlayerSlug) {
+        return false;
+      }
+
+      try {
+        const response = await fetchPublicShowcase(activePlayerSlug, {
+          filter: activeTab,
+          limit: COLLECTION_PAGE_SIZE,
+          offset,
+        });
+
+        if (requestKeyRef.current !== requestKey) {
+          return false;
+        }
+
+        applyCollectionResponse(response, mode);
+        return true;
+      } catch (requestError) {
+        if (requestKeyRef.current !== requestKey) {
+          return false;
+        }
+
+        const message =
+          requestError instanceof ApiError
+            ? requestError.message
+            : requestError instanceof Error
+              ? requestError.message
+              : mode === 'append'
+                ? 'Не удалось догрузить карточки витрины.'
+                : 'Не удалось загрузить витрину игрока.';
+
+        if (mode === 'replace') {
+          resetCollectionState();
+          setCollectionStatus('error');
+        }
+
+        setCollectionError(message);
+        return false;
+      }
+    },
+    [activePlayerSlug, activeTab, applyCollectionResponse, resetCollectionState],
+  );
+
+  const loadMoreCardsPage = useCallback(async () => {
+    if (
+      !activePlayerSlug ||
+      collectionStatus !== 'ready' ||
+      loadingMoreCards ||
+      !hasMoreCards
+    ) {
+      return false;
+    }
+
+    const currentRequestKey = requestKeyRef.current;
+    setLoadingMoreCards(true);
+
+    try {
+      return await loadCollectionPage({
+        offset: loadedCards.length,
+        mode: 'append',
+        requestKey: currentRequestKey,
+      });
+    } finally {
+      if (requestKeyRef.current === currentRequestKey) {
+        setLoadingMoreCards(false);
+      }
+    }
+  }, [
+    activePlayerSlug,
+    collectionStatus,
+    hasMoreCards,
+    loadCollectionPage,
+    loadedCards.length,
+    loadingMoreCards,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -72,97 +199,67 @@ export function CollectionPage() {
 
   useEffect(() => {
     if (!activePlayerSlug) {
-      setPublicOwner(null);
-      setPublicState(null);
-      setPublicStatus('idle');
-      setPublicError(null);
+      requestKeyRef.current += 1;
+      resetCollectionState();
       return;
     }
 
-    if (authenticated && user && activePlayerSlug === user.shareSlug) {
-      setPublicOwner(null);
-      setPublicState(null);
-      setPublicStatus('ready');
-      setPublicError(null);
-      return;
-    }
+    const currentRequestKey = requestKeyRef.current + 1;
+    requestKeyRef.current = currentRequestKey;
+    setCollectionStatus('loading');
+    setCollectionError(null);
+    setLoadedCards([]);
+    setFilteredTotal(0);
+    setHasMoreCards(false);
+    setLoadingMoreCards(false);
 
-    let cancelled = false;
-    setPublicStatus('loading');
-    setPublicError(null);
-
-    void fetchPublicShowcase(activePlayerSlug)
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-
-        setPublicOwner(response.user);
-        setPublicState(response.game);
-        setPublicStatus('ready');
-      })
-      .catch((requestError) => {
-        if (cancelled) {
-          return;
-        }
-
-        const message =
-          requestError instanceof ApiError
-            ? requestError.message
-            : requestError instanceof Error
-              ? requestError.message
-              : 'Не удалось загрузить витрину игрока.';
-
-        setPublicOwner(null);
-        setPublicState(null);
-        setPublicStatus('error');
-        setPublicError(message);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activePlayerSlug, authenticated, user]);
+    void loadCollectionPage({
+      offset: 0,
+      mode: 'replace',
+      requestKey: currentRequestKey,
+    });
+  }, [activePlayerSlug, activeTab, loadCollectionPage, resetCollectionState]);
 
   useEffect(() => {
-    if (!authenticated || !user || !publicOwner || !activePlayerSlug) {
+    if (!loadMoreRef.current || !hasMoreCards || collectionStatus !== 'ready') {
       return;
     }
 
-    if (publicOwner.id !== user.id || activePlayerSlug === user.shareSlug) {
-      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMoreCardsPage();
+        }
+      },
+      {
+        rootMargin: '360px 0px',
+      },
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [collectionStatus, hasMoreCards, loadMoreCardsPage, loadedCards.length]);
+
+  useEffect(() => {
+    if (requestedCardInstanceId && activeTab !== 'all') {
+      setActiveTab('all');
     }
-
-    navigate(buildCollectionPath(user.shareSlug, searchParams), { replace: true });
-  }, [activePlayerSlug, authenticated, navigate, publicOwner, searchParams, user]);
-
-  const duplicateCards = useMemo(() => {
-    const seen = new Set<string>();
-
-    return collectionState.collection.filter((card) => {
-      if (seen.has(card.id)) {
-        return true;
-      }
-
-      seen.add(card.id);
-      return false;
-    });
-  }, [collectionState.collection]);
-
-  const visibleCards = activeTab === 'duplicates' ? duplicateCards : collectionState.collection;
-  const duplicateCount = duplicateCards.length;
+  }, [activeTab, requestedCardInstanceId]);
 
   useEffect(() => {
     if (!requestedCardInstanceId || !collectionReady) {
       return;
     }
 
-    const matchingCard = collectionState.collection.find(
-      (card) => card.instanceId === requestedCardInstanceId,
-    );
+    const matchingCard = loadedCards.find((card) => card.instanceId === requestedCardInstanceId);
 
     if (matchingCard) {
       setActiveCard(matchingCard);
+      return;
+    }
+
+    if (hasMoreCards && !loadingMoreCards && activeTab === 'all') {
+      void loadMoreCardsPage();
       return;
     }
 
@@ -170,8 +267,12 @@ export function CollectionPage() {
     nextSearchParams.delete('card');
     setSearchParams(nextSearchParams, { replace: true });
   }, [
+    activeTab,
     collectionReady,
-    collectionState.collection,
+    hasMoreCards,
+    loadedCards,
+    loadMoreCardsPage,
+    loadingMoreCards,
     requestedCardInstanceId,
     searchParams,
     setSearchParams,
@@ -201,6 +302,7 @@ export function CollectionPage() {
     : authenticated
       ? 'Коллекция пока пустая'
       : 'Открой ссылку игрока или войди в аккаунт';
+  const filteredCount = activeTab === 'duplicates' ? duplicateCount : filteredTotal;
 
   return (
     <div className="page page--collection page--collection-minimal">
@@ -212,7 +314,7 @@ export function CollectionPage() {
 
         <div className="collection-breakdown collection-breakdown--minimal">
           <div>
-            <strong>{collectionState.collection.length}</strong>
+            <strong>{totalCards}</strong>
             <span>Всего карточек</span>
           </div>
           <div>
@@ -267,29 +369,42 @@ export function CollectionPage() {
         ) : null}
       </section>
 
-      {isRemoteCollection && publicStatus === 'loading' ? (
+      {Boolean(activePlayerSlug) && collectionStatus === 'loading' ? (
         <section className="collection-empty">
           <strong>Загружаем витрину...</strong>
         </section>
-      ) : isRemoteCollection && publicStatus === 'error' ? (
+      ) : Boolean(activePlayerSlug) && collectionStatus === 'error' ? (
         <section className="collection-empty">
-          <strong>{publicError ?? 'Не удалось загрузить витрину игрока'}</strong>
+          <strong>{collectionError ?? 'Не удалось загрузить витрину игрока'}</strong>
         </section>
-      ) : collectionState.collection.length === 0 ? (
+      ) : totalCards === 0 ? (
         <section className="collection-empty">
           <strong>{emptyTitle}</strong>
         </section>
-      ) : visibleCards.length > 0 ? (
+      ) : filteredCount > 0 ? (
         <section className="collection-grid collection-grid--minimal">
-          {visibleCards.map((card) => (
+          {loadedCards.map((card) => (
             <CollectionCardTile key={card.instanceId} card={card} onOpen={setActiveCard} />
           ))}
+          {hasMoreCards ? (
+            <div
+              ref={loadMoreRef}
+              aria-hidden="true"
+              className="collection-grid__sentinel"
+            />
+          ) : null}
         </section>
       ) : (
         <section className="collection-empty collection-empty--compact">
           <strong>Повторок пока нет</strong>
         </section>
       )}
+
+      {loadingMoreCards && loadedCards.length > 0 ? (
+        <section className="collection-pagination">
+          <strong>Подгружаем еще карточки...</strong>
+        </section>
+      ) : null}
 
       {activeCard ? (
         <div className="collection-overlay" onClick={closeViewer} role="presentation">

@@ -15,6 +15,7 @@ import {
   type ApiErrorResponse,
   type AuthUser,
   type CardEffectLayer,
+  type CollectionFilter,
   type CardTreatmentEffect,
   type ProposalEditorPayload,
   type Rarity,
@@ -53,6 +54,33 @@ function normalizeNickname(value: unknown): string | null {
   }
 
   return trimmed;
+}
+
+function normalizeCollectionFilter(value: unknown): CollectionFilter {
+  return value === 'duplicates' ? 'duplicates' : 'all';
+}
+
+function normalizeCollectionOffset(value: unknown): number {
+  if (typeof value !== 'string') {
+    return 0;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeCollectionLimit(value: unknown): number {
+  if (typeof value !== 'string') {
+    return 16;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 16;
+  }
+
+  return Math.min(parsed, 16);
 }
 
 function isAdminUser(user: AuthUser | null): boolean {
@@ -472,7 +500,15 @@ export async function buildApp() {
 
   app.get('/api/collections/:playerSlug', async (request, reply) => {
     const playerSlug = (request.params as { playerSlug?: string }).playerSlug?.trim() ?? '';
-    const showcase = store.getPublicPlayerShowcase(playerSlug);
+    const query =
+      typeof request.query === 'object' && request.query !== null
+        ? (request.query as Record<string, unknown>)
+        : {};
+    const showcase = store.getPublicPlayerShowcase(playerSlug, {
+      filter: normalizeCollectionFilter(query.filter),
+      offset: normalizeCollectionOffset(query.offset),
+      limit: normalizeCollectionLimit(query.limit),
+    });
 
     if (!showcase) {
       reply.code(404).send(apiError('COLLECTION_NOT_FOUND', 'Витрина игрока не найдена.'));
@@ -903,6 +939,33 @@ export async function buildApp() {
     reply.send({
       users: store.listAdminUsers(),
     });
+  });
+
+  app.post('/api/admin/users/:userId/unlock-pack', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      return;
+    }
+
+    const adminUser = store.grantAdminPackUnlockByUserId(
+      (request.params as { userId: string }).userId,
+    );
+
+    if (!adminUser) {
+      reply.code(404).send(apiError('USER_NOT_FOUND', 'Пользователь не найден.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ user: adminUser });
   });
 
   app.post('/api/admin/card-proposals/:proposalId/approve', async (request, reply) => {

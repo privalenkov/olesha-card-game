@@ -1725,6 +1725,66 @@ export function usePackTexture(face: 'front' | 'back') {
   return useMemo(() => setupTexture(drawPackFace(face)), [face]);
 }
 
+function drawStackCardBack() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1536;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return canvas;
+  }
+
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, '#0f1722');
+  gradient.addColorStop(0.5, '#182635');
+  gradient.addColorStop(1, '#090d14');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const glow = ctx.createRadialGradient(
+    canvas.width * 0.5,
+    canvas.height * 0.28,
+    40,
+    canvas.width * 0.5,
+    canvas.height * 0.38,
+    canvas.width * 0.44,
+  );
+  glow.addColorStop(0, 'rgba(141,229,255,0.22)');
+  glow.addColorStop(0.4, 'rgba(141,229,255,0.08)');
+  glow.addColorStop(1, 'rgba(141,229,255,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 28; index += 1) {
+    ctx.strokeStyle = index % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(141,229,255,0.05)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 160 + index * 26, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  drawRoundedPanel(ctx, 68, 68, canvas.width - 136, canvas.height - 136, 64);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.font = '700 110px Space Grotesk, sans-serif';
+  ctx.fillText('OG', canvas.width / 2, 658);
+  ctx.font = '700 42px Sora, sans-serif';
+  ctx.fillStyle = 'rgba(141,229,255,0.78)';
+  ctx.fillText('OLESHA COLLECTOR SERIES', canvas.width / 2, 738);
+
+  addNoise(ctx, canvas.width, canvas.height, 2200);
+  return canvas;
+}
+
+export function useStackCardBackTexture() {
+  return useMemo(() => setupTexture(drawStackCardBack()), []);
+}
+
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);

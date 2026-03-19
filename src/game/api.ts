@@ -3,8 +3,10 @@ import type {
   FetchProposalResult,
   NotificationListResult,
   AdminProposalOverridePayload,
+  AdminUserRecord,
   AdminUserListResult,
   ApiErrorResponse,
+  CollectionFilter,
   OpenPackResult,
   ProposalEditorPayload,
   ProposalListResult,
@@ -76,8 +78,32 @@ export function fetchSessionState() {
   return apiRequest<SessionState>('/api/me');
 }
 
-export function fetchPublicShowcase(playerSlug: string) {
-  return apiRequest<PublicShowcaseResult>(`/api/collections/${encodeURIComponent(playerSlug)}`);
+export function fetchPublicShowcase(
+  playerSlug: string,
+  options?: {
+    offset?: number;
+    limit?: number;
+    filter?: CollectionFilter;
+  },
+) {
+  const searchParams = new URLSearchParams();
+
+  if (typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0) {
+    searchParams.set('offset', String(Math.floor(options.offset)));
+  }
+
+  if (typeof options?.limit === 'number' && Number.isFinite(options.limit) && options.limit > 0) {
+    searchParams.set('limit', String(Math.floor(options.limit)));
+  }
+
+  if (options?.filter) {
+    searchParams.set('filter', options.filter);
+  }
+
+  const query = searchParams.toString();
+  return apiRequest<PublicShowcaseResult>(
+    `/api/collections/${encodeURIComponent(playerSlug)}${query ? `?${query}` : ''}`,
+  );
 }
 
 export function fetchNotifications() {
@@ -154,6 +180,13 @@ export function fetchAdminCatalog() {
 
 export function fetchAdminUsers() {
   return apiRequest<AdminUserListResult>('/api/admin/users');
+}
+
+export function unlockAdminUserPack(userId: string) {
+  return apiRequest<{ user: AdminUserRecord }>(`/api/admin/users/${userId}/unlock-pack`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 }
 
 export function approveProposal(proposalId: string) {

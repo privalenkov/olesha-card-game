@@ -24,6 +24,7 @@ import type {
   CardProposal,
   CardDefinition,
   CardFinish,
+  CollectionFilter,
   CardTreatmentEffect,
   CardVisuals,
   OpenPackResult,
@@ -146,6 +147,8 @@ interface AdminUserRow {
   total_cards: number;
   unique_cards: number;
   packs_opened: number;
+  packs_opened_today: number;
+  extra_packs_granted_today: number;
 }
 
 const LEGACY_VISUAL_EFFECT_PATTERN = 'none';
@@ -863,7 +866,10 @@ function toAdminCatalogCard(
   };
 }
 
-function toAdminUserRecord(row: AdminUserRow): AdminUserRecord {
+function toAdminUserRecord(row: AdminUserRow, dailyPackLimit: number): AdminUserRecord {
+  const packsOpenedToday = row.packs_opened_today ?? 0;
+  const extraPacksGrantedToday = row.extra_packs_granted_today ?? 0;
+
   return {
     id: row.id,
     googleSub: row.google_sub,
@@ -873,6 +879,10 @@ function toAdminUserRecord(row: AdminUserRow): AdminUserRecord {
     totalCards: row.total_cards,
     uniqueCards: row.unique_cards,
     packsOpened: row.packs_opened,
+    packsOpenedToday,
+    extraPacksGrantedToday,
+    remainingPacksToday: Math.max(dailyPackLimit + extraPacksGrantedToday - packsOpenedToday, 0),
+    dailyPackLimit,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1052,8 +1062,15 @@ export function createGameStore(config: ServerConfig) {
       user_id text not null references users(id) on delete cascade,
       pack_number integer not null,
       opened_at text not null,
+      day_key text not null
+    );
+
+    create table if not exists admin_pack_unlocks (
+      user_id text not null references users(id) on delete cascade,
       day_key text not null,
-      unique(user_id, day_key)
+      granted_count integer not null default 0,
+      updated_at text not null,
+      primary key (user_id, day_key)
     );
 
     create table if not exists owned_cards (
@@ -1068,10 +1085,46 @@ export function createGameStore(config: ServerConfig) {
 
     create index if not exists idx_sessions_expires_at on sessions(expires_at);
     create index if not exists idx_pack_open_events_user_id on pack_open_events(user_id, opened_at desc);
+    create index if not exists idx_admin_pack_unlocks_user_id
+    on admin_pack_unlocks(user_id, day_key desc);
     create index if not exists idx_owned_cards_user_id on owned_cards(user_id, acquired_at desc);
     create index if not exists idx_user_notifications_unread
     on user_notifications(user_id, read_at, created_at desc);
   `);
+
+  const packOpenEventsTableSql = db
+    .prepare(
+      `
+        select sql
+        from sqlite_master
+        where type = 'table' and name = 'pack_open_events'
+      `,
+    )
+    .get() as { sql: string } | undefined;
+  const requiresPackOpenEventsMigration = packOpenEventsTableSql?.sql?.includes(
+    'unique(user_id, day_key)',
+  );
+
+  if (requiresPackOpenEventsMigration) {
+    db.exec(`
+      begin immediate;
+      alter table pack_open_events rename to pack_open_events_legacy;
+      create table pack_open_events (
+        id text primary key,
+        user_id text not null references users(id) on delete cascade,
+        pack_number integer not null,
+        opened_at text not null,
+        day_key text not null
+      );
+      insert into pack_open_events (id, user_id, pack_number, opened_at, day_key)
+      select id, user_id, pack_number, opened_at, day_key
+      from pack_open_events_legacy;
+      drop table pack_open_events_legacy;
+      create index if not exists idx_pack_open_events_user_id
+      on pack_open_events(user_id, opened_at desc);
+      commit;
+    `);
+  }
 
   const userColumns = db.prepare(`pragma table_info(users)`).all() as Array<{ name: string }>;
   const hasNicknameColumn = userColumns.some((column) => column.name === 'nickname');
@@ -1297,9 +1350,20 @@ export function createGameStore(config: ServerConfig) {
   `);
 
   const deleteSessionByHash = db.prepare('delete from sessions where token_hash = ?');
+  const selectUserId = db.prepare(`
+    select id
+    from users
+    where id = ?
+    limit 1
+  `);
   const countPacksOpenedToday = db.prepare(`
     select count(*) as count
     from pack_open_events
+    where user_id = ? and day_key = ?
+  `);
+  const selectAdminPackUnlockCount = db.prepare(`
+    select coalesce(granted_count, 0) as count
+    from admin_pack_unlocks
     where user_id = ? and day_key = ?
   `);
   const selectMaxPackNumber = db.prepare(`
@@ -1334,6 +1398,98 @@ export function createGameStore(config: ServerConfig) {
     join card_definitions on card_definitions.id = owned_cards.card_definition_id
     where owned_cards.user_id = ?
     order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+  `);
+  const selectCollectionCount = db.prepare(`
+    select count(*) as count
+    from owned_cards
+    where user_id = ?
+  `);
+  const selectDuplicateCollectionCount = db.prepare(`
+    select count(*) as count
+    from (
+      select
+        row_number() over (
+          partition by owned_cards.card_definition_id
+          order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+        ) as duplicate_rank
+      from owned_cards
+      where owned_cards.user_id = ?
+    ) ranked_owned_cards
+    where duplicate_rank > 1
+  `);
+  const selectCollectionPage = db.prepare(`
+    select
+      card_definitions.id,
+      card_definitions.title,
+      card_definitions.url_image,
+      card_definitions.rarity,
+      card_definitions.description,
+      card_definitions.power,
+      card_definitions.cringe,
+      card_definitions.fame,
+      card_definitions.rarity_score,
+      card_definitions.humor,
+      card_definitions.default_finish,
+      card_definitions.creator_name,
+      card_definitions.visual_frame_style,
+      card_definitions.visual_accent_color,
+      card_definitions.visual_pattern_json,
+      card_definitions.effect_layers_json,
+      owned_cards.instance_id,
+      owned_cards.acquired_at,
+      owned_cards.pack_number,
+      owned_cards.finish,
+      owned_cards.holographic_seed
+    from owned_cards
+    join card_definitions on card_definitions.id = owned_cards.card_definition_id
+    where owned_cards.user_id = ?
+    order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+    limit ? offset ?
+  `);
+  const selectDuplicateCollectionPage = db.prepare(`
+    with ranked_owned_cards as (
+      select
+        owned_cards.instance_id,
+        owned_cards.user_id,
+        owned_cards.card_definition_id,
+        owned_cards.acquired_at,
+        owned_cards.pack_number,
+        owned_cards.finish,
+        owned_cards.holographic_seed,
+        row_number() over (
+          partition by owned_cards.card_definition_id
+          order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+        ) as duplicate_rank
+      from owned_cards
+      where owned_cards.user_id = ?
+    )
+    select
+      card_definitions.id,
+      card_definitions.title,
+      card_definitions.url_image,
+      card_definitions.rarity,
+      card_definitions.description,
+      card_definitions.power,
+      card_definitions.cringe,
+      card_definitions.fame,
+      card_definitions.rarity_score,
+      card_definitions.humor,
+      card_definitions.default_finish,
+      card_definitions.creator_name,
+      card_definitions.visual_frame_style,
+      card_definitions.visual_accent_color,
+      card_definitions.visual_pattern_json,
+      card_definitions.effect_layers_json,
+      ranked_owned_cards.instance_id,
+      ranked_owned_cards.acquired_at,
+      ranked_owned_cards.pack_number,
+      ranked_owned_cards.finish,
+      ranked_owned_cards.holographic_seed
+    from ranked_owned_cards
+    join card_definitions on card_definitions.id = ranked_owned_cards.card_definition_id
+    where ranked_owned_cards.duplicate_rank > 1
+    order by ranked_owned_cards.acquired_at desc, ranked_owned_cards.instance_id desc
+    limit ? offset ?
   `);
   const selectPublicUserBySlug = db.prepare(`
     select
@@ -1432,6 +1588,19 @@ export function createGameStore(config: ServerConfig) {
         from pack_open_events
         where pack_open_events.user_id = users.id
       ) as packs_opened
+      ,
+      (
+        select count(*)
+        from pack_open_events
+        where pack_open_events.user_id = users.id
+          and pack_open_events.day_key = @day_key
+      ) as packs_opened_today,
+      (
+        select coalesce(admin_pack_unlocks.granted_count, 0)
+        from admin_pack_unlocks
+        where admin_pack_unlocks.user_id = users.id
+          and admin_pack_unlocks.day_key = @day_key
+      ) as extra_packs_granted_today
     from users
     order by total_cards desc, datetime(users.created_at) asc, users.id asc
   `);
@@ -1510,6 +1679,13 @@ export function createGameStore(config: ServerConfig) {
     insert into pack_open_events (id, user_id, pack_number, opened_at, day_key)
     values (?, ?, ?, ?, ?)
   `);
+  const upsertAdminPackUnlock = db.prepare(`
+    insert into admin_pack_unlocks (user_id, day_key, granted_count, updated_at)
+    values (?, ?, 1, ?)
+    on conflict(user_id, day_key) do update set
+      granted_count = admin_pack_unlocks.granted_count + 1,
+      updated_at = excluded.updated_at
+  `);
   const insertOwnedCard = db.prepare(`
     insert into owned_cards (
       instance_id, user_id, card_definition_id, acquired_at, pack_number, finish, holographic_seed
@@ -1520,32 +1696,93 @@ export function createGameStore(config: ServerConfig) {
     const dayKey = getDayKey(now, config.appTimeZone);
     const packsOpenedToday =
       (countPacksOpenedToday.get(userId, dayKey) as { count: number }).count ?? 0;
+    const extraPacksGrantedToday =
+      (selectAdminPackUnlockCount.get(userId, dayKey) as { count: number } | undefined)?.count ?? 0;
     const totalPacksOpened =
       (selectMaxPackNumber.get(userId) as { packNumber: number }).packNumber ?? 0;
     const collection = selectCollection.all(userId).map((row) => toOwnedCard(row as OwnedCardRow));
+    const effectiveDailyPackLimit = config.dailyPackLimit + extraPacksGrantedToday;
 
     return {
       collection,
       packsOpenedToday,
       totalPacksOpened,
-      remainingPacks: Math.max(config.dailyPackLimit - packsOpenedToday, 0),
-      dailyPackLimit: config.dailyPackLimit,
+      remainingPacks: Math.max(effectiveDailyPackLimit - packsOpenedToday, 0),
+      dailyPackLimit: effectiveDailyPackLimit,
       nextPackResetAt: getNextResetAt(now, config.appTimeZone).toISOString(),
       serverNow: now.toISOString(),
     };
   }
 
-  function getPublicPlayerShowcase(slug: string, now = new Date()) {
+  function findPublicUserBySlug(slug: string) {
     const trimmedSlug = slug.trim();
 
     if (!trimmedSlug) {
       return null;
     }
 
-    const user = selectPublicUserBySlug.get(
+    return (selectPublicUserBySlug.get(
       normalizeNicknameKey(trimmedSlug),
       trimmedSlug,
-    ) as UserRow | undefined;
+    ) as UserRow | undefined) ?? null;
+  }
+
+  function getCollectionSummary(userId: string) {
+    const totalCards =
+      (selectCollectionCount.get(userId) as { count: number } | undefined)?.count ?? 0;
+    const duplicateCards =
+      (selectDuplicateCollectionCount.get(userId) as { count: number } | undefined)?.count ?? 0;
+
+    return {
+      totalCards,
+      duplicateCards,
+    };
+  }
+
+  function getPlayerCollectionPage(
+    userId: string,
+    {
+      filter = 'all',
+      limit = 16,
+      offset = 0,
+    }: {
+      filter?: CollectionFilter;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
+    const summary = getCollectionSummary(userId);
+    const rows =
+      filter === 'duplicates'
+        ? selectDuplicateCollectionPage.all(userId, limit, offset)
+        : selectCollectionPage.all(userId, limit, offset);
+    const cards = rows.map((row) => toOwnedCard(row as OwnedCardRow));
+    const filteredTotal = filter === 'duplicates' ? summary.duplicateCards : summary.totalCards;
+
+    return {
+      ...summary,
+      cards,
+      filter,
+      offset,
+      limit,
+      filteredTotal,
+      hasMore: offset + cards.length < filteredTotal,
+    };
+  }
+
+  function getPublicPlayerShowcase(
+    slug: string,
+    {
+      filter = 'all',
+      limit = 16,
+      offset = 0,
+    }: {
+      filter?: CollectionFilter;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
+    const user = findPublicUserBySlug(slug);
 
     if (!user) {
       return null;
@@ -1553,7 +1790,11 @@ export function createGameStore(config: ServerConfig) {
 
     return {
       user: toPublicPlayerProfile(user),
-      game: getPlayerSnapshot(user.id, now),
+      ...getPlayerCollectionPage(user.id, {
+        filter,
+        limit,
+        offset,
+      }),
     };
   }
 
@@ -1797,8 +2038,43 @@ export function createGameStore(config: ServerConfig) {
     };
   }
 
-  function listAdminUsers(): AdminUserRecord[] {
-    return selectAdminUsers.all().map((row) => toAdminUserRecord(row as AdminUserRow));
+  function listAdminUsers(now = new Date()): AdminUserRecord[] {
+    const dayKey = getDayKey(now, config.appTimeZone);
+    return selectAdminUsers
+      .all({ day_key: dayKey })
+      .map((row) => toAdminUserRecord(row as AdminUserRow, config.dailyPackLimit));
+  }
+
+  function grantAdminPackUnlockByUserId(userId: string, now = new Date()): AdminUserRecord | null {
+    const existingUser = selectUserId.get(userId) as { id: string } | undefined;
+
+    if (!existingUser) {
+      return null;
+    }
+
+    const dayKey = getDayKey(now, config.appTimeZone);
+    const nowIso = now.toISOString();
+
+    db.exec('BEGIN IMMEDIATE');
+
+    try {
+      upsertAdminPackUnlock.run(userId, dayKey, nowIso);
+      createNotification(
+        userId,
+        'info',
+        'Пак снова доступен',
+        'Администратор разблокировал для вас еще одно открытие пака на сегодня.',
+        null,
+        null,
+        nowIso,
+      );
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    return listAdminUsers(now).find((user) => user.id === userId) ?? null;
   }
 
   function approveProposalById(proposalId: string): CardProposal | null {
@@ -1935,8 +2211,11 @@ export function createGameStore(config: ServerConfig) {
     try {
       const openedToday =
         (countPacksOpenedToday.get(userId, dayKey) as { count: number }).count ?? 0;
+      const extraPacksGrantedToday =
+        (selectAdminPackUnlockCount.get(userId, dayKey) as { count: number } | undefined)?.count ?? 0;
+      const effectiveDailyPackLimit = config.dailyPackLimit + extraPacksGrantedToday;
 
-      if (openedToday >= config.dailyPackLimit) {
+      if (openedToday >= effectiveDailyPackLimit) {
         throw new PackLimitReachedError(nextPackResetAt);
       }
 
@@ -1997,6 +2276,7 @@ export function createGameStore(config: ServerConfig) {
     listAdminProposals,
     listAdminCards,
     listAdminUsers,
+    grantAdminPackUnlockByUserId,
     listUnreadNotifications,
     markNotificationReadById,
     approveProposalById,

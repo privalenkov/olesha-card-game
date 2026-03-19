@@ -271,6 +271,417 @@ button {
   letter-spacing: 0.02em;
 }
 
+.pack-ritual .home-stage__canvas {
+  position: relative;
+  overflow: hidden;
+}
+
+.pack-ritual__backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(127, 226, 255, 0.18), transparent 22%),
+    radial-gradient(circle at 20% 78%, rgba(255, 154, 103, 0.12), transparent 18%),
+    radial-gradient(circle at 80% 76%, rgba(255, 227, 133, 0.08), transparent 20%),
+    linear-gradient(180deg, #04070d 0%, #09111d 38%, #05080f 100%);
+}
+
+.pack-ritual__hero,
+.pack-ritual__carousel-shell,
+.pack-ritual__reveal-shell {
+  position: relative;
+  z-index: 1;
+  width: min(1480px, calc(100% - 64px));
+  height: 100%;
+  margin: 0 auto;
+}
+
+.pack-ritual__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(320px, 420px);
+  gap: 48px;
+  align-items: center;
+}
+
+.pack-ritual__copy {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pack-ritual__copy--centered,
+.pack-ritual__tear-copy {
+  max-width: 880px;
+  margin: 0 auto;
+  align-items: center;
+  text-align: center;
+}
+
+.pack-ritual__copy h1,
+.pack-ritual__tear-copy h1 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(2.8rem, 5vw, 5.6rem);
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+}
+
+.pack-ritual__copy p,
+.pack-ritual__tear-copy p {
+  margin: 0;
+  color: var(--copy-muted);
+  font-size: clamp(1rem, 1.4vw, 1.12rem);
+  max-width: 66ch;
+}
+
+.pack-ritual__hero-pack {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+}
+
+.pack-ritual__hero-pack--3d {
+  width: min(100%, 560px);
+}
+
+.pack-ritual__open {
+  min-width: 220px;
+}
+
+.pack-ritual__fullscreen-stage {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.pack-ritual__scene-shell {
+  position: relative;
+  width: 100%;
+  height: min(74vh, 820px);
+  min-height: 520px;
+  border-radius: 30px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 50% 28%, rgba(143, 228, 255, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(7, 12, 19, 0.76), rgba(4, 7, 12, 0.92));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 32px 80px rgba(0, 0, 0, 0.34);
+}
+
+.pack-ritual__scene-shell--fullscreen {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pack-ritual__hero-actions {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.pack-ritual__scene-hint {
+  color: var(--copy-faint);
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+.pack-ritual__cta {
+  position: absolute;
+  left: 50%;
+  bottom: 110px;
+  z-index: 4;
+  transform: translateX(-50%);
+}
+
+.pack-ritual__carousel-shell {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0 0 138px;
+}
+
+.pack-carousel {
+  position: relative;
+  min-height: 100vh;
+}
+
+.pack-carousel--3d {
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  touch-action: none;
+  cursor: grab;
+}
+
+.pack-carousel--3d.is-dragging {
+  cursor: grabbing;
+}
+
+.pack-ritual__reveal-shell {
+  padding-top: 58px;
+  padding-bottom: 110px;
+}
+
+.pack-ritual__tear-copy {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+
+.pack-ritual__dock-stage {
+  position: absolute;
+  inset: 0;
+  border-radius: 34px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(118, 225, 255, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(4, 7, 12, 0.82), rgba(3, 5, 8, 0.96));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 28px 72px rgba(0, 0, 0, 0.28);
+}
+
+.pack-ritual__dock-stage .pack-scene {
+  height: 100%;
+}
+
+.pack-ritual__tear-trace {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pack-ritual__tear-trace line {
+  stroke: #fdf2cf;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(255, 246, 212, 0.66));
+}
+
+.pack-reveal {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.pack-reveal--rising {
+  animation: pack-reveal-rise 920ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pack-reveal--opening {
+  animation: pack-reveal-from-pack 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pack-ritual__stack-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
+
+.pack-ritual__stack-layer--opening {
+  pointer-events: none;
+}
+
+.pack-reveal__stack {
+  position: relative;
+  width: min(38vw, 520px);
+  min-width: 300px;
+  aspect-ratio: 344 / 482;
+  --pack-stack-card-scale: 0.7;
+}
+
+.pack-reveal__active {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: 30px;
+}
+
+.pack-reveal__card-shell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(100% * var(--pack-stack-card-scale));
+  height: calc(100% * var(--pack-stack-card-scale));
+  max-width: 100%;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.pack-reveal__active {
+  overflow: visible;
+  isolation: isolate;
+}
+
+.pack-reveal__active--charging.pack-reveal__active--common,
+.pack-reveal__active--charging.pack-reveal__active--uncommon {
+  animation: pack-card-bob 420ms ease-in-out infinite alternate;
+}
+
+.pack-reveal__active--launching {
+  pointer-events: none;
+}
+
+.pack-reveal__active--launching-out {
+  z-index: 3;
+}
+
+.pack-reveal__active--stack-anchor {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pack-reveal__active--from-stack {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.pack-reveal__viewer {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pack-reveal__viewer .card-viewer {
+  width: 100%;
+  height: 100%;
+}
+
+.pack-reveal__active--impact {
+  animation: pack-card-impact 180ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.pack-reveal__hud {
+  position: absolute;
+  top: 50%;
+  right: 32px;
+  transform: translateY(-50%);
+  width: min(320px, 28vw);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  z-index: 3;
+}
+
+.pack-reveal__counter {
+  width: 100%;
+  padding: 18px 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 18, 0.76);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pack-reveal__counter strong {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(1.8rem, 2vw, 2.4rem);
+  letter-spacing: -0.04em;
+}
+
+.pack-reveal__counter span {
+  color: var(--copy-faint);
+  line-height: 1.45;
+}
+
+.pack-reveal__rarity-pill {
+  backdrop-filter: blur(12px);
+}
+
+@keyframes pack-reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(180px) scale(0.88);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pack-reveal-from-pack {
+  from {
+    opacity: 0.32;
+    transform: translateY(clamp(360px, 38vh, 560px)) scale(1);
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pack-card-bob {
+  from {
+    transform: translateY(-2px);
+  }
+
+  to {
+    transform: translateY(8px);
+  }
+}
+
+@keyframes pack-card-impact {
+  0% {
+    transform: scale(0.95);
+  }
+
+  40% {
+    transform: scale(1.015);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
 .hero-panel,
 .collection-hero {
   display: grid;
@@ -865,6 +1276,12 @@ button {
   justify-content: start;
 }
 
+.collection-grid__sentinel {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 1px;
+}
+
 .collection-card--preview {
   min-height: 0;
   aspect-ratio: 344 / 482;
@@ -925,6 +1342,22 @@ button {
 
 .collection-empty--compact {
   min-height: 220px;
+}
+
+.collection-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 24px;
+}
+
+.collection-pagination strong {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(8, 11, 18, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--copy-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .collection-empty strong {
@@ -1555,6 +1988,11 @@ button {
   gap: 10px 18px;
 }
 
+.admin-user-card__actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .collection-overlay {
   position: fixed;
   inset: 0;
@@ -1601,6 +2039,40 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .pack-ritual__hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    padding-top: 54px;
+    padding-bottom: 150px;
+  }
+
+  .pack-ritual__copy {
+    align-items: center;
+  }
+
+  .pack-ritual__carousel-shell,
+  .pack-ritual__reveal-shell {
+    width: min(100%, calc(100% - 40px));
+  }
+
+  .pack-ritual__carousel-shell {
+    width: 100%;
+  }
+
+  .pack-ritual__scene-shell {
+    height: min(68vh, 760px);
+  }
+
+  .pack-ritual__cta {
+    bottom: 104px;
+  }
+
+  .pack-reveal__hud {
+    right: 24px;
+    width: min(300px, 32vw);
+  }
+
   .hero-panel__copy h1,
   .collection-hero__copy h1 {
     max-width: 12ch;
@@ -1633,6 +2105,63 @@ button {
   .hero-panel,
   .collection-hero {
     padding: 22px;
+  }
+
+  .pack-ritual__hero,
+  .pack-ritual__carousel-shell,
+  .pack-ritual__reveal-shell {
+    width: calc(100% - 32px);
+  }
+
+  .pack-ritual__hero {
+    padding-top: 34px;
+    padding-bottom: 150px;
+  }
+
+  .pack-ritual__copy h1,
+  .pack-ritual__tear-copy h1 {
+    font-size: clamp(2.4rem, 8vw, 4.2rem);
+  }
+
+  .pack-carousel {
+    min-height: 560px;
+  }
+
+  .pack-carousel--3d {
+    min-height: 100vh;
+    height: 100vh;
+  }
+
+  .pack-ritual__scene-shell {
+    min-height: 460px;
+    height: min(62vh, 620px);
+  }
+
+  .pack-ritual__scene-shell--fullscreen {
+    min-height: 100vh;
+    height: 100vh;
+  }
+
+  .pack-ritual__dock-stage {
+    border-radius: 28px;
+  }
+
+  .pack-reveal__stack {
+    width: min(64vw, 420px);
+  }
+
+  .pack-reveal__hud {
+    top: auto;
+    right: auto;
+    left: 50%;
+    bottom: 114px;
+    transform: translateX(-50%);
+    width: min(420px, calc(100% - 16px));
+    align-items: center;
+  }
+
+  .pack-reveal__counter {
+    text-align: center;
   }
 
   .hero-metrics,
@@ -1729,6 +2258,40 @@ button {
 }
 
 @media (max-width: 720px) {
+  .pack-ritual__hero {
+    padding-bottom: 172px;
+  }
+
+  .pack-carousel {
+    min-height: 500px;
+  }
+
+  .pack-carousel__controls {
+    bottom: 96px;
+    width: calc(100% - 28px);
+  }
+
+  .pack-carousel__swipe-hint {
+    text-align: center;
+  }
+
+  .pack-ritual__scene-shell {
+    min-height: 420px;
+    height: min(56vh, 560px);
+  }
+
+  .pack-ritual__cta {
+    bottom: 98px;
+  }
+
+  .pack-reveal__stack {
+    width: min(78vw, 360px);
+  }
+
+  .pack-reveal__hud {
+    bottom: 104px;
+  }
+
   .creator-preview {
     height: min(68vh, 640px);
     min-height: 460px;

@@ -8,6 +8,7 @@ import {
   fetchAdminCatalog,
   fetchAdminProposals,
   fetchAdminUsers,
+  unlockAdminUserPack,
 } from '../game/api';
 import {
   buildPreviewCardFromDefinition,
@@ -124,7 +125,15 @@ function AdminCatalogRow({
   );
 }
 
-function AdminUserRow({ user }: { user: AdminUserRecord }) {
+function AdminUserRow({
+  user,
+  busy,
+  onUnlock,
+}: {
+  user: AdminUserRecord;
+  busy: boolean;
+  onUnlock: () => void;
+}) {
   return (
     <article className="admin-user-card">
       <div className="admin-user-card__head">
@@ -137,7 +146,22 @@ function AdminUserRow({ user }: { user: AdminUserRecord }) {
         <span>Всего карточек: {user.totalCards}</span>
         <span>Уникальных: {user.uniqueCards}</span>
         <span>Открыто паков: {user.packsOpened}</span>
+        <span>
+          Сегодня открыто: {user.packsOpenedToday} / {user.dailyPackLimit}
+        </span>
+        <span>Разблокировок на сегодня: {user.extraPacksGrantedToday}</span>
+        <span>Можно открыть сейчас: {user.remainingPacksToday}</span>
         <span>Обновлен: {new Date(user.updatedAt).toLocaleString()}</span>
+      </div>
+      <div className="admin-user-card__actions">
+        <button
+          className="action-button action-button--solid"
+          disabled={busy}
+          onClick={onUnlock}
+          type="button"
+        >
+          {busy ? 'Разблокируем...' : 'Разблокировать пак'}
+        </button>
       </div>
     </article>
   );
@@ -385,7 +409,31 @@ export function AdminProposalsPage() {
       {tab === 'users' ? (
         <div className="admin-users">
           {users.length > 0 ? (
-            users.map((user) => <AdminUserRow key={user.id} user={user} />)
+            users.map((user) => (
+              <AdminUserRow
+                key={user.id}
+                busy={busyId === `unlock-pack:${user.id}`}
+                onUnlock={async () => {
+                  setBusyId(`unlock-pack:${user.id}`);
+
+                  try {
+                    await unlockAdminUserPack(user.id);
+                    const usersResponse = await fetchAdminUsers();
+                    setUsers(usersResponse.users);
+                    setError(null);
+                  } catch (unlockError) {
+                    setError(
+                      unlockError instanceof Error
+                        ? unlockError.message
+                        : 'Не удалось разблокировать пак пользователю.',
+                    );
+                  } finally {
+                    setBusyId(null);
+                  }
+                }}
+                user={user}
+              />
+            ))
           ) : (
             <div className="creator-empty empty-state">
               <strong>Пользователей пока нет</strong>
