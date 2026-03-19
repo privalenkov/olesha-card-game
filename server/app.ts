@@ -41,9 +41,13 @@ function normalizeNickname(value: unknown): string | null {
     return null;
   }
 
-  const trimmed = value.trim().replace(/\s+/gu, ' ');
+  const trimmed = value.trim();
 
   if (trimmed.length < 2 || trimmed.length > 32) {
+    return null;
+  }
+
+  if (!/^[A-Za-z0-9_-]+$/u.test(trimmed)) {
     return null;
   }
 
@@ -465,6 +469,19 @@ export async function buildApp() {
     return readSessionState(store, request);
   });
 
+  app.get('/api/collections/:playerSlug', async (request, reply) => {
+    const playerSlug = (request.params as { playerSlug?: string }).playerSlug?.trim() ?? '';
+    const showcase = store.getPublicPlayerShowcase(playerSlug);
+
+    if (!showcase) {
+      reply.code(404).send(apiError('COLLECTION_NOT_FOUND', 'Витрина игрока не найдена.'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send(showcase);
+  });
+
   app.get('/api/notifications', async (request, reply) => {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
@@ -622,7 +639,12 @@ export async function buildApp() {
     if (!nickname) {
       reply
         .code(400)
-        .send(apiError('INVALID_NICKNAME', 'Ник должен быть длиной от 2 до 32 символов.'));
+        .send(
+          apiError(
+            'INVALID_NICKNAME',
+            'Ник должен быть длиной от 2 до 32 символов и содержать только английские буквы, цифры, дефис или нижнее подчеркивание.',
+          ),
+        );
       return;
     }
 

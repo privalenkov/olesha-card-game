@@ -19,6 +19,7 @@ import type {
   OpenPackResult,
   OwnedCard,
   ProposalEditorPayload,
+  PublicPlayerProfile,
   Rarity,
   RemoteGameState,
 } from '../src/game/types.js';
@@ -64,14 +65,15 @@ interface SessionRow {
   id: string;
   email: string;
   name: string;
+  shareSlug: string;
   avatarUrl: string | null;
   googleSub: string;
 }
 
 interface UserRow {
   id: string;
-  email: string;
   name: string;
+  shareSlug: string;
   avatarUrl: string | null;
 }
 
@@ -139,13 +141,203 @@ interface AdminUserRow {
 const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
 const LEGACY_VISUAL_EFFECT_PATTERN = 'none';
 const LEGACY_VISUAL_EFFECT_PLACEMENT = 'frame';
+const MAX_NICKNAME_LENGTH = 32;
+const DEFAULT_NICKNAME_PREFIX = 'Collector';
+const DEFAULT_NICKNAME_SHORT_ID_LENGTH = 8;
+
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  А: 'A',
+  а: 'a',
+  Б: 'B',
+  б: 'b',
+  В: 'V',
+  в: 'v',
+  Г: 'G',
+  г: 'g',
+  Д: 'D',
+  д: 'd',
+  Е: 'E',
+  е: 'e',
+  Ё: 'Yo',
+  ё: 'yo',
+  Ж: 'Zh',
+  ж: 'zh',
+  З: 'Z',
+  з: 'z',
+  И: 'I',
+  и: 'i',
+  Й: 'Y',
+  й: 'y',
+  К: 'K',
+  к: 'k',
+  Л: 'L',
+  л: 'l',
+  М: 'M',
+  м: 'm',
+  Н: 'N',
+  н: 'n',
+  О: 'O',
+  о: 'o',
+  П: 'P',
+  п: 'p',
+  Р: 'R',
+  р: 'r',
+  С: 'S',
+  с: 's',
+  Т: 'T',
+  т: 't',
+  У: 'U',
+  у: 'u',
+  Ф: 'F',
+  ф: 'f',
+  Х: 'Kh',
+  х: 'kh',
+  Ц: 'Ts',
+  ц: 'ts',
+  Ч: 'Ch',
+  ч: 'ch',
+  Ш: 'Sh',
+  ш: 'sh',
+  Щ: 'Sch',
+  щ: 'sch',
+  Ъ: '',
+  ъ: '',
+  Ы: 'Y',
+  ы: 'y',
+  Ь: '',
+  ь: '',
+  Э: 'E',
+  э: 'e',
+  Ю: 'Yu',
+  ю: 'yu',
+  Я: 'Ya',
+  я: 'ya',
+  Є: 'Ye',
+  є: 'ye',
+  І: 'I',
+  і: 'i',
+  Ї: 'Yi',
+  ї: 'yi',
+  Ґ: 'G',
+  ґ: 'g',
+  Ў: 'U',
+  ў: 'u',
+};
 
 function isUniqueConstraintError(error: unknown): error is Error & { code?: string } {
   return error instanceof Error && 'code' in error && (error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE';
 }
 
 function normalizeNicknameKey(nickname: string): string {
-  return nickname.trim().replace(/\s+/gu, ' ').normalize('NFKC').toLocaleLowerCase();
+  return nickname.trim().normalize('NFKC').toLocaleLowerCase();
+}
+
+function shortUserId(userId: string): string {
+  const compact = userId.replace(/[^A-Za-z0-9]/gu, '');
+  return (compact || 'user').slice(0, DEFAULT_NICKNAME_SHORT_ID_LENGTH);
+}
+
+function trimNicknameLength(value: string): string {
+  return value.slice(0, MAX_NICKNAME_LENGTH).replace(/[-_]+$/gu, '');
+}
+
+function buildDefaultNickname(userId: string): string {
+  return trimNicknameLength(`${DEFAULT_NICKNAME_PREFIX}-${shortUserId(userId)}`);
+}
+
+function transliterateNicknameSource(value: string): string {
+  const decomposed = value.normalize('NFKD').replace(/\p{Mark}+/gu, '');
+  let result = '';
+
+  for (const character of decomposed) {
+    if (character in CYRILLIC_TO_LATIN) {
+      result += CYRILLIC_TO_LATIN[character];
+      continue;
+    }
+
+    if (/[A-Za-z0-9]/u.test(character)) {
+      result += character;
+      continue;
+    }
+
+    if (character === '-' || character === '_') {
+      result += character;
+      continue;
+    }
+
+    if (/[\s./\\,:;|+()[\]{}]+/u.test(character)) {
+      result += '-';
+    }
+  }
+
+  return trimNicknameLength(
+    result
+      .replace(/-{2,}/gu, '-')
+      .replace(/_{2,}/gu, '_')
+      .replace(/(?:-|_){2,}/gu, '-')
+      .replace(/^[-_]+|[-_]+$/gu, ''),
+  );
+}
+
+function buildAutoNickname(
+  source: string | null | undefined,
+  userId: string,
+  usedNicknames?: Set<string>,
+): string {
+  let candidate = transliterateNicknameSource(source ?? '');
+
+  if (candidate.length < 2) {
+    candidate = buildDefaultNickname(userId);
+  }
+
+  let normalized = normalizeNicknameKey(candidate);
+
+  if (!normalized) {
+    candidate = buildDefaultNickname(userId);
+    normalized = normalizeNicknameKey(candidate);
+  }
+
+  if (!usedNicknames || !usedNicknames.has(normalized)) {
+    usedNicknames?.add(normalized);
+    return candidate;
+  }
+
+  const suffix = `-${shortUserId(userId)}`;
+  const baseMaxLength = Math.max(MAX_NICKNAME_LENGTH - suffix.length, 2);
+  let uniqueBase = candidate.slice(0, baseMaxLength).replace(/[-_]+$/gu, '');
+
+  if (uniqueBase.length < 2) {
+    uniqueBase = DEFAULT_NICKNAME_PREFIX.slice(0, baseMaxLength).replace(/[-_]+$/gu, '');
+  }
+
+  candidate = trimNicknameLength(`${uniqueBase}${suffix}`);
+  normalized = normalizeNicknameKey(candidate);
+
+  if (!usedNicknames.has(normalized)) {
+    usedNicknames.add(normalized);
+    return candidate;
+  }
+
+  let counter = 2;
+
+  while (counter < 10_000) {
+    const counterSuffix = `${suffix}-${counter}`;
+    const counterBaseMaxLength = Math.max(MAX_NICKNAME_LENGTH - counterSuffix.length, 2);
+    const counterBase =
+      uniqueBase.slice(0, counterBaseMaxLength).replace(/[-_]+$/gu, '') ||
+      DEFAULT_NICKNAME_PREFIX.slice(0, counterBaseMaxLength);
+    candidate = trimNicknameLength(`${counterBase}${counterSuffix}`);
+    normalized = normalizeNicknameKey(candidate);
+
+    if (!usedNicknames.has(normalized)) {
+      usedNicknames.add(normalized);
+      return candidate;
+    }
+
+    counter += 1;
+  }
+
+  throw new Error(`Failed to generate unique nickname for user ${userId}`);
 }
 
 function normalizeCardImageUrl(url: string): string {
@@ -701,6 +893,15 @@ function toAdminUserRecord(row: AdminUserRow): AdminUserRecord {
   };
 }
 
+function toPublicPlayerProfile(row: UserRow): PublicPlayerProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    shareSlug: row.shareSlug,
+    avatarUrl: row.avatarUrl,
+  };
+}
+
 function rollPackFromCatalog(catalog: CardDefinition[], packNumber: number, timestamp: string) {
   const byRarity = catalog.reduce<Record<Rarity, CardDefinition[]>>(
     (acc, card) => {
@@ -893,43 +1094,34 @@ export function createGameStore(config: ServerConfig) {
     db.exec('alter table users add column nickname_normalized text');
   }
 
-  const existingNicknames = db
+  const existingUsers = db
     .prepare(
       `
-        select id, nickname
+        select id, name, nickname
         from users
-        where nickname is not null and trim(nickname) <> ''
         order by datetime(created_at) asc, id asc
       `,
     )
-    .all() as Array<{ id: string; nickname: string }>;
-  const updateNormalizedNickname = db.prepare(`
+    .all() as Array<{ id: string; name: string; nickname: string | null }>;
+  const updateNicknameMigrationStatement = db.prepare(`
     update users
     set nickname = ?, nickname_normalized = ?
     where id = ?
   `);
-  const normalizeExistingNicknames = db.transaction(() => {
+  const migrateExistingNicknames = db.transaction(() => {
     const seen = new Set<string>();
 
-    for (const row of existingNicknames) {
-      const normalized = normalizeNicknameKey(row.nickname);
-
-      if (!normalized) {
-        updateNormalizedNickname.run(null, null, row.id);
-        continue;
-      }
-
-      if (seen.has(normalized)) {
-        updateNormalizedNickname.run(null, null, row.id);
-        continue;
-      }
-
-      seen.add(normalized);
-      updateNormalizedNickname.run(row.nickname.trim().replace(/\s+/gu, ' '), normalized, row.id);
+    for (const row of existingUsers) {
+      const nextNickname = buildAutoNickname(row.nickname ?? row.name, row.id, seen);
+      updateNicknameMigrationStatement.run(
+        nextNickname,
+        normalizeNicknameKey(nextNickname),
+        row.id,
+      );
     }
   });
 
-  normalizeExistingNicknames();
+  migrateExistingNicknames();
   db.exec('drop index if exists idx_users_nickname_unique');
   db.exec(`
     create unique index if not exists idx_users_nickname_normalized_unique
@@ -1050,13 +1242,29 @@ export function createGameStore(config: ServerConfig) {
     insert into users (
       id, google_sub, email, name, nickname, nickname_normalized, avatar_url, created_at, updated_at
     )
-    values (@id, @google_sub, @email, @name, null, null, @avatar_url, @created_at, @updated_at)
+    values (
+      @id,
+      @google_sub,
+      @email,
+      @name,
+      @nickname,
+      @nickname_normalized,
+      @avatar_url,
+      @created_at,
+      @updated_at
+    )
     on conflict(google_sub) do update set
       email = excluded.email,
       name = excluded.name,
       avatar_url = excluded.avatar_url,
       updated_at = excluded.updated_at
-    returning id, email, google_sub as googleSub, coalesce(nickname, name) as name, avatar_url as avatarUrl
+    returning
+      id,
+      email,
+      google_sub as googleSub,
+      coalesce(nickname, name) as name,
+      coalesce(nickname, id) as shareSlug,
+      avatar_url as avatarUrl
   `);
 
   const insertSession = db.prepare(`
@@ -1070,6 +1278,7 @@ export function createGameStore(config: ServerConfig) {
       users.email,
       users.google_sub as googleSub,
       coalesce(users.nickname, users.name) as name,
+      coalesce(users.nickname, users.id) as shareSlug,
       users.avatar_url as avatarUrl
     from sessions
     join users on users.id = sessions.user_id
@@ -1079,7 +1288,19 @@ export function createGameStore(config: ServerConfig) {
     update users
     set nickname = ?, nickname_normalized = ?, updated_at = ?
     where id = ?
-    returning id, email, google_sub as googleSub, coalesce(nickname, name) as name, avatar_url as avatarUrl
+    returning
+      id,
+      email,
+      google_sub as googleSub,
+      coalesce(nickname, name) as name,
+      coalesce(nickname, id) as shareSlug,
+      avatar_url as avatarUrl
+  `);
+  const selectUserByNicknameNormalized = db.prepare(`
+    select id
+    from users
+    where nickname_normalized = ?
+    limit 1
   `);
 
   const deleteSessionByHash = db.prepare('delete from sessions where token_hash = ?');
@@ -1120,6 +1341,16 @@ export function createGameStore(config: ServerConfig) {
     join card_definitions on card_definitions.id = owned_cards.card_definition_id
     where owned_cards.user_id = ?
     order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+  `);
+  const selectPublicUserBySlug = db.prepare(`
+    select
+      id,
+      coalesce(nickname, name) as name,
+      coalesce(nickname, id) as shareSlug,
+      avatar_url as avatarUrl
+    from users
+    where nickname_normalized = ?
+      or (nickname_normalized is null and id = ?)
   `);
   const selectActiveCatalog = db.prepare(`
     select
@@ -1311,13 +1542,48 @@ export function createGameStore(config: ServerConfig) {
     };
   }
 
+  function getPublicPlayerShowcase(slug: string, now = new Date()) {
+    const trimmedSlug = slug.trim();
+
+    if (!trimmedSlug) {
+      return null;
+    }
+
+    const user = selectPublicUserBySlug.get(
+      normalizeNicknameKey(trimmedSlug),
+      trimmedSlug,
+    ) as UserRow | undefined;
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      user: toPublicPlayerProfile(user),
+      game: getPlayerSnapshot(user.id, now),
+    };
+  }
+
   function upsertUserFromGoogle(profile: GoogleProfile): AuthUser {
     const now = new Date().toISOString();
+    const userId = randomUUID();
+    let nickname = buildDefaultNickname(userId);
+    let normalizedNickname = normalizeNicknameKey(nickname);
+    let counter = 2;
+
+    while (selectUserByNicknameNormalized.get(normalizedNickname)) {
+      nickname = trimNicknameLength(`${buildDefaultNickname(userId)}-${counter}`);
+      normalizedNickname = normalizeNicknameKey(nickname);
+      counter += 1;
+    }
+
     return upsertGoogleUser.get({
-      id: randomUUID(),
+      id: userId,
       google_sub: profile.sub,
       email: profile.email,
       name: profile.name,
+      nickname,
+      nickname_normalized: normalizedNickname,
       avatar_url: profile.avatarUrl,
       created_at: now,
       updated_at: now,
@@ -1325,7 +1591,7 @@ export function createGameStore(config: ServerConfig) {
   }
 
   function updateNickname(userId: string, nickname: string): AuthUser {
-    const trimmedNickname = nickname.trim().replace(/\s+/gu, ' ');
+    const trimmedNickname = nickname.trim();
     const normalizedNickname = normalizeNicknameKey(trimmedNickname);
 
     try {
@@ -1715,6 +1981,7 @@ export function createGameStore(config: ServerConfig) {
     getUserFromSessionToken,
     deleteSession,
     getPlayerSnapshot,
+    getPublicPlayerShowcase,
     openPackForUser,
     updateNickname,
     startCardProposal,

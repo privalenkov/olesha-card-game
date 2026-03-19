@@ -8,6 +8,7 @@ import type {
   OpenPackResult,
   ProposalEditorPayload,
   ProposalListResult,
+  PublicShowcaseResult,
   RemoteGameState,
   SessionState,
   StartProposalResult,
@@ -73,6 +74,10 @@ async function apiRequest<T>(input: RequestInfo, init?: RequestInit): Promise<T>
 
 export function fetchSessionState() {
   return apiRequest<SessionState>('/api/me');
+}
+
+export function fetchPublicShowcase(playerSlug: string) {
+  return apiRequest<PublicShowcaseResult>(`/api/collections/${encodeURIComponent(playerSlug)}`);
 }
 
 export function fetchNotifications() {

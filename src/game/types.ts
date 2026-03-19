@@ -172,6 +172,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  shareSlug: string;
   avatarUrl: string | null;
   googleSub?: string;
 }
@@ -211,6 +212,18 @@ export interface OpenPackResult {
 
 export interface UpdateNicknameResult {
   user: AuthUser;
+}
+
+export interface PublicPlayerProfile {
+  id: string;
+  name: string;
+  shareSlug: string;
+  avatarUrl: string | null;
+}
+
+export interface PublicShowcaseResult {
+  user: PublicPlayerProfile;
+  game: RemoteGameState;
 }
 
 export interface CardProposal {

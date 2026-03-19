@@ -1,4 +1,4 @@
-import { HashRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { GameProvider } from './game/GameContext';
 import { useGame } from './game/GameContext';
 import { CardCreatorPage } from './pages/CardCreatorPage';
@@ -110,7 +110,10 @@ function AppShell() {
               <button
                 className="topbar__auth-button"
                 onClick={async () => {
-                  const nextName = window.prompt('Введите новый ник', user.name);
+                  const nextName = window.prompt(
+                    'Введите новый ник (латиница, цифры, "_" или "-")',
+                    user.name,
+                  );
 
                   if (nextName === null) {
                     return;
@@ -146,6 +149,7 @@ function AppShell() {
         <Routes>
           <Route index element={<HomePage />} />
           <Route path="/collection" element={<CollectionPage />} />
+          <Route path="/collection/:playerSlug" element={<CollectionPage />} />
           <Route path="/creator/:proposalId" element={<CardCreatorPage />} />
           <Route path="/admin/proposals" element={<AdminProposalsPage />} />
         </Routes>
@@ -157,9 +161,9 @@ function AppShell() {
 export default function App() {
   return (
     <GameProvider>
-      <HashRouter>
+      <BrowserRouter>
         <AppShell />
-      </HashRouter>
+      </BrowserRouter>
     </GameProvider>
   );
 }

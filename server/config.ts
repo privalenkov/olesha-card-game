@@ -98,7 +98,7 @@ export const serverConfig = {
   host,
   appBaseUrl,
   frontendBaseUrl,
-  frontendRedirectUrl: `${frontendBaseUrl.origin}/#/`,
+  frontendRedirectUrl: `${frontendBaseUrl.origin}/`,
   googleCallbackUrl,
   googleClientId,
   googleClientSecret,
