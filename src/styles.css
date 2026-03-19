@@ -966,6 +966,33 @@ button {
   gap: 12px;
 }
 
+.creator-rarity-balance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.creator-rarity-balance__card {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--rarity-color) 28%, rgba(255, 255, 255, 0.08));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--rarity-color) 10%, rgba(255, 255, 255, 0.03)), rgba(255, 255, 255, 0.03)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.creator-rarity-balance__card strong {
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--rarity-color);
+}
+
+.creator-rarity-balance__card span {
+  color: var(--copy-faint);
+}
+
 .creator-layout {
   display: grid;
   grid-template-columns: minmax(360px, 0.95fr) minmax(340px, 520px);
@@ -1640,6 +1667,12 @@ button {
   .creator-layout,
   .proposal-card {
     grid-template-columns: 1fr;
+  }
+
+  .creator-header,
+  .admin-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .creator-preview {

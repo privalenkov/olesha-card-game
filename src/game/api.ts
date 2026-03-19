@@ -1,10 +1,10 @@
 import type {
   AdminCatalogResult,
+  FetchProposalResult,
   NotificationListResult,
   AdminProposalOverridePayload,
   AdminUserListResult,
   ApiErrorResponse,
-  CardProposal,
   OpenPackResult,
   ProposalEditorPayload,
   ProposalListResult,
@@ -120,7 +120,7 @@ export function requestProposalStart() {
 }
 
 export function fetchProposal(proposalId: string) {
-  return apiRequest<{ proposal: CardProposal }>(`/api/card-proposals/${proposalId}`);
+  return apiRequest<FetchProposalResult>(`/api/card-proposals/${proposalId}`);
 }
 
 export function saveProposal(proposalId: string, payload: ProposalEditorPayload) {

@@ -255,6 +255,19 @@ export interface CardProposal {
   rejectionReason: string | null;
 }
 
+export interface RarityBalanceEntry {
+  rarity: Rarity;
+  catalogCount: number;
+  catalogShare: number;
+  targetCatalogShare: number;
+  proposalChance: number;
+}
+
+export interface RarityBalanceSnapshot {
+  totalCatalogCards: number;
+  entries: RarityBalanceEntry[];
+}
+
 export interface ProposalEditorPayload {
   title: string;
   description: string;
@@ -271,6 +284,12 @@ export interface AdminProposalOverridePayload {
 
 export interface StartProposalResult {
   proposal: CardProposal;
+  rarityBalance: RarityBalanceSnapshot;
+}
+
+export interface FetchProposalResult {
+  proposal: CardProposal;
+  rarityBalance: RarityBalanceSnapshot;
 }
 
 export interface UpdateProposalResult {
@@ -299,6 +318,7 @@ export interface AdminCatalogCard {
 
 export interface AdminCatalogResult {
   cards: AdminCatalogCard[];
+  rarityBalance: RarityBalanceSnapshot;
 }
 
 export interface AdminUserRecord {

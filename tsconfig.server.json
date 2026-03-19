@@ -14,5 +14,11 @@
     "rootDir": ".",
     "outDir": "dist-server"
   },
-  "include": ["server/**/*.ts", "shared/**/*.ts", "src/game/config.ts", "src/game/types.ts"]
+  "include": [
+    "server/**/*.ts",
+    "shared/**/*.ts",
+    "src/game/config.ts",
+    "src/game/types.ts",
+    "src/game/rarityBalance.ts"
+  ]
 }

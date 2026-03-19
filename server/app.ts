@@ -727,6 +727,7 @@ export async function buildApp() {
     setNoStore(reply);
     reply.send({
       proposal: store.startCardProposal(user),
+      rarityBalance: store.getCurrentRarityBalance(),
     });
   });
 
@@ -753,7 +754,10 @@ export async function buildApp() {
     }
 
     setNoStore(reply);
-    reply.send({ proposal });
+    reply.send({
+      proposal,
+      rarityBalance: store.getCurrentRarityBalance(),
+    });
   });
 
   app.patch('/api/card-proposals/:proposalId', async (request, reply) => {
@@ -884,9 +888,7 @@ export async function buildApp() {
     }
 
     setNoStore(reply);
-    reply.send({
-      cards: store.listAdminCards(),
-    });
+    reply.send(store.listAdminCards());
   });
 
   app.get('/api/admin/users', async (request, reply) => {

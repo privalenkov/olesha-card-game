@@ -2,9 +2,19 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { CARDS_PER_PACK, proposalRarityWeights, rarityWeights } from '../src/game/config.js';
+import { CARDS_PER_PACK, rarityWeights } from '../src/game/config.js';
+import {
+  buildRarityBalanceSnapshot,
+  countItemsByRarity,
+  getPackSlotRarityWeights,
+  getProposalRarityWeights,
+  getRarityChanceMap,
+  getTotalRarityCount,
+  rarityOrder,
+} from '../src/game/rarityBalance.js';
 import type {
   AdminCatalogCard,
+  AdminCatalogResult,
   AppNotification,
   AppNotificationKind,
   AdminUserRecord,
@@ -138,7 +148,6 @@ interface AdminUserRow {
   packs_opened: number;
 }
 
-const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
 const LEGACY_VISUAL_EFFECT_PATTERN = 'none';
 const LEGACY_VISUAL_EFFECT_PLACEMENT = 'frame';
 const MAX_NICKNAME_LENGTH = 32;
@@ -612,14 +621,10 @@ function buildProposalEffectGrant(rarity: Rarity): ProposalEffectGrant {
 function getRemainingCountByRarity(
   countsByRarity: Record<Rarity, number>,
   drawnCounts: Record<Rarity, number>,
-  targetRarity: Rarity,
 ) {
   return rarityOrder.reduce<Record<Rarity, number>>(
     (acc, rarity) => {
-      acc[rarity] = countsByRarity[rarity] - drawnCounts[rarity];
-      if (rarity === targetRarity) {
-        acc[rarity] = Math.max(acc[rarity], 0);
-      }
+      acc[rarity] = Math.max(countsByRarity[rarity] - drawnCounts[rarity], 0);
       return acc;
     },
     {
@@ -633,19 +638,7 @@ function getRemainingCountByRarity(
 }
 
 function getPerCardDropChanceByRarity(catalog: CardDefinition[]) {
-  const countsByRarity = rarityOrder.reduce<Record<Rarity, number>>(
-    (acc, rarity) => {
-      acc[rarity] = catalog.filter((card) => card.rarity === rarity).length;
-      return acc;
-    },
-    {
-      common: 0,
-      uncommon: 0,
-      rare: 0,
-      epic: 0,
-      veryrare: 0,
-    },
-  );
+  const countsByRarity = countItemsByRarity(catalog);
 
   const results = {
     common: 0,
@@ -674,13 +667,21 @@ function getPerCardDropChanceByRarity(catalog: CardDefinition[]) {
         return cached;
       }
 
-      const weights = slotIndex === CARDS_PER_PACK - 1 ? rarityWeights.featured : rarityWeights.standard;
-      const remainingByRarity = getRemainingCountByRarity(countsByRarity, drawnCounts, targetRarity);
-      const totalRemaining = rarityOrder.reduce((sum, rarity) => sum + remainingByRarity[rarity], 0);
+      const baseWeights = slotIndex === CARDS_PER_PACK - 1 ? rarityWeights.featured : rarityWeights.standard;
+      const remainingByRarity = getRemainingCountByRarity(countsByRarity, drawnCounts);
+      const totalRemaining = getTotalRarityCount(remainingByRarity);
+      const slotChanceByRarity = getRarityChanceMap(
+        totalRemaining > 0 ? getPackSlotRarityWeights(baseWeights, remainingByRarity) : baseWeights,
+      );
       let probability = 0;
 
-      for (const [selectedRarity, weight] of weights) {
-        const slotProbability = weight / 100;
+      for (const selectedRarity of rarityOrder) {
+        const slotProbability = slotChanceByRarity[selectedRarity];
+
+        if (slotProbability <= 0) {
+          continue;
+        }
+
         const selectedRemaining = remainingByRarity[selectedRarity];
 
         if (selectedRemaining > 0) {
@@ -709,25 +710,9 @@ function getPerCardDropChanceByRarity(catalog: CardDefinition[]) {
         }
 
         if (totalRemaining <= 0) {
-          continue;
-        }
-
-        probability += slotProbability * (1 / totalRemaining);
-
-        for (const rarity of rarityOrder) {
-          const categoryCount =
-            rarity === targetRarity ? remainingByRarity[rarity] - 1 : remainingByRarity[rarity];
-
-          if (categoryCount <= 0) {
-            continue;
-          }
-
-          const nextDrawn = {
-            ...drawnCounts,
-            [rarity]: drawnCounts[rarity] + 1,
-          };
+          probability += slotProbability * (1 / catalog.length);
           probability +=
-            slotProbability * (categoryCount / totalRemaining) * visit(slotIndex + 1, nextDrawn);
+            slotProbability * ((catalog.length - 1) / catalog.length) * visit(slotIndex + 1, drawnCounts);
         }
       }
 
@@ -918,10 +903,14 @@ function rollPackFromCatalog(catalog: CardDefinition[], packNumber: number, time
   );
 
   const excludedIds = new Set<string>();
+  const remainingByRarity = countItemsByRarity(catalog);
   const pulled: OwnedCard[] = [];
 
   for (let slot = 0; slot < CARDS_PER_PACK; slot += 1) {
-    const weights = slot === CARDS_PER_PACK - 1 ? rarityWeights.featured : rarityWeights.standard;
+    const baseWeights = slot === CARDS_PER_PACK - 1 ? rarityWeights.featured : rarityWeights.standard;
+    const totalRemaining = getTotalRarityCount(remainingByRarity);
+    const weights =
+      totalRemaining > 0 ? getPackSlotRarityWeights(baseWeights, remainingByRarity) : baseWeights;
     const rarity = weightedPick(weights);
     const primaryPool = byRarity[rarity];
     const fallbackPool = catalog.filter((card) => !excludedIds.has(card.id));
@@ -929,6 +918,10 @@ function rollPackFromCatalog(catalog: CardDefinition[], packNumber: number, time
       primaryPool.length > 0 ? primaryPool : fallbackPool.length > 0 ? fallbackPool : catalog,
       excludedIds,
     );
+
+    if (totalRemaining > 0) {
+      remainingByRarity[card.rarity] = Math.max(remainingByRarity[card.rarity] - 1, 0);
+    }
 
     pulled.push({
       ...card,
@@ -1673,6 +1666,14 @@ export function createGameStore(config: ServerConfig) {
     return markNotificationRead.run(new Date().toISOString(), notificationId, userId).changes > 0;
   }
 
+  function getActiveCatalogDefinitions(): CardDefinition[] {
+    return selectActiveCatalog.all().map((row) => toCardDefinition(row as CardRow));
+  }
+
+  function getCurrentRarityBalance() {
+    return buildRarityBalanceSnapshot(getActiveCatalogDefinitions());
+  }
+
   function startCardProposal(user: AuthUser): CardProposal {
     const existing = selectLatestActiveProposalByUser.get(user.id) as ProposalRow | undefined;
 
@@ -1681,7 +1682,7 @@ export function createGameStore(config: ServerConfig) {
     }
 
     const now = new Date().toISOString();
-    const rarity = weightedPick(proposalRarityWeights);
+    const rarity = weightedPick(getProposalRarityWeights(countItemsByRarity(getActiveCatalogDefinitions())));
     const grant = buildProposalEffectGrant(rarity);
     const visuals = getDefaultCardVisuals();
     const defaultFinish =
@@ -1786,11 +1787,14 @@ export function createGameStore(config: ServerConfig) {
     return selectAdminProposals.all().map((row) => toCardProposal(row as ProposalRow));
   }
 
-  function listAdminCards(): AdminCatalogCard[] {
+  function listAdminCards(): AdminCatalogResult {
     const rows = selectAdminCatalog.all().map((row) => row as AdminCardRow);
     const catalog = rows.map((row) => toCardDefinition(row));
     const dropChancePerPackByRarity = getPerCardDropChanceByRarity(catalog);
-    return rows.map((row) => toAdminCatalogCard(row, dropChancePerPackByRarity));
+    return {
+      cards: rows.map((row) => toAdminCatalogCard(row, dropChancePerPackByRarity)),
+      rarityBalance: buildRarityBalanceSnapshot(catalog),
+    };
   }
 
   function listAdminUsers(): AdminUserRecord[] {
@@ -1938,7 +1942,7 @@ export function createGameStore(config: ServerConfig) {
 
       const nextPackNumber =
         ((selectMaxPackNumber.get(userId) as { packNumber: number }).packNumber ?? 0) + 1;
-      const catalog = selectActiveCatalog.all().map((row) => toCardDefinition(row as CardRow));
+      const catalog = getActiveCatalogDefinitions();
 
       if (catalog.length === 0) {
         throw new NoApprovedCardsError();
@@ -1982,6 +1986,7 @@ export function createGameStore(config: ServerConfig) {
     deleteSession,
     getPlayerSnapshot,
     getPublicPlayerShowcase,
+    getCurrentRarityBalance,
     openPackForUser,
     updateNickname,
     startCardProposal,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CardEffectMaskEditor } from '../components/CardEffectMaskEditor';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
@@ -11,6 +11,8 @@ import {
 } from '../game/api';
 import { buildPreviewOwnedCard } from '../game/cardDraft';
 import { useGame } from '../game/GameContext';
+import { rarityMeta } from '../game/config';
+import { rarityOrder } from '../game/rarityBalance';
 import {
   CARD_ACCENT_SWATCHES,
   CARD_FINISH_OPTIONS,
@@ -23,8 +25,9 @@ import {
   PROPOSAL_STATUS_LABELS,
   type CardProposal,
   type CardTreatmentEffect,
-  type Rarity,
   type ProposalEditorPayload,
+  type Rarity,
+  type RarityBalanceSnapshot,
 } from '../game/types';
 import { useCardPreviewImage, useDecorativePatternMaskImage } from '../three/textures';
 
@@ -147,6 +150,7 @@ export function CardCreatorPage() {
   const navigate = useNavigate();
   const { authConfigured, authenticated, isAdmin, login, notify } = useGame();
   const [proposal, setProposal] = useState<CardProposal | null>(null);
+  const [rarityBalance, setRarityBalance] = useState<RarityBalanceSnapshot | null>(null);
   const [draft, setDraft] = useState<ProposalEditorPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,6 +181,7 @@ export function CardCreatorPage() {
         }
 
         setProposal(response.proposal);
+        setRarityBalance(response.rarityBalance);
         setDraft(draftFromProposal(response.proposal));
         setStatusMessage(null);
       } catch (error) {
@@ -570,10 +575,16 @@ export function CardCreatorPage() {
       <div className="creator-header">
         <div>
           <strong>Редактор карточки</strong>
-          <span>
-            Редкость выдана сервером: {proposal.rarity} • treatments: {draft.effectLayers.length}/
-            {proposal.maxEffectLayers}
-          </span>
+          {isAdmin ? (
+            <span>
+              Редкость выдана сервером: {proposal.rarity} • treatments: {draft.effectLayers.length}/
+              {proposal.maxEffectLayers}
+            </span>
+          ) : (
+            <span>
+              Доступно эффектов: {draft.effectLayers.length}/{proposal.maxEffectLayers}
+            </span>
+          )}
         </div>
         <div className="creator-header__actions">
           <button
@@ -594,6 +605,32 @@ export function CardCreatorPage() {
           </button>
         </div>
       </div>
+
+      {isAdmin && rarityBalance ? (
+        <div className="creator-rarity-balance">
+          {rarityOrder.map((rarity) => {
+            const entry = rarityBalance.entries.find((item) => item.rarity === rarity);
+
+            if (!entry) {
+              return null;
+            }
+
+            return (
+              <article
+                key={entry.rarity}
+                className="creator-rarity-balance__card"
+                style={{ '--rarity-color': rarityMeta[entry.rarity].hue } as CSSProperties}
+              >
+                <strong>{rarityMeta[entry.rarity].label}</strong>
+                <span>Сейчас в редакторе: {(entry.proposalChance * 100).toFixed(1)}%</span>
+                <span>
+                  В каталоге: {entry.catalogCount} • цель {(entry.targetCatalogShare * 100).toFixed(1)}%
+                </span>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="creator-layout">
         <div className="creator-preview">
@@ -986,10 +1023,14 @@ export function CardCreatorPage() {
             ) : null}
 
             <div className="creator-section__head">
-              <strong>Выданные сервером treatments</strong>
-              <span>
-                Чем редче карточка, тем больше сервер выдает effect slots и тем сильнее их набор.
-              </span>
+              <strong>{isAdmin ? 'Выданные сервером treatments' : 'Доступные эффекты'}</strong>
+              {isAdmin ? (
+                <span>
+                  Чем редче карточка, тем больше сервер выдает effect slots и тем сильнее их набор.
+                </span>
+              ) : (
+                <span>Добавляй только те спецэффекты, которые доступны для этой карточки.</span>
+              )}
             </div>
 
             {proposal.allowedEffects.length > 0 ? (
@@ -1012,7 +1053,7 @@ export function CardCreatorPage() {
               </div>
             ) : (
               <div className="creator-effect-empty">
-                Сервер выдал эту карточку без специальных treatment-эффектов.
+                Для этой карточки сейчас нет доступных специальных эффектов.
               </div>
             )}
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { rarityMeta } from '../game/config';
+import { rarityOrder } from '../game/rarityBalance';
 import {
   approveProposal,
   deleteProposal,
@@ -18,12 +19,11 @@ import type {
   AdminUserRecord,
   CardProposal,
   OwnedCard,
-  Rarity,
+  RarityBalanceSnapshot,
 } from '../game/types';
 import { useCardPreviewImage } from '../three/textures';
 
 type AdminTab = 'proposals' | 'cards' | 'users';
-const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
 
 function ProposalRow({
   proposal,
@@ -149,24 +149,27 @@ export function AdminProposalsPage() {
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [proposals, setProposals] = useState<CardProposal[]>([]);
   const [cards, setCards] = useState<AdminCatalogCard[]>([]);
+  const [rarityBalance, setRarityBalance] = useState<RarityBalanceSnapshot | null>(null);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejectingProposal, setRejectingProposal] = useState<CardProposal | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const rarityBreakdown = useMemo(() => {
-    const totalCards = cards.length;
-
     return rarityOrder.map((rarity) => {
       const items = cards.filter((item) => item.card.rarity === rarity);
+      const balanceEntry = rarityBalance?.entries.find((entry) => entry.rarity === rarity);
+
       return {
         rarity,
-        count: items.length,
-        share: totalCards > 0 ? items.length / totalCards : 0,
+        count: balanceEntry?.catalogCount ?? items.length,
+        share: balanceEntry?.catalogShare ?? 0,
+        targetShare: balanceEntry?.targetCatalogShare ?? 0,
+        proposalChance: balanceEntry?.proposalChance ?? 0,
         perCardDropChance: items[0]?.dropChancePerPack ?? 0,
       };
     });
-  }, [cards]);
+  }, [cards, rarityBalance]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -189,6 +192,7 @@ export function AdminProposalsPage() {
 
         setProposals(proposalResponse.proposals);
         setCards(cardsResponse.cards);
+        setRarityBalance(cardsResponse.rarityBalance);
         setUsers(usersResponse.users);
         setError(null);
       } catch (loadError) {
@@ -321,6 +325,7 @@ export function AdminProposalsPage() {
                     setProposals((current) => current.filter((item) => item.id !== proposal.id));
                     const cardsResponse = await fetchAdminCatalog();
                     setCards(cardsResponse.cards);
+                    setRarityBalance(cardsResponse.rarityBalance);
                     setError(null);
                   } catch (approveError) {
                     setError(
@@ -356,6 +361,8 @@ export function AdminProposalsPage() {
                     <strong>{rarityMeta[item.rarity].label}</strong>
                     <span>Карточек: {item.count}</span>
                     <span>Доля каталога: {(item.share * 100).toFixed(1)}%</span>
+                    <span>Цель каталога: {(item.targetShare * 100).toFixed(1)}%</span>
+                    <span>Шанс выдачи в редакторе: {(item.proposalChance * 100).toFixed(1)}%</span>
                     <span>Шанс конкретной карточки: {(item.perCardDropChance * 100).toFixed(2)}%</span>
                   </article>
                 ))}
