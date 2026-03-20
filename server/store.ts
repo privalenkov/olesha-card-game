@@ -449,6 +449,37 @@ function parseJsonObject<T extends object>(value: string | null | undefined, fal
   }
 }
 
+function addStoredAssetUrl(target: Set<string>, value: string | null | undefined) {
+  const normalized = value?.trim() ?? '';
+
+  if (normalized.startsWith('/uploads/')) {
+    target.add(normalized);
+  }
+}
+
+function collectStoredAssetUrlsFromRow(
+  target: Set<string>,
+  row: {
+    url_image: string;
+    visual_pattern_json: string | null;
+    effect_layers_json: string | null;
+  },
+) {
+  addStoredAssetUrl(target, row.url_image);
+
+  const decorativePattern = parseJsonObject<Partial<CardDecorativePattern>>(
+    row.visual_pattern_json,
+    {},
+  );
+  addStoredAssetUrl(target, decorativePattern.svgUrl);
+
+  const effectLayers = parseJsonArray<Partial<CardEffectLayer>>(row.effect_layers_json, []);
+
+  for (const layer of effectLayers) {
+    addStoredAssetUrl(target, layer.maskUrl);
+  }
+}
+
 function createProposalCardId(title: string, proposalId: string) {
   const slug = title
     .toLowerCase()
@@ -1604,6 +1635,21 @@ export function createGameStore(config: ServerConfig) {
     from users
     order by total_cards desc, datetime(users.created_at) asc, users.id asc
   `);
+  const selectReferencedCardAssets = db.prepare(`
+    select
+      url_image,
+      visual_pattern_json,
+      effect_layers_json
+    from card_definitions
+  `);
+  const selectReferencedProposalAssets = db.prepare(`
+    select
+      url_image,
+      visual_pattern_json,
+      effect_layers_json
+    from card_proposals
+    where status <> 'deleted'
+  `);
   const updateProposalDraft = db.prepare(`
     update card_proposals
     set
@@ -2045,6 +2091,28 @@ export function createGameStore(config: ServerConfig) {
       .map((row) => toAdminUserRecord(row as AdminUserRow, config.dailyPackLimit));
   }
 
+  function listReferencedStoredAssetUrls() {
+    const assets = new Set<string>();
+
+    for (const row of selectReferencedCardAssets.all() as Array<{
+      url_image: string;
+      visual_pattern_json: string | null;
+      effect_layers_json: string | null;
+    }>) {
+      collectStoredAssetUrlsFromRow(assets, row);
+    }
+
+    for (const row of selectReferencedProposalAssets.all() as Array<{
+      url_image: string;
+      visual_pattern_json: string | null;
+      effect_layers_json: string | null;
+    }>) {
+      collectStoredAssetUrlsFromRow(assets, row);
+    }
+
+    return assets;
+  }
+
   function grantAdminPackUnlockByUserId(userId: string, now = new Date()): AdminUserRecord | null {
     const existingUser = selectUserId.get(userId) as { id: string } | undefined;
 
@@ -2276,6 +2344,7 @@ export function createGameStore(config: ServerConfig) {
     listAdminProposals,
     listAdminCards,
     listAdminUsers,
+    listReferencedStoredAssetUrls,
     grantAdminPackUnlockByUserId,
     listUnreadNotifications,
     markNotificationReadById,

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
+import { type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
@@ -81,6 +82,10 @@ const MUTATION_RATE_LIMITS = {
   admin: { max: 120, windowMs: 10 * 60 * 1000 },
   packsOpen: { max: 12, windowMs: 60 * 1000 },
 } satisfies Record<string, RateLimitWindow>;
+
+function isNodeErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === code;
+}
 
 function normalizeNickname(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -545,6 +550,74 @@ function createRateLimiter() {
   };
 }
 
+async function cleanupOrphanedUploads(store: GameStore) {
+  let entries: Dirent[];
+
+  try {
+    entries = await fs.readdir(serverConfig.uploadsDir, { withFileTypes: true });
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return {
+        reclaimedBytes: 0,
+        removedCount: 0,
+      };
+    }
+
+    throw error;
+  }
+
+  const referencedAssets = store.listReferencedStoredAssetUrls();
+  const cutoffTime = Date.now() - serverConfig.uploadOrphanGracePeriodMs;
+  let reclaimedBytes = 0;
+  let removedCount = 0;
+
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const assetUrl = `/uploads/${entry.name}`;
+
+    if (referencedAssets.has(assetUrl)) {
+      continue;
+    }
+
+    const filePath = path.join(serverConfig.uploadsDir, entry.name);
+    let stat: Stats;
+
+    try {
+      stat = await fs.stat(filePath);
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        continue;
+      }
+
+      throw error;
+    }
+
+    if (!stat.isFile() || stat.mtimeMs > cutoffTime) {
+      continue;
+    }
+
+    try {
+      await fs.unlink(filePath);
+      removedCount += 1;
+      reclaimedBytes += stat.size;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return {
+    reclaimedBytes,
+    removedCount,
+  };
+}
+
 async function serveClientFile(request: FastifyRequest, reply: FastifyReply) {
   const requestUrl = new URL(request.raw.url ?? '/', serverConfig.appBaseUrl);
   const pathname = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
@@ -641,9 +714,33 @@ export async function buildApp() {
         serverConfig.googleCallbackUrl,
       )
     : null;
+  let uploadsCleanupPromise: Promise<void> | null = null;
 
   await app.register(cookie);
   await fs.mkdir(serverConfig.uploadsDir, { recursive: true });
+
+  function scheduleUploadsCleanup() {
+    if (uploadsCleanupPromise) {
+      return uploadsCleanupPromise;
+    }
+
+    uploadsCleanupPromise = cleanupOrphanedUploads(store)
+      .then(({ reclaimedBytes, removedCount }) => {
+        if (removedCount > 0) {
+          app.log.info({ reclaimedBytes, removedCount }, 'Removed orphaned uploaded assets.');
+        }
+      })
+      .catch((error) => {
+        app.log.error(error, 'Failed to cleanup orphaned uploaded assets.');
+      })
+      .finally(() => {
+        uploadsCleanupPromise = null;
+      });
+
+    return uploadsCleanupPromise;
+  }
+
+  void scheduleUploadsCleanup();
 
   app.addHook('onClose', async () => {
     store.close();
@@ -949,15 +1046,24 @@ export async function buildApp() {
         : parsed.mimeType === 'image/webp'
           ? 'webp'
           : 'jpg';
-    const fileName = `${randomUUID()}.${extension}`;
+    const contentHash = createHash('sha256').update(normalizedBuffer).digest('hex');
+    const fileName = `${contentHash}.${extension}`;
     const filePath = path.join(serverConfig.uploadsDir, fileName);
 
-    await fs.writeFile(filePath, normalizedBuffer);
+    try {
+      await fs.writeFile(filePath, normalizedBuffer, { flag: 'wx' });
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, 'EEXIST')) {
+        throw error;
+      }
+    }
 
     setNoStore(reply);
     reply.send({
       url: `/uploads/${fileName}`,
     });
+
+    void scheduleUploadsCleanup();
   });
 
   app.post('/api/card-proposals/start', async (request, reply) => {
@@ -1071,6 +1177,7 @@ export async function buildApp() {
 
     setNoStore(reply);
     reply.send({ proposal: updated });
+    void scheduleUploadsCleanup();
   });
 
   app.post('/api/card-proposals/:proposalId/submit', async (request, reply) => {
@@ -1229,6 +1336,7 @@ export async function buildApp() {
 
     setNoStore(reply);
     reply.send({ proposal });
+    void scheduleUploadsCleanup();
   });
 
   app.patch('/api/admin/card-proposals/:proposalId/override', async (request, reply) => {
@@ -1273,6 +1381,7 @@ export async function buildApp() {
 
     setNoStore(reply);
     reply.send({ proposal });
+    void scheduleUploadsCleanup();
   });
 
   app.delete('/api/admin/card-proposals/:proposalId', async (request, reply) => {
@@ -1316,6 +1425,7 @@ export async function buildApp() {
 
     setNoStore(reply);
     reply.send({ proposal });
+    void scheduleUploadsCleanup();
   });
 
   app.post('/api/packs/open', async (request, reply) => {
