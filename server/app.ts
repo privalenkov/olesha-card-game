@@ -38,6 +38,50 @@ function apiError(error: string, message: string, extra?: Partial<ApiErrorRespon
   } satisfies ApiErrorResponse;
 }
 
+interface RateLimitWindow {
+  max: number;
+  windowMs: number;
+}
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+const APP_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "connect-src 'self'",
+  "font-src 'self' data:",
+  "img-src 'self' data: blob: https://*.googleusercontent.com https://lh3.googleusercontent.com",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "form-action 'self' https://accounts.google.com",
+].join('; ');
+
+const UPLOADED_SVG_CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data:",
+  "style-src 'unsafe-inline'",
+  'sandbox',
+].join('; ');
+
+const MUTATION_RATE_LIMITS = {
+  authStart: { max: 12, windowMs: 10 * 60 * 1000 },
+  authCallback: { max: 24, windowMs: 10 * 60 * 1000 },
+  notifications: { max: 90, windowMs: 10 * 60 * 1000 },
+  profile: { max: 24, windowMs: 10 * 60 * 1000 },
+  uploads: { max: 24, windowMs: 10 * 60 * 1000 },
+  proposals: { max: 120, windowMs: 10 * 60 * 1000 },
+  admin: { max: 120, windowMs: 10 * 60 * 1000 },
+  packsOpen: { max: 12, windowMs: 60 * 1000 },
+} satisfies Record<string, RateLimitWindow>;
+
 function normalizeNickname(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -54,6 +98,10 @@ function normalizeNickname(value: unknown): string | null {
   }
 
   return trimmed;
+}
+
+function getRequestPath(request: FastifyRequest) {
+  return new URL(request.raw.url ?? '/', serverConfig.appBaseUrl).pathname;
 }
 
 function normalizeCollectionFilter(value: unknown): CollectionFilter {
@@ -335,6 +383,33 @@ function parseImageDataUrl(value: unknown) {
   };
 }
 
+function sanitizeSvgUpload(buffer: Buffer) {
+  const markup = buffer.toString('utf8').replace(/^\uFEFF/u, '').trim();
+
+  if (!markup || !/<svg[\s>]/iu.test(markup)) {
+    return null;
+  }
+
+  const forbiddenPatterns = [
+    /<script[\s>]/iu,
+    /<!DOCTYPE/iu,
+    /<!ENTITY/iu,
+    /<foreignObject[\s>]/iu,
+    /<(?:iframe|frame|frameset|object|embed|audio|video|portal|meta|link)\b/iu,
+    /<(?:animate|animateMotion|animateTransform|set|mpath)\b/iu,
+    /\son[a-z]+\s*=/iu,
+    /\b(?:javascript:|vbscript:|data:text\/html)\b/iu,
+    /\b(?:href|xlink:href)\s*=\s*["']?\s*(?!#)/iu,
+    /@import/iu,
+  ];
+
+  if (forbiddenPatterns.some((pattern) => pattern.test(markup))) {
+    return null;
+  }
+
+  return Buffer.from(markup, 'utf8');
+}
+
 function getMimeType(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
     case '.js':
@@ -375,12 +450,99 @@ function setNoStore(reply: FastifyReply) {
 
 function assertAllowedOrigin(request: FastifyRequest, reply: FastifyReply) {
   const origin = request.headers.origin;
+  reply.header('Vary', 'Origin');
 
-  if (!origin || serverConfig.allowedOrigins.has(origin)) {
+  if (!origin) {
+    reply.code(403).send(apiError('FORBIDDEN_ORIGIN', 'Для этого запроса нужен корректный Origin.'));
+    return;
+  }
+
+  if (serverConfig.allowedOrigins.has(origin)) {
     return;
   }
 
   reply.code(403).send(apiError('FORBIDDEN_ORIGIN', 'Недопустимый origin для мутации данных.'));
+}
+
+function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
+  const requestPath = getRequestPath(request);
+
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+  if (serverConfig.secureCookies) {
+    reply.header(
+      'Strict-Transport-Security',
+      'max-age=31536000; includeSubDomains; preload',
+    );
+  }
+
+  if (requestPath.startsWith('/uploads/') && requestPath.toLowerCase().endsWith('.svg')) {
+    reply.header('Content-Security-Policy', UPLOADED_SVG_CONTENT_SECURITY_POLICY);
+    return;
+  }
+
+  if (!requestPath.startsWith('/api/')) {
+    reply.header('Content-Security-Policy', APP_CONTENT_SECURITY_POLICY);
+  }
+}
+
+function createRateLimiter() {
+  const entries = new Map<string, RateLimitEntry>();
+  let requestsSinceCleanup = 0;
+
+  function cleanup(now: number) {
+    if (requestsSinceCleanup < 256) {
+      return;
+    }
+
+    requestsSinceCleanup = 0;
+
+    for (const [key, entry] of entries.entries()) {
+      if (entry.resetAt <= now) {
+        entries.delete(key);
+      }
+    }
+  }
+
+  return function enforceRateLimit(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    bucket: string,
+    window: RateLimitWindow,
+    subject = request.ip,
+  ) {
+    const now = Date.now();
+    requestsSinceCleanup += 1;
+    cleanup(now);
+
+    const key = `${bucket}:${subject || 'anonymous'}`;
+    const current = entries.get(key);
+
+    if (!current || current.resetAt <= now) {
+      entries.set(key, {
+        count: 1,
+        resetAt: now + window.windowMs,
+      });
+      return true;
+    }
+
+    if (current.count >= window.max) {
+      reply.header(
+        'Retry-After',
+        String(Math.max(Math.ceil((current.resetAt - now) / 1000), 1)),
+      );
+      reply
+        .code(429)
+        .send(apiError('RATE_LIMITED', 'Слишком много запросов. Подожди немного и попробуй снова.'));
+      return false;
+    }
+
+    current.count += 1;
+    return true;
+  };
 }
 
 async function serveClientFile(request: FastifyRequest, reply: FastifyReply) {
@@ -427,7 +589,15 @@ async function serveUploadFile(request: FastifyRequest, reply: FastifyReply) {
 
   try {
     const file = await fs.readFile(candidatePath);
-    reply.type(getMimeType(candidatePath)).send(file);
+    const safeFile =
+      path.extname(candidatePath).toLowerCase() === '.svg' ? sanitizeSvgUpload(file) : file;
+
+    if (!safeFile) {
+      reply.code(415).send('Unsafe SVG');
+      return;
+    }
+
+    reply.type(getMimeType(candidatePath)).send(safeFile);
   } catch {
     reply.code(404).send('Not found');
   }
@@ -463,6 +633,7 @@ export async function buildApp() {
     trustProxy: true,
   });
   const store = createGameStore(serverConfig);
+  const enforceRateLimit = createRateLimiter();
   const oauthClient = serverConfig.googleAuthConfigured
     ? new OAuth2Client(
         serverConfig.googleClientId,
@@ -476,6 +647,10 @@ export async function buildApp() {
 
   app.addHook('onClose', async () => {
     store.close();
+  });
+
+  app.addHook('onRequest', async (request, reply) => {
+    applySecurityHeaders(request, reply);
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -540,6 +715,10 @@ export async function buildApp() {
       return;
     }
 
+    if (!enforceRateLimit(request, reply, 'notifications', MUTATION_RATE_LIMITS.notifications)) {
+      return;
+    }
+
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
@@ -563,7 +742,11 @@ export async function buildApp() {
     await serveUploadFile(request, reply);
   });
 
-  app.get('/api/auth/google/start', async (_request, reply) => {
+  app.get('/api/auth/google/start', async (request, reply) => {
+    if (!enforceRateLimit(request, reply, 'auth:start', MUTATION_RATE_LIMITS.authStart)) {
+      return;
+    }
+
     if (!oauthClient) {
       reply
         .code(503)
@@ -588,6 +771,10 @@ export async function buildApp() {
   });
 
   app.get('/api/auth/google/callback', async (request, reply) => {
+    if (!enforceRateLimit(request, reply, 'auth:callback', MUTATION_RATE_LIMITS.authCallback)) {
+      return;
+    }
+
     if (!oauthClient) {
       reply.redirect(serverConfig.frontendRedirectUrl);
       return;
@@ -646,6 +833,10 @@ export async function buildApp() {
       return;
     }
 
+    if (!enforceRateLimit(request, reply, 'profile:logout', MUTATION_RATE_LIMITS.profile)) {
+      return;
+    }
+
     store.deleteSession(request.cookies[serverConfig.sessionCookieName]);
     reply.clearCookie(serverConfig.sessionCookieName, sessionCookieOptions());
     setNoStore(reply);
@@ -656,6 +847,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'profile:nickname', MUTATION_RATE_LIMITS.profile)) {
       return;
     }
 
@@ -707,6 +902,10 @@ export async function buildApp() {
       return;
     }
 
+    if (!enforceRateLimit(request, reply, 'uploads:card-art', MUTATION_RATE_LIMITS.uploads)) {
+      return;
+    }
+
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
@@ -727,6 +926,21 @@ export async function buildApp() {
       return;
     }
 
+    const normalizedBuffer =
+      parsed.mimeType === 'image/svg+xml' ? sanitizeSvgUpload(parsed.buffer) : parsed.buffer;
+
+    if (!normalizedBuffer) {
+      reply
+        .code(400)
+        .send(
+          apiError(
+            'UNSAFE_SVG',
+            'SVG содержит небезопасные конструкции. Удали скрипты, внешние ссылки и обработчики событий.',
+          ),
+        );
+      return;
+    }
+
     const extension =
       parsed.mimeType === 'image/png'
         ? 'png'
@@ -738,7 +952,7 @@ export async function buildApp() {
     const fileName = `${randomUUID()}.${extension}`;
     const filePath = path.join(serverConfig.uploadsDir, fileName);
 
-    await fs.writeFile(filePath, parsed.buffer);
+    await fs.writeFile(filePath, normalizedBuffer);
 
     setNoStore(reply);
     reply.send({
@@ -750,6 +964,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'proposals:start', MUTATION_RATE_LIMITS.proposals)) {
       return;
     }
 
@@ -800,6 +1018,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'proposals:update', MUTATION_RATE_LIMITS.proposals)) {
       return;
     }
 
@@ -855,6 +1077,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'proposals:submit', MUTATION_RATE_LIMITS.proposals)) {
       return;
     }
 
@@ -948,6 +1174,10 @@ export async function buildApp() {
       return;
     }
 
+    if (!enforceRateLimit(request, reply, 'admin:unlock-pack', MUTATION_RATE_LIMITS.admin)) {
+      return;
+    }
+
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
@@ -972,6 +1202,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'admin:approve-proposal', MUTATION_RATE_LIMITS.admin)) {
       return;
     }
 
@@ -1001,6 +1235,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'admin:override-proposal', MUTATION_RATE_LIMITS.admin)) {
       return;
     }
 
@@ -1044,6 +1282,10 @@ export async function buildApp() {
       return;
     }
 
+    if (!enforceRateLimit(request, reply, 'admin:delete-proposal', MUTATION_RATE_LIMITS.admin)) {
+      return;
+    }
+
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
@@ -1080,6 +1322,10 @@ export async function buildApp() {
     assertAllowedOrigin(request, reply);
 
     if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'packs:open', MUTATION_RATE_LIMITS.packsOpen)) {
       return;
     }
 

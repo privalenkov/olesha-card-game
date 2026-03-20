@@ -184,9 +184,7 @@ function AppShell() {
         </nav>
 
         <div className="topbar__auth">
-          {status === 'loading' ? (
-            <span className="topbar__hint">Сессия...</span>
-          ) : authenticated && user ? (
+          {authenticated && user ? (
             <>
               <span className="topbar__hint topbar__hint--user">{user.name}</span>
               <button
@@ -225,9 +223,7 @@ function AppShell() {
             <button className="topbar__auth-button" onClick={login} type="button">
               Войти через Google
             </button>
-          ) : (
-            <span className="topbar__hint">Google OAuth не настроен</span>
-          )}
+          ) : <></>}
         </div>
       </header>
 
