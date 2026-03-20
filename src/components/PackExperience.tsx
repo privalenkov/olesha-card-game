@@ -5,7 +5,15 @@ import { CardViewerCanvas } from './CardViewerCanvas';
 import { PackCarouselScene, PackScene } from './PackScene';
 import { preloadCardTextureAssets } from '../three/textures';
 
-type ExperienceStage = 'hero' | 'preparing' | 'carousel' | 'tear' | 'opening' | 'revealing' | 'complete';
+type ExperienceStage =
+  | 'hero'
+  | 'preparing'
+  | 'carousel'
+  | 'carousel_to_tear'
+  | 'tear'
+  | 'opening'
+  | 'revealing'
+  | 'complete';
 type RevealState = 'charging' | 'impact' | 'awaiting_flip' | 'revealed' | 'launching' | 'complete';
 
 interface TearGesture {
@@ -130,6 +138,7 @@ export function PackExperience() {
   const [tearDirection, setTearDirection] = useState<1 | -1>(1);
   const [tearDocked, setTearDocked] = useState(false);
   const [tearHintVisible, setTearHintVisible] = useState(false);
+  const [packOpeningPending, setPackOpeningPending] = useState(false);
   const [cardLaunchOffset, setCardLaunchOffset] = useState(0);
   const cardSwipeRef = useRef<CardSwipeGesture>(initialCardSwipeGesture);
   const carouselSwipeRef = useRef<CarouselSwipeGesture>(initialCarouselSwipeGesture);
@@ -160,6 +169,13 @@ export function PackExperience() {
   const stackedCards = openedPack?.slice(currentIndex + 1) ?? [];
   const lastCard = openedPack ? currentIndex >= openedPack.length - 1 : false;
   const availablePacks = authenticated ? state.remainingPacks : state.dailyPackLimit;
+  const preloadTearStage = stage === 'carousel_to_tear';
+  const dockStageMounted = preloadTearStage || stage === 'tear' || stage === 'opening';
+  const dockStageVisible = stage === 'tear' || stage === 'opening';
+  const dockPackSnapped = preloadTearStage || (stage === 'tear' && tearDocked);
+  const dockPackOffsetY = stage === 'opening' ? -5.4 : dockPackSnapped ? -2.45 : 0.08;
+  const revealStackMode =
+    stage === 'opening' ? 'opening' : stage === 'revealing' || stage === 'complete' ? 'revealing' : null;
 
   useEffect(() => {
     return () => {
@@ -370,6 +386,7 @@ export function PackExperience() {
     setTearDirection(1);
     setTearDocked(false);
     setTearHintVisible(false);
+    setPackOpeningPending(false);
     setCardLaunchOffset(0);
     setStackEntryCardId(null);
     setHeroButtonVisible(false);
@@ -400,8 +417,12 @@ export function PackExperience() {
       return;
     }
 
-    setTearDocked(false);
     setTearHintVisible(false);
+
+    if (tearDocked) {
+      return;
+    }
+
     const dockTimer = window.setTimeout(() => {
       setTearDocked(true);
     }, 16);
@@ -409,7 +430,7 @@ export function PackExperience() {
     return () => {
       window.clearTimeout(dockTimer);
     };
-  }, [stage]);
+  }, [stage, tearDocked]);
 
   function preparePackOpening() {
     if (stage === 'preparing') {
@@ -591,6 +612,26 @@ export function PackExperience() {
     preparePackOpening();
   }
 
+  function beginTearTransition() {
+    if (stage !== 'carousel') {
+      return;
+    }
+
+    setCarouselFlipPreview(0);
+    setCarouselDragging(false);
+    setCarouselSliding(false);
+    setCarouselInteracting(false);
+    setTearDocked(false);
+    setTearHintVisible(false);
+    carouselSwipeRef.current = initialCarouselSwipeGesture;
+    setStage('carousel_to_tear');
+  }
+
+  function finishTearTransition() {
+    setTearDocked(true);
+    setStage('tear');
+  }
+
   function beginCarouselSwipe(event: ReactPointerEvent<HTMLDivElement>) {
     if (stage !== 'carousel') {
       return;
@@ -676,7 +717,7 @@ export function PackExperience() {
         rotateCarouselPack(carouselIndex, deltaX > 0 ? Math.PI : -Math.PI);
         carouselSuppressClickUntilRef.current = Date.now() + 220;
       } else if (!swipe.moved && Math.abs(deltaX) < 18 && Math.abs(deltaY) < 18) {
-        setStage('tear');
+        beginTearTransition();
         carouselSuppressClickUntilRef.current = Date.now() + 220;
       }
       setCarouselFlipPreview(0);
@@ -696,7 +737,7 @@ export function PackExperience() {
   }
 
   function startTearGesture(event: ReactPointerEvent<HTMLDivElement>) {
-    if (stage !== 'tear') {
+    if (stage !== 'tear' || packOpeningPending) {
       return;
     }
 
@@ -737,7 +778,8 @@ export function PackExperience() {
       cardEntryTimerRef.current = null;
     }
 
-    setStage('opening');
+    setPackOpeningPending(true);
+    setTearHintVisible(false);
     setOpenedPack(null);
     setCurrentIndex(0);
     setRevealState('charging');
@@ -747,12 +789,15 @@ export function PackExperience() {
     const pack = await openPack();
 
     if (!pack) {
+      setPackOpeningPending(false);
       resetExperience();
       return;
     }
 
     void preloadCardTextureAssets(pack);
     setOpenedPack(pack);
+    setStage('opening');
+    setPackOpeningPending(false);
     openingTimerRef.current = window.setTimeout(() => {
       openingTimerRef.current = null;
       setStage('revealing');
@@ -862,6 +907,7 @@ export function PackExperience() {
                 revealImpactDurationMs={revealImpactDurationMs}
                 onUserFlip={onUserFlip}
                 scaleMultiplier={0.7}
+                transparentBackground
               />
             </div>
           </div>
@@ -983,7 +1029,7 @@ export function PackExperience() {
           </div>
         ) : null}
 
-        {stage === 'preparing' || stage === 'carousel' ? (
+        {stage === 'preparing' || stage === 'carousel' || stage === 'carousel_to_tear' ? (
           <div className="pack-ritual__fullscreen-stage">
             <div
               className={`pack-carousel pack-carousel--3d ${carouselDragging ? 'is-dragging' : ''}`}
@@ -1009,7 +1055,9 @@ export function PackExperience() {
               <PackCarouselScene
                 activeIndex={carouselIndex}
                 dragPreview={carouselFlipPreview}
-                hoverEnabled={!carouselInteracting && !carouselDragging && !carouselSliding}
+                hoverEnabled={
+                  stage === 'carousel' && !carouselInteracting && !carouselDragging && !carouselSliding
+                }
                 orbitIndex={carouselOrbitIndex}
                 onPackClick={(index) => {
                   if (stage !== 'carousel') {
@@ -1027,108 +1075,117 @@ export function PackExperience() {
                     return;
                   }
 
-                  setStage('tear');
+                  beginTearTransition();
                 }}
+                onTransitionToTearComplete={finishTearTransition}
                 rotationOffsets={visualPackRotationOffsets}
+                transitionToTear={stage === 'carousel_to_tear'}
               />
             </div>
           </div>
         ) : null}
 
-        {stage === 'tear' || stage === 'opening' || stage === 'revealing' || stage === 'complete' ? (
-          <div className="pack-ritual__reveal-shell">
-            {stage === 'tear' ? (
-              <div className={`pack-ritual__tear-copy ${tearHintVisible ? 'is-visible' : ''}`}>
-                Проведите по линии, чтобы открыть
-              </div>
-            ) : null}
+        {dockStageMounted ? (
+          <div className="pack-ritual__fullscreen-stage pack-ritual__fullscreen-stage--overlay">
+            <div
+              className={`pack-ritual__dock-stage ${stage === 'opening' ? 'is-opening' : ''} ${
+                dockStageVisible ? 'is-visible' : 'is-preloaded'
+              }`}
+              onPointerDown={startTearGesture}
+              onPointerMove={(event) => {
+                if (
+                  stage !== 'tear' ||
+                  !tearGesture.active ||
+                  tearGesture.pointerId !== event.pointerId
+                ) {
+                  return;
+                }
 
-            {stage === 'tear' || stage === 'opening' ? (
-              <div
-                className={`pack-ritual__dock-stage ${stage === 'opening' ? 'is-opening' : ''}`}
-                onPointerDown={startTearGesture}
-                onPointerMove={(event) => {
-                  if (
-                    stage !== 'tear' ||
-                    !tearGesture.active ||
-                    tearGesture.pointerId !== event.pointerId
-                  ) {
-                    return;
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setTearGesture((current) => {
+                  if (!current.active) {
+                    return current;
                   }
 
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  setTearGesture((current) => {
-                    if (!current.active) {
-                      return current;
-                    }
-
-                    return {
-                      ...current,
-                      currentX: event.clientX - bounds.left,
-                      currentY: event.clientY - bounds.top,
-                    };
-                  });
-                }}
-                onPointerUp={(event) => {
-                  if (
-                    stage !== 'tear' ||
-                    !tearGesture.active ||
-                    tearGesture.pointerId !== event.pointerId
-                  ) {
-                    setTearGesture(initialTearGesture);
-                    return;
-                  }
-
-                  const deltaX = tearGesture.currentX - tearGesture.startX;
-                  const deltaY = tearGesture.currentY - tearGesture.startY;
-                  const readyToOpen = Math.abs(deltaX) > 220 && Math.abs(deltaY) < 120;
-
-                  if (!readyToOpen) {
-                    setTearGesture(initialTearGesture);
-                    return;
-                  }
-
-                  setTearAnchor(clamp(tearGesture.startX / tearGesture.width, 0.14, 0.86));
-                  setTearDirection(deltaX >= 0 ? 1 : -1);
+                  return {
+                    ...current,
+                    currentX: event.clientX - bounds.left,
+                    currentY: event.clientY - bounds.top,
+                  };
+                });
+              }}
+              onPointerUp={(event) => {
+                if (
+                  stage !== 'tear' ||
+                  !tearGesture.active ||
+                  tearGesture.pointerId !== event.pointerId
+                ) {
                   setTearGesture(initialTearGesture);
-                  void finalizePackOpening();
-                }}
-              >
-                <PackScene
-                  cards={null}
-                  dragPreview={0}
-                  focusIndex={currentIndex}
-                  hoverEnabled={false}
-                  onOffsetSettled={
-                    stage === 'tear' && tearDocked ? () => setTearHintVisible(true) : undefined
-                  }
-                  offsetY={stage === 'opening' ? -5.4 : tearDocked ? -2.45 : 0.08}
-                  packScale={0.86}
-                  phase={stage === 'opening' ? 'tearing' : 'sealed'}
-                  rotationOffset={selectedPackRotationOffset}
-                  tearAnchor={liveTearAnchor}
-                  tearDirection={tearDirection}
-                  tearProgress={tearProgress}
-                />
+                  return;
+                }
 
-                {stage === 'tear' && tearGesture.active ? (
-                  <svg className="pack-ritual__tear-trace" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <line
-                      x1={(tearGesture.startX / tearGesture.width) * 100}
-                      x2={(tearGesture.currentX / tearGesture.width) * 100}
-                      y1={(tearGesture.startY / tearGesture.height) * 100}
-                      y2={(tearGesture.currentY / tearGesture.height) * 100}
-                    />
-                  </svg>
-                ) : null}
-              </div>
-            ) : null}
+                const deltaX = tearGesture.currentX - tearGesture.startX;
+                const deltaY = tearGesture.currentY - tearGesture.startY;
+                const readyToOpen = Math.abs(deltaX) > 220 && Math.abs(deltaY) < 120;
 
-            {stage === 'opening' || stage === 'revealing' || stage === 'complete' ? (
-              <div className={`pack-ritual__stack-layer ${stage === 'opening' ? 'pack-ritual__stack-layer--opening' : ''}`}>
-                {renderRevealStack(stage === 'opening' ? 'opening' : 'revealing')}
-              </div>
-            ) : null}
+                if (!readyToOpen) {
+                  setTearGesture(initialTearGesture);
+                  return;
+                }
+
+                setTearAnchor(clamp(tearGesture.startX / tearGesture.width, 0.14, 0.86));
+                setTearDirection(deltaX >= 0 ? 1 : -1);
+                setTearGesture(initialTearGesture);
+                void finalizePackOpening();
+              }}
+            >
+              {stage === 'tear' ? (
+                <div className={`pack-ritual__tear-copy ${tearHintVisible ? 'is-visible' : ''}`}>
+                  Проведите по линии, чтобы открыть
+                </div>
+              ) : null}
+
+              <PackScene
+                cards={null}
+                cameraY={0.24}
+                dragPreview={0}
+                focusIndex={currentIndex}
+                hoverEnabled={false}
+                onOffsetSettled={
+                  stage === 'tear' && tearDocked ? () => setTearHintVisible(true) : undefined
+                }
+                offsetY={dockPackOffsetY}
+                packScale={0.86}
+                phase={stage === 'opening' ? 'tearing' : 'sealed'}
+                rotationOffset={selectedPackRotationOffset}
+                snapOffsetOnMount={dockPackSnapped}
+                tearAnchor={liveTearAnchor}
+                tearDirection={tearDirection}
+                tearProgress={tearProgress}
+              />
+
+              {stage === 'tear' && tearGesture.active ? (
+                <svg className="pack-ritual__tear-trace" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <line
+                    x1={(tearGesture.startX / tearGesture.width) * 100}
+                    x2={(tearGesture.currentX / tearGesture.width) * 100}
+                    y1={(tearGesture.startY / tearGesture.height) * 100}
+                    y2={(tearGesture.currentY / tearGesture.height) * 100}
+                  />
+                </svg>
+              ) : null}
+
+            </div>
+          </div>
+        ) : null}
+
+        {revealStackMode ? (
+          <div
+            className={`pack-ritual__stack-layer ${
+              revealStackMode === 'opening' ? 'pack-ritual__stack-layer--opening' : ''
+            }`}
+          >
+            {renderRevealStack(revealStackMode)}
           </div>
         ) : null}
       </div>

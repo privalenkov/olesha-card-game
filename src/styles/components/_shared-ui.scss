@@ -200,10 +200,18 @@
   position: relative;
 }
 
+.card-viewer--transparent {
+  background: transparent;
+}
+
 .pack-scene canvas,
 .card-viewer canvas {
   display: block;
   background: var(--app-background);
+}
+
+.card-viewer--transparent canvas {
+  background: transparent;
 }
 
 .gesture-stage__tips {

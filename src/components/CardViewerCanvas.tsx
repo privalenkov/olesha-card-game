@@ -1848,6 +1848,7 @@ export function CardViewerCanvas({
   revealImpactRarity = null,
   revealImpactDurationMs = 0,
   skipIntroAnimation = false,
+  transparentBackground = false,
   onUserFlip,
 }: {
   card: OwnedCard;
@@ -1867,6 +1868,7 @@ export function CardViewerCanvas({
   revealImpactRarity?: ViewerImpactRarity | null;
   revealImpactDurationMs?: number;
   skipIntroAnimation?: boolean;
+  transparentBackground?: boolean;
   onUserFlip?: (side: CardSide) => void;
 }) {
   const resolvedInitialSide = forcedSide ?? initialSide;
@@ -2223,7 +2225,7 @@ export function CardViewerCanvas({
   return (
     <div
       ref={viewerRef}
-      className="card-viewer"
+      className={`card-viewer ${transparentBackground ? 'card-viewer--transparent' : ''}`}
       onClick={(event) => {
         if (suppressClickRef.current) {
           event.preventDefault();
@@ -2240,14 +2242,20 @@ export function CardViewerCanvas({
       }}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ pointerEvents: interactive ? 'auto' : 'none', touchAction: interactive ? 'pan-y' : 'none' }}
+      style={{
+        background: transparentBackground ? 'transparent' : undefined,
+        pointerEvents: interactive ? 'auto' : 'none',
+        touchAction: interactive ? 'pan-y' : 'none',
+      }}
     >
       <Canvas
         camera={{ position: [0, 0, cameraZ], fov: VIEWER_CANVAS_FOV }}
         dpr={effectsPreset === 'stack' ? 1 : VIEWER_CANVAS_DPR}
+        gl={{ alpha: transparentBackground }}
         onCreated={({ gl }) => {
-          gl.setClearColor(VIEWER_CANVAS_BACKGROUND, 1);
+          gl.setClearColor(VIEWER_CANVAS_BACKGROUND, transparentBackground ? 0 : 1);
         }}
+        style={{ background: transparentBackground ? 'transparent' : undefined }}
       >
         <MemoCardRig
           card={card}

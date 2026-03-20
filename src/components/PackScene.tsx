@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Canvas, type ThreeEvent, useFrame, useLoader } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import {
@@ -11,6 +11,7 @@ import {
   MathUtils,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   Shape,
   Vector3,
 } from 'three';
@@ -47,6 +48,8 @@ interface PackSceneProps {
   offsetY?: number;
   packScale?: number;
   onOffsetSettled?: () => void;
+  snapOffsetOnMount?: boolean;
+  cameraY?: number;
 }
 
 interface PackCarouselSceneProps {
@@ -56,6 +59,8 @@ interface PackCarouselSceneProps {
   dragPreview?: number;
   hoverEnabled?: boolean;
   onPackClick?: (index: number) => void;
+  transitionToTear?: boolean;
+  onTransitionToTearComplete?: () => void;
 }
 
 const PACK_WIDTH = 2.4;
@@ -66,6 +71,8 @@ const PACK_TOTAL_HEIGHT = PACK_BODY_HEIGHT + PACK_BOTTOM_CRIMP;
 const TEAR_WIDTH = 3.2;
 const TEAR_HEIGHT = 0.54;
 const DEFAULT_PACK_SCALE = 0.8;
+const DEFAULT_PACK_SCENE_CAMERA_Y = 0.1;
+const TRANSITION_PACK_SCENE_CAMERA_Y = 0.24;
 const CAROUSEL_TILT = 0;
 const CAROUSEL_RADIUS = 4.5;
 const CAROUSEL_CENTER_Z = -CAROUSEL_RADIUS - 0.54;
@@ -73,6 +80,10 @@ const CAROUSEL_HOVER_PLANE_WIDTH = PACK_WIDTH * 1.18;
 const CAROUSEL_HOVER_PLANE_HEIGHT = PACK_TOTAL_HEIGHT + TEAR_HEIGHT + 0.24;
 const CAROUSEL_HOVER_PLANE_CENTER_Y = 0.08;
 const PACK_ACCENT_LIGHT = '#74dbff';
+const CAROUSEL_TO_TEAR_SETTLE_DISTANCE = 0.06;
+const CAROUSEL_TO_TEAR_SETTLE_SCALE_EPSILON = 0.015;
+const CAROUSEL_TO_TEAR_INACTIVE_DEPTH_OFFSET = 0.92;
+const CAROUSEL_TO_TEAR_INACTIVE_SCALE_FACTOR = 0.95;
 const PACK_BODY_MATERIAL = {
   color: '#0d4c66',
   metalness: 0.24,
@@ -81,6 +92,8 @@ const PACK_BODY_MATERIAL = {
   clearcoatRoughness: 0.18,
   reflectivity: 0.18,
 } as const;
+const TEAR_STAGE_DOCK_OFFSET_Y = -2.45;
+const TEAR_STAGE_WORLD_Y = TEAR_STAGE_DOCK_OFFSET_Y + 0.02;
 const PACK_MODEL_MATERIAL = {
   color: '#d6e0e5',
   metalness: 0.1,
@@ -332,6 +345,7 @@ function PackRig({
   offsetY = 0,
   packScale = DEFAULT_PACK_SCALE,
   onOffsetSettled,
+  snapOffsetOnMount = false,
 }: PackSceneProps) {
   const groupRef = useRef<Group>(null);
   const tearPivotRef = useRef<Group>(null);
@@ -340,6 +354,7 @@ function PackRig({
   const hoverTargetRef = useRef({ x: 0, y: 0 });
   const hoverPointerRef = useRef({ x: 0, y: 0 });
   const offsetSettledRef = useRef(false);
+  const offsetSnappedRef = useRef(false);
   const offsetSettledCallbackRef = useRef<(() => void) | undefined>(onOffsetSettled);
   const packGeometry = usePackModelGeometry();
   const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
@@ -361,7 +376,8 @@ function PackRig({
   }, [hoverEnabled]);
   useEffect(() => {
     offsetSettledRef.current = false;
-  }, [offsetY, phase]);
+    offsetSnappedRef.current = false;
+  }, [offsetY, phase, snapOffsetOnMount]);
 
   useFrame((state, delta) => {
     if (!groupRef.current || !tearPivotRef.current || !tearOffsetRef.current || !slitRef.current) {
@@ -407,6 +423,10 @@ function PackRig({
       delta,
     );
     const targetPositionY = offsetY + (opened ? -0.08 : 0.02);
+    if (snapOffsetOnMount && !offsetSnappedRef.current) {
+      groupRef.current.position.y = targetPositionY;
+      offsetSnappedRef.current = true;
+    }
     groupRef.current.position.y = MathUtils.damp(
       groupRef.current.position.y,
       targetPositionY,
@@ -589,8 +609,12 @@ function CarouselPack({
   active,
   index,
   onClick,
+  onTransitionToTearComplete,
   packGeometry,
   rotationOffset,
+  ringGroupRef,
+  transitionToTear,
+  transitionProgressRef,
 }: {
   dragPreview: number;
   hoverEnabled: boolean;
@@ -598,11 +622,21 @@ function CarouselPack({
   active: boolean;
   index: number;
   onClick?: (index: number) => void;
+  onTransitionToTearComplete?: () => void;
   packGeometry: BufferGeometry;
   rotationOffset: number;
+  ringGroupRef: MutableRefObject<Group | null>;
+  transitionToTear: boolean;
+  transitionProgressRef: MutableRefObject<number>;
 }) {
   const slotRef = useRef<Group>(null);
   const packRef = useRef<Group>(null);
+  const bodyMaterialRef = useRef<MeshPhysicalMaterial>(null);
+  const shadowMaterialRef = useRef<MeshBasicMaterial>(null);
+  const transitionSettledRef = useRef(false);
+  const transitionCompleteCallbackRef = useRef<(() => void) | undefined>(onTransitionToTearComplete);
+  const transitionWorldPositionRef = useRef(new Vector3());
+  const transitionTargetVectorRef = useRef(new Vector3());
   const [hovered, setHovered] = useState(false);
   const hoverTargetRef = useRef({ x: 0, y: 0 });
   const hoverPointerRef = useRef({ x: 0, y: 0 });
@@ -617,6 +651,12 @@ function CarouselPack({
     hoverPointerRef.current.x = 0;
     hoverPointerRef.current.y = 0;
   }, [active, hoverEnabled]);
+  useEffect(() => {
+    transitionCompleteCallbackRef.current = onTransitionToTearComplete;
+  }, [onTransitionToTearComplete]);
+  useEffect(() => {
+    transitionSettledRef.current = false;
+  }, [active, transitionToTear]);
 
   useFrame((state, delta) => {
     if (!slotRef.current || !packRef.current) {
@@ -626,6 +666,8 @@ function CarouselPack({
     const targetX = Math.sin(slotAngle) * CAROUSEL_RADIUS;
     const targetZ = Math.cos(slotAngle) * CAROUSEL_RADIUS;
     const targetY = Math.cos(slotAngle) * 0.02 + (active ? 0.06 : 0);
+    const transitionProgress = transitionProgressRef.current ?? 0;
+    const transitionMix = MathUtils.smoothstep(transitionProgress, 0, 1);
     hoverPointerRef.current.x = MathUtils.damp(
       hoverPointerRef.current.x,
       active && hoverEnabled ? hoverTargetRef.current.x : 0,
@@ -650,11 +692,47 @@ function CarouselPack({
         ? Math.sin(state.clock.elapsedTime * VIEWER_IDLE_ROLL_SPEED) * VIEWER_IDLE_ROLL_AMPLITUDE
         : 0
       : 0;
-    const targetScale = (active ? 0.8 : 0.72) + (hovered && hoverEnabled ? 0.015 : 0);
+    const baseScale = (active ? 0.8 : 0.72) + (hovered && hoverEnabled ? 0.015 : 0);
+    const targetScale = active
+      ? MathUtils.lerp(baseScale, 0.86, transitionMix)
+      : MathUtils.lerp(baseScale, baseScale * CAROUSEL_TO_TEAR_INACTIVE_SCALE_FACTOR, transitionMix);
+    const inactiveFade = active ? 1 : Math.pow(1 - transitionMix, 1.35);
 
-    slotRef.current.position.x = targetX;
-    slotRef.current.position.y = MathUtils.damp(slotRef.current.position.y, targetY, 5, delta);
-    slotRef.current.position.z = targetZ;
+    let targetSlotX = targetX;
+    let targetSlotY = targetY;
+    let targetSlotZ = targetZ;
+
+    if (transitionMix > 0.001 && ringGroupRef.current) {
+      ringGroupRef.current.updateWorldMatrix(true, false);
+
+      if (active) {
+        const targetLocal = ringGroupRef.current.worldToLocal(
+          transitionTargetVectorRef.current.set(0, TEAR_STAGE_WORLD_Y, 0),
+        );
+
+        targetSlotX = MathUtils.lerp(targetX, targetLocal.x, transitionMix);
+        targetSlotY = MathUtils.lerp(targetY, targetLocal.y, transitionMix);
+        targetSlotZ = MathUtils.lerp(targetZ, targetLocal.z, transitionMix);
+      } else {
+        const targetWorld = ringGroupRef.current.localToWorld(
+          transitionWorldPositionRef.current.set(targetX, targetY, targetZ),
+        );
+
+        targetWorld.z -= CAROUSEL_TO_TEAR_INACTIVE_DEPTH_OFFSET * transitionMix;
+
+        const targetLocal = ringGroupRef.current.worldToLocal(
+          transitionTargetVectorRef.current.copy(targetWorld),
+        );
+
+        targetSlotX = targetLocal.x;
+        targetSlotY = targetLocal.y;
+        targetSlotZ = targetLocal.z;
+      }
+    }
+
+    slotRef.current.position.x = MathUtils.damp(slotRef.current.position.x, targetSlotX, 5.8, delta);
+    slotRef.current.position.y = MathUtils.damp(slotRef.current.position.y, targetSlotY, 5.8, delta);
+    slotRef.current.position.z = MathUtils.damp(slotRef.current.position.z, targetSlotZ, 5.8, delta);
     slotRef.current.rotation.y = slotAngle;
 
     packRef.current.rotation.x = active
@@ -670,6 +748,44 @@ function CarouselPack({
     const currentScale = packRef.current.scale.x;
     const dampedScale = MathUtils.damp(currentScale, targetScale, 5, delta);
     packRef.current.scale.setScalar(dampedScale);
+
+    if (bodyMaterialRef.current) {
+      bodyMaterialRef.current.opacity = MathUtils.damp(
+        bodyMaterialRef.current.opacity,
+        inactiveFade,
+        6,
+        delta,
+      );
+    }
+
+    if (shadowMaterialRef.current) {
+      shadowMaterialRef.current.opacity = MathUtils.damp(
+        shadowMaterialRef.current.opacity,
+        (active ? 0.16 : 0.1) * inactiveFade,
+        6,
+        delta,
+      );
+    }
+
+    if (
+      active &&
+      transitionToTear &&
+      !transitionSettledRef.current &&
+      transitionProgress > 0.985
+    ) {
+      const worldPosition = slotRef.current.getWorldPosition(transitionWorldPositionRef.current);
+      const targetWorld = transitionTargetVectorRef.current.set(0, TEAR_STAGE_WORLD_Y, 0);
+      const distanceToTarget = worldPosition.distanceTo(targetWorld);
+      const scaleDelta = Math.abs(packRef.current.scale.x - 0.86);
+
+      if (
+        distanceToTarget < CAROUSEL_TO_TEAR_SETTLE_DISTANCE &&
+        scaleDelta < CAROUSEL_TO_TEAR_SETTLE_SCALE_EPSILON
+      ) {
+        transitionSettledRef.current = true;
+        transitionCompleteCallbackRef.current?.();
+      }
+    }
   });
 
   function handleHoverMove(event: ThreeEvent<PointerEvent>) {
@@ -729,15 +845,23 @@ function CarouselPack({
 
         <mesh position={[0, -2.12, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[1.9, 48]} />
-          <meshBasicMaterial color="#000000" transparent opacity={active ? 0.16 : 0.1} />
+          <meshBasicMaterial
+            ref={shadowMaterialRef}
+            color="#000000"
+            transparent
+            opacity={active ? 0.16 : 0.1}
+          />
         </mesh>
 
         <mesh>
           <primitive attach="geometry" object={packGeometry} />
           <meshPhysicalMaterial
+            ref={bodyMaterialRef}
             {...PACK_MODEL_MATERIAL}
             emissive="#0d2d3d"
             emissiveIntensity={active ? 0.04 : 0.03}
+            transparent
+            opacity={1}
           />
         </mesh>
       </group>
@@ -752,26 +876,53 @@ function PackCarouselRig({
   dragPreview = 0,
   hoverEnabled = true,
   onPackClick,
+  transitionToTear = false,
+  onTransitionToTearComplete,
 }: PackCarouselSceneProps) {
   const ringRef = useRef<Group>(null);
+  const ringGroupRef = useRef<Group | null>(null);
+  const transitionProgressRef = useRef(0);
+  const outerFloorMaterialRef = useRef<MeshBasicMaterial>(null);
+  const innerFloorMaterialRef = useRef<MeshBasicMaterial>(null);
   const packGeometry = usePackModelGeometry();
   const carouselStep = (Math.PI * 2) / Math.max(rotationOffsets.length, 1);
 
   useEffect(() => () => packGeometry.dispose(), [packGeometry]);
+  useEffect(() => {
+    if (transitionToTear) {
+      return;
+    }
+
+    transitionProgressRef.current = 0;
+  }, [transitionToTear]);
 
   useFrame((state, delta) => {
+    transitionProgressRef.current = MathUtils.damp(
+      transitionProgressRef.current,
+      transitionToTear ? 1 : 0,
+      5.2,
+      delta,
+    );
+    const transitionMix = MathUtils.smoothstep(transitionProgressRef.current, 0, 1);
+
     state.camera.position.x = MathUtils.damp(state.camera.position.x, 0, 4, delta);
     state.camera.position.y = MathUtils.damp(
       state.camera.position.y,
-      0.52,
+      MathUtils.lerp(0.52, TRANSITION_PACK_SCENE_CAMERA_Y, transitionMix),
       4,
       delta,
     );
-    state.camera.lookAt(0, -0.1, -0.4);
+    state.camera.lookAt(
+      0,
+      MathUtils.lerp(-0.1, TRANSITION_PACK_SCENE_CAMERA_Y, transitionMix),
+      MathUtils.lerp(-0.4, 0, transitionMix),
+    );
 
     if (!ringRef.current) {
       return;
     }
+
+    ringGroupRef.current = ringRef.current;
 
     ringRef.current.rotation.y = MathUtils.damp(
       ringRef.current.rotation.y,
@@ -779,6 +930,24 @@ function PackCarouselRig({
       6.4,
       delta,
     );
+    if (outerFloorMaterialRef.current) {
+      outerFloorMaterialRef.current.opacity = MathUtils.damp(
+        outerFloorMaterialRef.current.opacity,
+        0.1 * (1 - transitionMix),
+        5,
+        delta,
+      );
+    }
+
+    if (innerFloorMaterialRef.current) {
+      innerFloorMaterialRef.current.opacity = MathUtils.damp(
+        innerFloorMaterialRef.current.opacity,
+        0.06 * (1 - transitionMix),
+        5,
+        delta,
+      );
+    }
+
   });
 
   return (
@@ -788,12 +957,12 @@ function PackCarouselRig({
       <group rotation={[CAROUSEL_TILT, 0, 0]} position={[0, -0.08, 0]}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.72, -2.2]}>
           <circleGeometry args={[11.6, 84]} />
-          <meshBasicMaterial color="#07101a" transparent opacity={0.1} />
+          <meshBasicMaterial ref={outerFloorMaterialRef} color="#07101a" transparent opacity={0.1} />
         </mesh>
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.68, -2.1]}>
           <circleGeometry args={[8.2, 72]} />
-          <meshBasicMaterial color="#0b1c2a" transparent opacity={0.06} />
+          <meshBasicMaterial ref={innerFloorMaterialRef} color="#0b1c2a" transparent opacity={0.06} />
         </mesh>
 
         <group ref={ringRef} position={[0, 0, CAROUSEL_CENTER_Z]}>
@@ -805,9 +974,15 @@ function PackCarouselRig({
               hoverEnabled={hoverEnabled}
               index={index}
               onClick={onPackClick}
+              onTransitionToTearComplete={
+                index === activeIndex ? onTransitionToTearComplete : undefined
+              }
               packGeometry={packGeometry}
+              ringGroupRef={ringGroupRef}
               rotationOffset={rotationOffset}
               slotAngle={index * carouselStep}
+              transitionToTear={transitionToTear}
+              transitionProgressRef={transitionProgressRef}
             />
           ))}
         </group>
@@ -819,17 +994,19 @@ function PackCarouselRig({
 }
 
 export function PackScene(props: PackSceneProps) {
+  const { cameraY = DEFAULT_PACK_SCENE_CAMERA_Y, ...rigProps } = props;
+
   return (
     <div className="pack-scene">
       <Canvas
-        camera={{ position: [0, 0.1, 10.9], fov: VIEWER_CANVAS_FOV }}
+        camera={{ position: [0, cameraY, 10.9], fov: VIEWER_CANVAS_FOV }}
         dpr={VIEWER_CANVAS_DPR}
         onCreated={({ gl }) => {
           gl.setClearColor(VIEWER_CANVAS_BACKGROUND, 1);
         }}
       >
         <Suspense fallback={null}>
-          <PackRig {...props} />
+          <PackRig {...rigProps} />
         </Suspense>
       </Canvas>
     </div>
