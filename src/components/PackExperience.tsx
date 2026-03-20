@@ -129,6 +129,7 @@ export function PackExperience() {
   const [tearAnchor, setTearAnchor] = useState(0.5);
   const [tearDirection, setTearDirection] = useState<1 | -1>(1);
   const [tearDocked, setTearDocked] = useState(false);
+  const [tearHintVisible, setTearHintVisible] = useState(false);
   const [cardLaunchOffset, setCardLaunchOffset] = useState(0);
   const cardSwipeRef = useRef<CardSwipeGesture>(initialCardSwipeGesture);
   const carouselSwipeRef = useRef<CarouselSwipeGesture>(initialCarouselSwipeGesture);
@@ -368,6 +369,7 @@ export function PackExperience() {
     setTearAnchor(0.5);
     setTearDirection(1);
     setTearDocked(false);
+    setTearHintVisible(false);
     setCardLaunchOffset(0);
     setStackEntryCardId(null);
     setHeroButtonVisible(false);
@@ -394,15 +396,19 @@ export function PackExperience() {
 
   useEffect(() => {
     if (stage !== 'tear') {
+      setTearHintVisible(false);
       return;
     }
 
     setTearDocked(false);
+    setTearHintVisible(false);
     const dockTimer = window.setTimeout(() => {
       setTearDocked(true);
     }, 16);
 
-    return () => window.clearTimeout(dockTimer);
+    return () => {
+      window.clearTimeout(dockTimer);
+    };
   }, [stage]);
 
   function preparePackOpening() {
@@ -420,6 +426,7 @@ export function PackExperience() {
     setTearAnchor(0.5);
     setTearDirection(1);
     setTearDocked(false);
+    setTearHintVisible(false);
     setCardLaunchOffset(0);
     setStackEntryCardId(null);
     setHeroButtonVisible(false);
@@ -1031,13 +1038,8 @@ export function PackExperience() {
         {stage === 'tear' || stage === 'opening' || stage === 'revealing' || stage === 'complete' ? (
           <div className="pack-ritual__reveal-shell">
             {stage === 'tear' ? (
-              <div className="pack-ritual__tear-copy">
-                <span className="eyebrow">Open The Pack</span>
-                <h1>Проведите линию чтобы открыть пак.</h1>
-                <p>
-                  Пак уходит вниз за экран, оставляя сверху только кромку. Веди горизонтально по
-                  верхней части и разрывай обертку вручную.
-                </p>
+              <div className={`pack-ritual__tear-copy ${tearHintVisible ? 'is-visible' : ''}`}>
+                Проведите по линии, чтобы открыть
               </div>
             ) : null}
 
@@ -1097,6 +1099,9 @@ export function PackExperience() {
                   dragPreview={0}
                   focusIndex={currentIndex}
                   hoverEnabled={false}
+                  onOffsetSettled={
+                    stage === 'tear' && tearDocked ? () => setTearHintVisible(true) : undefined
+                  }
                   offsetY={stage === 'opening' ? -5.4 : tearDocked ? -2.45 : 0.08}
                   packScale={0.86}
                   phase={stage === 'opening' ? 'tearing' : 'sealed'}

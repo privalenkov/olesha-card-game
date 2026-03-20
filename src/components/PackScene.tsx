@@ -46,6 +46,7 @@ interface PackSceneProps {
   focusIndex: number;
   offsetY?: number;
   packScale?: number;
+  onOffsetSettled?: () => void;
 }
 
 interface PackCarouselSceneProps {
@@ -57,7 +58,7 @@ interface PackCarouselSceneProps {
   onPackClick?: (index: number) => void;
 }
 
-const PACK_WIDTH = 2.3;
+const PACK_WIDTH = 2.4;
 const PACK_BODY_HEIGHT = 3.9;
 const PACK_BOTTOM_CRIMP = 0.42;
 const PACK_DEPTH = 0.14;
@@ -330,6 +331,7 @@ function PackRig({
   focusIndex,
   offsetY = 0,
   packScale = DEFAULT_PACK_SCALE,
+  onOffsetSettled,
 }: PackSceneProps) {
   const groupRef = useRef<Group>(null);
   const tearPivotRef = useRef<Group>(null);
@@ -337,11 +339,16 @@ function PackRig({
   const slitRef = useRef<Mesh>(null);
   const hoverTargetRef = useRef({ x: 0, y: 0 });
   const hoverPointerRef = useRef({ x: 0, y: 0 });
+  const offsetSettledRef = useRef(false);
+  const offsetSettledCallbackRef = useRef<(() => void) | undefined>(onOffsetSettled);
   const packGeometry = usePackModelGeometry();
   const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
   const showTearSeal = phase === 'tearing' || tearProgress > 0.001;
 
   useEffect(() => () => packGeometry.dispose(), [packGeometry]);
+  useEffect(() => {
+    offsetSettledCallbackRef.current = onOffsetSettled;
+  }, [onOffsetSettled]);
   useEffect(() => {
     if (hoverEnabled) {
       return;
@@ -352,6 +359,9 @@ function PackRig({
     hoverPointerRef.current.x = 0;
     hoverPointerRef.current.y = 0;
   }, [hoverEnabled]);
+  useEffect(() => {
+    offsetSettledRef.current = false;
+  }, [offsetY, phase]);
 
   useFrame((state, delta) => {
     if (!groupRef.current || !tearPivotRef.current || !tearOffsetRef.current || !slitRef.current) {
@@ -396,12 +406,21 @@ function PackRig({
       2.8,
       delta,
     );
+    const targetPositionY = offsetY + (opened ? -0.08 : 0.02);
     groupRef.current.position.y = MathUtils.damp(
       groupRef.current.position.y,
-      offsetY + (opened ? -0.08 : 0.02),
+      targetPositionY,
       3.4,
       delta,
     );
+    if (
+      offsetSettledCallbackRef.current &&
+      !offsetSettledRef.current &&
+      Math.abs(groupRef.current.position.y - targetPositionY) < 0.015
+    ) {
+      offsetSettledRef.current = true;
+      offsetSettledCallbackRef.current();
+    }
 
     tearPivotRef.current.position.x = MathUtils.damp(
       tearPivotRef.current.position.x,
