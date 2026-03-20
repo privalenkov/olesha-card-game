@@ -113,6 +113,42 @@ function getErrorMessage(error: unknown) {
   return String(error);
 }
 
+function formatErrorDetails(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const details = [error.message];
+  const cause = error.cause;
+
+  if (cause && typeof cause === 'object') {
+    const causeParts: string[] = [];
+    const entries = cause as Record<string, unknown>;
+
+    if (typeof entries.message === 'string' && entries.message.trim()) {
+      causeParts.push(entries.message.trim());
+    }
+
+    for (const key of ['code', 'errno', 'syscall', 'hostname', 'host', 'address', 'port']) {
+      const value = entries[key];
+
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
+        causeParts.push(`${key}=${String(value)}`);
+      }
+    }
+
+    if (causeParts.length > 0) {
+      details.push(`cause: ${causeParts.join(', ')}`);
+    }
+  }
+
+  return details.join(' | ');
+}
+
 function buildGoogleAuthUrl(state: string) {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', serverConfig.googleClientId);
@@ -977,6 +1013,7 @@ export async function buildApp() {
     try {
       tokens = await exchangeGoogleAuthorizationCode(code);
     } catch (error) {
+      const errorDetails = formatErrorDetails(error);
       request.log.error(
         {
           err: error,
@@ -985,6 +1022,7 @@ export async function buildApp() {
         },
         'Google OAuth token exchange failed.',
       );
+      request.log.error(`Google OAuth token exchange failed details: ${errorDetails}`);
       reply
         .code(502)
         .send(
@@ -1039,6 +1077,7 @@ export async function buildApp() {
     try {
       payload = await fetchGoogleUserInfo(tokens.access_token);
     } catch (error) {
+      const errorDetails = formatErrorDetails(error);
       request.log.error(
         {
           err: error,
@@ -1046,6 +1085,7 @@ export async function buildApp() {
         },
         'Google OAuth userinfo request failed.',
       );
+      request.log.error(`Google OAuth userinfo request failed details: ${errorDetails}`);
       reply
         .code(502)
         .send(
