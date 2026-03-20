@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import { type Dirent, type Stats } from 'node:fs';
+import https from 'node:https';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
@@ -161,22 +162,79 @@ function buildGoogleAuthUrl(state: string) {
   return url.toString();
 }
 
-async function exchangeGoogleAuthorizationCode(code: string) {
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      code,
-      client_id: serverConfig.googleClientId,
-      client_secret: serverConfig.googleClientSecret,
-      grant_type: 'authorization_code',
-      redirect_uri: serverConfig.googleCallbackUrl,
-    }),
+async function requestGoogleJson(
+  urlValue: string,
+  {
+    method = 'GET',
+    headers = {},
+    body,
+  }: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
+) {
+  const url = new URL(urlValue);
+
+  return new Promise<{ statusCode: number; responseText: string }>((resolve, reject) => {
+    const request = https.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port ? Number(url.port) : undefined,
+        path: `${url.pathname}${url.search}`,
+        method,
+        headers,
+        family: 4,
+      },
+      (response) => {
+        let responseText = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          responseText += chunk;
+        });
+        response.on('end', () => {
+          resolve({
+            statusCode: response.statusCode ?? 0,
+            responseText,
+          });
+        });
+      },
+    );
+
+    request.setTimeout(15000, () => {
+      const timeoutError = new Error(`Request to ${url.hostname} timed out`);
+      (timeoutError as NodeJS.ErrnoException).code = 'ETIMEDOUT';
+      request.destroy(timeoutError);
+    });
+    request.on('error', reject);
+
+    if (body) {
+      request.write(body);
+    }
+
+    request.end();
   });
-  const responseText = await response.text();
+}
+
+async function exchangeGoogleAuthorizationCode(code: string) {
+  const { statusCode, responseText } = await requestGoogleJson(
+    'https://oauth2.googleapis.com/token',
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        code,
+        client_id: serverConfig.googleClientId,
+        client_secret: serverConfig.googleClientSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: serverConfig.googleCallbackUrl,
+      }).toString(),
+    },
+  );
   let payload: GoogleTokenResponse | null = null;
 
   try {
@@ -185,26 +243,28 @@ async function exchangeGoogleAuthorizationCode(code: string) {
     payload = null;
   }
 
-  if (!response.ok) {
+  if (statusCode < 200 || statusCode >= 300) {
     const details =
       payload?.error_description?.trim() ||
       payload?.error?.trim() ||
       responseText.trim() ||
-      response.statusText;
-    throw new Error(`Token endpoint returned ${response.status}: ${details}`);
+      'Unknown Google token error';
+    throw new Error(`Token endpoint returned ${statusCode}: ${details}`);
   }
 
   return payload ?? {};
 }
 
 async function fetchGoogleUserInfo(accessToken: string) {
-  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+  const { statusCode, responseText } = await requestGoogleJson(
+    'https://openidconnect.googleapis.com/v1/userinfo',
+    {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
-  const responseText = await response.text();
+  );
   let payload: GoogleUserInfoResponse | null = null;
 
   try {
@@ -213,9 +273,9 @@ async function fetchGoogleUserInfo(accessToken: string) {
     payload = null;
   }
 
-  if (!response.ok) {
+  if (statusCode < 200 || statusCode >= 300) {
     throw new Error(
-      `Userinfo endpoint returned ${response.status}: ${responseText.trim() || response.statusText}`,
+      `Userinfo endpoint returned ${statusCode}: ${responseText.trim() || 'Unknown Google userinfo error'}`,
     );
   }
 
