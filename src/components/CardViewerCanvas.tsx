@@ -7,7 +7,7 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, type ThreeEvent, useFrame } from '@react-three/fiber';
 import { Float, Sparkles } from '@react-three/drei';
 import {
   AdditiveBlending,
@@ -185,8 +185,18 @@ const CARD_FACE = {
   height: CARD_HEIGHT,
 } as const;
 
+const CARD_HOVER_PLANE_WIDTH = CARD_FACE.width * 1.08;
+const CARD_HOVER_PLANE_HEIGHT = CARD_FACE.height * 1.08;
 const FLIP_PREVIEW_LIMIT = 0.72;
 const FLIP_TRIGGER_DISTANCE = 72;
+
+function getHoverYawDirection(rotationY: number) {
+  const normalizedRotation = MathUtils.euclideanModulo(rotationY, Math.PI * 2);
+  const showingBackSide =
+    normalizedRotation > Math.PI * 0.5 && normalizedRotation < Math.PI * 1.5;
+
+  return showingBackSide ? -1 : 1;
+}
 const edgeHighlightVertexShader = `
   varying vec2 vUv;
   varying vec3 vWorldPosition;
@@ -941,6 +951,7 @@ function CardRig({
   flipTargetRef,
   dragPreviewRef,
   pointer,
+  pointerTarget,
 }: {
   card: OwnedCard;
   introKey: string;
@@ -958,6 +969,7 @@ function CardRig({
   flipTargetRef: MutableRefObject<number>;
   dragPreviewRef: MutableRefObject<number>;
   pointer: Vector2;
+  pointerTarget: Vector2;
 }) {
   const outerGroupRef = useRef<Group>(null);
   const stackGroupRef = useRef<Group>(null);
@@ -1127,14 +1139,18 @@ function CardRig({
       return;
     }
 
+    pointer.x = MathUtils.damp(pointer.x, pointerTarget.x, 8, delta);
+    pointer.y = MathUtils.damp(pointer.y, pointerTarget.y, 8, delta);
+
     introRef.current = Math.min(introRef.current + delta * 1.6, 1);
     stackEntryRef.current = Math.max(stackEntryRef.current - delta / 0.42, 0);
     const easedIntro = 1 - (1 - introRef.current) * (1 - introRef.current);
     const stackEntryOffset = Math.pow(stackEntryRef.current, 0.86);
     const baseFlip = flipTargetRef.current;
     const dragPreview = dragPreviewRef.current;
-    const sharedYawTarget = pointer.x * VIEWER_HOVER_TILT_Y;
     const activeFlipTarget = baseFlip + dragPreview;
+    const hoverPointerX = pointer.x * getHoverYawDirection(activeFlipTarget);
+    const sharedYawTarget = hoverPointerX * VIEWER_HOVER_TILT_Y;
     const shakeStrength =
       shakeMode === 'veryrare' ? 1.25 : shakeMode === 'epic' ? 1 : shakeMode === 'rare' ? 0.8 : 0;
     const shakeX =
@@ -1241,10 +1257,12 @@ function CardRig({
     const yawTilt = Math.sin(totalYaw);
     const edgeTilt = Math.min(
       1,
-      Math.abs(outerGroupRef.current.rotation.x) * 2.6 + Math.abs(yawTilt) * 1.45 + Math.abs(pointer.x) * 0.35,
+      Math.abs(outerGroupRef.current.rotation.x) * 2.6 +
+        Math.abs(yawTilt) * 1.45 +
+        Math.abs(hoverPointerX) * 0.35,
     );
     const edgeTiltDirection = new Vector2(
-      yawTilt + pointer.x * 0.35,
+      yawTilt + hoverPointerX * 0.35,
       -outerGroupRef.current.rotation.x + pointer.y * 0.12,
     );
 
@@ -1262,7 +1280,7 @@ function CardRig({
       textures.foil.offset.y =
         0.02 + Math.cos(state.clock.elapsedTime * (0.26 + finish.shimmerBoost * 0.18)) * 0.035;
       textures.foil.rotation =
-        state.clock.elapsedTime * (0.035 + finish.shimmerBoost * 0.025) + pointer.x * 0.06;
+        state.clock.elapsedTime * (0.035 + finish.shimmerBoost * 0.025) + hoverPointerX * 0.06;
     }
 
     if (showDecorativeEffects && haloRef.current) {
@@ -1270,7 +1288,7 @@ function CardRig({
       const haloMaterial = haloRef.current.material as MeshBasicMaterial;
       haloMaterial.opacity = MathUtils.damp(
         haloMaterial.opacity,
-        0.06 + finish.shimmerBoost * 0.04 + Math.abs(pointer.x) * 0.02,
+        0.06 + finish.shimmerBoost * 0.04 + Math.abs(hoverPointerX) * 0.02,
         4,
         delta,
       );
@@ -1382,6 +1400,24 @@ function CardRig({
     }
   });
 
+  function handleHoverMove(event: ThreeEvent<PointerEvent>) {
+    if (!activeGroupRef.current) {
+      return;
+    }
+
+    event.stopPropagation();
+    const localPoint = activeGroupRef.current.worldToLocal(event.point.clone());
+    pointerTarget.set(
+      MathUtils.clamp(localPoint.x / (CARD_HOVER_PLANE_WIDTH * 0.5), -1, 1),
+      MathUtils.clamp(localPoint.y / (CARD_HOVER_PLANE_HEIGHT * 0.5), -1, 1),
+    );
+  }
+
+  function resetHover(event?: ThreeEvent<PointerEvent>) {
+    event?.stopPropagation();
+    pointerTarget.set(0, 0);
+  }
+
   if (!textures && !renderStackOnly) {
     return null;
   }
@@ -1467,6 +1503,16 @@ function CardRig({
             <group ref={activeGroupRef} visible={canRenderActiveCard}>
               {canRenderActiveCard && textures ? (
                 <>
+              <mesh
+                position={[0, 0, faceOffset + 0.06]}
+                onPointerMove={handleHoverMove}
+                onPointerOut={resetHover}
+                onPointerOver={handleHoverMove}
+              >
+                <planeGeometry args={[CARD_HOVER_PLANE_WIDTH, CARD_HOVER_PLANE_HEIGHT]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
+              </mesh>
+
               <mesh>
                 <primitive attach="geometry" object={bodyGeometry} />
                 <meshPhysicalMaterial
@@ -1835,6 +1881,7 @@ export function CardViewerCanvas({
     pointerId: null,
   });
   const pointer = useMemo(() => new Vector2(0, 0), []);
+  const pointerTarget = useMemo(() => new Vector2(0, 0), []);
 
   const applySide = (nextSide: CardSide, targetRotation = nextSide === 'back' ? Math.PI : 0) => {
     sideRef.current = nextSide;
@@ -1906,12 +1953,20 @@ export function CardViewerCanvas({
   useEffect(() => {
     suppressClickRef.current = false;
     pointer.set(0, 0);
+    pointerTarget.set(0, 0);
     resetMousePress();
     resetDragPointer();
     dragRef.current = initialDrag;
     dragPreviewRef.current = 0;
     applySide(initialSide);
-  }, [initialSide, introKey, pointer]);
+  }, [initialSide, introKey, pointer, pointerTarget]);
+
+  useEffect(() => {
+    if (!interactive) {
+      pointer.set(0, 0);
+      pointerTarget.set(0, 0);
+    }
+  }, [interactive, pointer, pointerTarget]);
 
   useEffect(() => {
     if (!forcedSide) {
@@ -1934,16 +1989,9 @@ export function CardViewerCanvas({
       clientY <= rect.bottom;
 
     if (!isInside && !dragRef.current.active) {
-      pointer.set(0, 0);
+      pointerTarget.set(0, 0);
       return;
     }
-
-    const normalizedX = ((clientX - rect.left) / rect.width) * 2 - 1;
-    const normalizedY = -((((clientY - rect.top) / rect.height) * 2) - 1);
-    pointer.set(
-      MathUtils.clamp(normalizedX, -1, 1),
-      MathUtils.clamp(normalizedY, -1, 1),
-    );
   };
 
   const syncPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2033,7 +2081,7 @@ export function CardViewerCanvas({
       window.removeEventListener('pointerup', handleWindowPointerUp);
       window.removeEventListener('pointercancel', handleWindowPointerCancel);
     };
-  }, [pointer]);
+  }, [pointerTarget]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!interactive) {
@@ -2186,7 +2234,7 @@ export function CardViewerCanvas({
       onPointerDown={handlePointerDown}
       onPointerLeave={() => {
         if (interactive && !dragRef.current.active && !mousePressRef.current.active) {
-          pointer.set(0, 0);
+          pointerTarget.set(0, 0);
         }
       }}
       onPointerMove={handlePointerMove}
@@ -2214,6 +2262,7 @@ export function CardViewerCanvas({
           flipTargetRef={flipTargetRef}
           dragPreviewRef={dragPreviewRef}
           pointer={pointer}
+          pointerTarget={pointerTarget}
         />
       </Canvas>
     </div>

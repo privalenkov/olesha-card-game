@@ -39,7 +39,7 @@
 .collection-hero__copy h1 {
   margin: 0;
   font-family: 'Inter', sans-serif;
-  font-size: clamp(2.7rem, 5vw, 4.8rem);
+  font-size: clamp(43px, 5vw, 77px);
   line-height: 0.96;
   letter-spacing: -0.04em;
   max-width: 10ch;
@@ -61,7 +61,7 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--cyan);
-  font-size: 0.72rem;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -88,7 +88,7 @@
 .hero-metrics strong,
 .collection-breakdown strong {
   font-family: 'Inter', sans-serif;
-  font-size: clamp(1.6rem, 2vw, 2.3rem);
+  font-size: clamp(26px, 2vw, 37px);
 }
 
 .hero-metrics span,
@@ -96,7 +96,7 @@
 .collection-reset,
 .hero-actions__hint {
   color: var(--copy-faint);
-  font-size: 0.82rem;
+  font-size: 13px;
 }
 
 .hero-actions,
@@ -108,12 +108,12 @@
 }
 
 .action-button {
-  padding: 14px 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 13px 22px;
+  border-radius: 8px;
+  border: none;
   background: rgba(255, 255, 255, 0.04);
   cursor: pointer;
-  font-size: 0.76rem;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -134,8 +134,7 @@
 }
 
 .action-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.22);
+  transform: scale(0.9);
 }
 
 .action-button:disabled {
@@ -144,10 +143,9 @@
 }
 
 .action-button--solid {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 16px 38px rgba(255, 31, 90, 0.28);
+  background: #EC0B43;
+  color: #F4F1DE;
+  box-shadow: none;
   font-weight: 700;
 }
 
@@ -223,7 +221,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   text-align: center;
   color: var(--copy-muted);
-  font-size: 0.84rem;
+  font-size: 13px;
   backdrop-filter: blur(14px);
 }
 
@@ -362,7 +360,7 @@
 .section-heading h2 {
   margin: 0;
   font-family: 'Inter', sans-serif;
-  font-size: clamp(2rem, 3vw, 3.2rem);
+  font-size: clamp(32px, 3vw, 51px);
   letter-spacing: -0.04em;
 }
 
@@ -393,7 +391,7 @@
   color: var(--rarity-color);
   box-shadow: 0 0 26px var(--rarity-glow);
   border: 1px solid color-mix(in srgb, var(--rarity-color) 32%, white 12%);
-  font-size: 0.76rem;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;

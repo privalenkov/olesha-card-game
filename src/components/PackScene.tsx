@@ -1,10 +1,11 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame, useLoader } from '@react-three/fiber';
+import { Canvas, type ThreeEvent, useFrame, useLoader } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import {
   AdditiveBlending,
   BufferGeometry,
   Color,
+  DoubleSide,
   Float32BufferAttribute,
   Group,
   MathUtils,
@@ -64,9 +65,11 @@ const TEAR_WIDTH = 3.2;
 const TEAR_HEIGHT = 0.54;
 const DEFAULT_PACK_SCALE = 0.8;
 const CAROUSEL_TILT = 0;
-const CAROUSEL_STEP = (Math.PI * 2) / 5;
 const CAROUSEL_RADIUS = 4.5;
 const CAROUSEL_CENTER_Z = -CAROUSEL_RADIUS - 0.54;
+const CAROUSEL_HOVER_PLANE_WIDTH = PACK_WIDTH * 1.18;
+const CAROUSEL_HOVER_PLANE_HEIGHT = PACK_TOTAL_HEIGHT + TEAR_HEIGHT + 0.24;
+const CAROUSEL_HOVER_PLANE_CENTER_Y = 0.08;
 const PACK_ACCENT_LIGHT = '#74dbff';
 const PACK_BODY_MATERIAL = {
   color: '#0d4c66',
@@ -203,6 +206,14 @@ function createTearStripShape(width: number, height: number) {
   return shape;
 }
 
+function getHoverYawDirection(rotationY: number) {
+  const normalizedRotation = MathUtils.euclideanModulo(rotationY, Math.PI * 2);
+  const showingBackSide =
+    normalizedRotation > Math.PI * 0.5 && normalizedRotation < Math.PI * 1.5;
+
+  return showingBackSide ? -1 : 1;
+}
+
 function MiniCard({
   card,
   index,
@@ -323,11 +334,23 @@ function PackRig({
   const tearPivotRef = useRef<Group>(null);
   const tearOffsetRef = useRef<Group>(null);
   const slitRef = useRef<Mesh>(null);
+  const hoverTargetRef = useRef({ x: 0, y: 0 });
+  const hoverPointerRef = useRef({ x: 0, y: 0 });
   const packGeometry = usePackModelGeometry();
   const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
   const showTearSeal = phase === 'tearing' || tearProgress > 0.001;
 
   useEffect(() => () => packGeometry.dispose(), [packGeometry]);
+  useEffect(() => {
+    if (hoverEnabled) {
+      return;
+    }
+
+    hoverTargetRef.current.x = 0;
+    hoverTargetRef.current.y = 0;
+    hoverPointerRef.current.x = 0;
+    hoverPointerRef.current.y = 0;
+  }, [hoverEnabled]);
 
   useFrame((state, delta) => {
     if (!groupRef.current || !tearPivotRef.current || !tearOffsetRef.current || !slitRef.current) {
@@ -337,8 +360,21 @@ function PackRig({
     const opened = phase !== 'sealed';
     const peelTarget = opened ? 1 : tearProgress;
     const anchorX = MathUtils.lerp(-TEAR_WIDTH * 0.28, TEAR_WIDTH * 0.28, tearAnchor);
-    const pointerX = hoverEnabled ? state.pointer.x : 0;
-    const pointerY = hoverEnabled ? state.pointer.y : 0;
+    hoverPointerRef.current.x = MathUtils.damp(
+      hoverPointerRef.current.x,
+      hoverEnabled ? hoverTargetRef.current.x : 0,
+      8,
+      delta,
+    );
+    hoverPointerRef.current.y = MathUtils.damp(
+      hoverPointerRef.current.y,
+      hoverEnabled ? hoverTargetRef.current.y : 0,
+      8,
+      delta,
+    );
+    const pointerX =
+      hoverPointerRef.current.x * getHoverYawDirection(rotationOffset + dragPreview);
+    const pointerY = hoverPointerRef.current.y;
     groupRef.current.rotation.y = MathUtils.damp(
       groupRef.current.rotation.y,
       rotationOffset + dragPreview + pointerX * VIEWER_HOVER_TILT_Y,
@@ -414,12 +450,45 @@ function PackRig({
     );
   });
 
+  function handleHoverMove(event: ThreeEvent<PointerEvent>) {
+    if (!groupRef.current) {
+      return;
+    }
+
+    const localPoint = groupRef.current.worldToLocal(event.point.clone());
+    hoverTargetRef.current.x = MathUtils.clamp(
+      localPoint.x / (CAROUSEL_HOVER_PLANE_WIDTH * 0.5),
+      -1,
+      1,
+    );
+    hoverTargetRef.current.y = MathUtils.clamp(
+      (localPoint.y - CAROUSEL_HOVER_PLANE_CENTER_Y) / (CAROUSEL_HOVER_PLANE_HEIGHT * 0.5),
+      -1,
+      1,
+    );
+  }
+
+  function resetHover() {
+    hoverTargetRef.current.x = 0;
+    hoverTargetRef.current.y = 0;
+  }
+
   return (
     <>
       <SharedViewerLighting accentColor={PACK_ACCENT_LIGHT} />
 
       <Float speed={1.35} rotationIntensity={0.06} floatIntensity={0.18}>
         <group ref={groupRef} scale={packScale}>
+          <mesh
+            position={[0, CAROUSEL_HOVER_PLANE_CENTER_Y, PACK_DEPTH / 2 + 0.18]}
+            onPointerMove={handleHoverMove}
+            onPointerOut={resetHover}
+            onPointerOver={handleHoverMove}
+          >
+            <planeGeometry args={[CAROUSEL_HOVER_PLANE_WIDTH, CAROUSEL_HOVER_PLANE_HEIGHT]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
+          </mesh>
+
           <mesh>
             <primitive attach="geometry" object={packGeometry} />
             <meshPhysicalMaterial
@@ -512,21 +581,49 @@ function CarouselPack({
   packGeometry: BufferGeometry;
   rotationOffset: number;
 }) {
-  const ref = useRef<Group>(null);
+  const slotRef = useRef<Group>(null);
+  const packRef = useRef<Group>(null);
   const [hovered, setHovered] = useState(false);
+  const hoverTargetRef = useRef({ x: 0, y: 0 });
+  const hoverPointerRef = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (active && hoverEnabled) {
+      return;
+    }
+
+    hoverTargetRef.current.x = 0;
+    hoverTargetRef.current.y = 0;
+    hoverPointerRef.current.x = 0;
+    hoverPointerRef.current.y = 0;
+  }, [active, hoverEnabled]);
 
   useFrame((state, delta) => {
-    if (!ref.current) {
+    if (!slotRef.current || !packRef.current) {
       return;
     }
 
     const targetX = Math.sin(slotAngle) * CAROUSEL_RADIUS;
     const targetZ = Math.cos(slotAngle) * CAROUSEL_RADIUS;
     const targetY = Math.cos(slotAngle) * 0.02 + (active ? 0.06 : 0);
-    const pointerX = active && hoverEnabled ? state.pointer.x : 0;
-    const pointerY = active && hoverEnabled ? state.pointer.y : 0;
+    hoverPointerRef.current.x = MathUtils.damp(
+      hoverPointerRef.current.x,
+      active && hoverEnabled ? hoverTargetRef.current.x : 0,
+      8,
+      delta,
+    );
+    hoverPointerRef.current.y = MathUtils.damp(
+      hoverPointerRef.current.y,
+      active && hoverEnabled ? hoverTargetRef.current.y : 0,
+      8,
+      delta,
+    );
+    const pointerX =
+      hoverPointerRef.current.x *
+      getHoverYawDirection(rotationOffset + (active ? dragPreview : 0));
+    const pointerY = hoverPointerRef.current.y;
     const targetRotationY =
-      slotAngle + rotationOffset + (active ? dragPreview : 0) + pointerX * VIEWER_HOVER_TILT_Y;
+      rotationOffset + (active ? dragPreview : 0) + pointerX * VIEWER_HOVER_TILT_Y;
     const targetRotationX = active ? -pointerY * VIEWER_HOVER_TILT_X + VIEWER_BASE_TILT_X : 0;
     const targetRotationZ = active
       ? hoverEnabled
@@ -535,68 +632,95 @@ function CarouselPack({
       : 0;
     const targetScale = (active ? 0.8 : 0.72) + (hovered && hoverEnabled ? 0.015 : 0);
 
-    ref.current.position.x = targetX;
-    ref.current.position.y = MathUtils.damp(ref.current.position.y, targetY, 5, delta);
-    ref.current.position.z = targetZ;
-    ref.current.rotation.x =
-      active && hoverEnabled
-        ? MathUtils.damp(ref.current.rotation.x, targetRotationX, 5, delta)
-        : targetRotationX;
-    ref.current.rotation.y =
-      active && (hoverEnabled || Math.abs(dragPreview) > 0.0001)
-        ? MathUtils.damp(ref.current.rotation.y, targetRotationY, 5.4, delta)
-        : targetRotationY;
-    ref.current.rotation.z =
-      active && hoverEnabled
-        ? MathUtils.damp(ref.current.rotation.z, targetRotationZ, 5, delta)
-        : targetRotationZ;
+    slotRef.current.position.x = targetX;
+    slotRef.current.position.y = MathUtils.damp(slotRef.current.position.y, targetY, 5, delta);
+    slotRef.current.position.z = targetZ;
+    slotRef.current.rotation.y = slotAngle;
 
-    const currentScale = ref.current.scale.x;
+    packRef.current.rotation.x = active
+      ? MathUtils.damp(packRef.current.rotation.x, targetRotationX, 5, delta)
+      : targetRotationX;
+    packRef.current.rotation.y = active
+      ? MathUtils.damp(packRef.current.rotation.y, targetRotationY, 5.4, delta)
+      : targetRotationY;
+    packRef.current.rotation.z = active
+      ? MathUtils.damp(packRef.current.rotation.z, targetRotationZ, 5, delta)
+      : targetRotationZ;
+
+    const currentScale = packRef.current.scale.x;
     const dampedScale = MathUtils.damp(currentScale, targetScale, 5, delta);
-    ref.current.scale.setScalar(dampedScale);
+    packRef.current.scale.setScalar(dampedScale);
   });
+
+  function handleHoverMove(event: ThreeEvent<PointerEvent>) {
+    if (!packRef.current) {
+      return;
+    }
+
+    event.stopPropagation();
+    setHovered(true);
+
+    if (!active || !hoverEnabled) {
+      return;
+    }
+
+    const localPoint = packRef.current.worldToLocal(event.point.clone());
+    hoverTargetRef.current.x = MathUtils.clamp(
+      localPoint.x / (CAROUSEL_HOVER_PLANE_WIDTH * 0.5),
+      -1,
+      1,
+    );
+    hoverTargetRef.current.y = MathUtils.clamp(
+      (localPoint.y - CAROUSEL_HOVER_PLANE_CENTER_Y) / (CAROUSEL_HOVER_PLANE_HEIGHT * 0.5),
+      -1,
+      1,
+    );
+  }
+
+  function resetHover(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    setHovered(false);
+    hoverTargetRef.current.x = 0;
+    hoverTargetRef.current.y = 0;
+  }
 
   return (
     <group
-      ref={ref}
+      ref={slotRef}
       onClick={(event) => {
         event.stopPropagation();
         onClick?.(index);
       }}
-      onPointerOut={(event) => {
-        event.stopPropagation();
-        setHovered(false);
-      }}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        setHovered(true);
-      }}
     >
-      <mesh
-        position={[0, 0.08, PACK_DEPTH / 2 + 0.18]}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClick?.(index);
-        }}
-      >
-        <planeGeometry args={[PACK_WIDTH * 1.18, PACK_TOTAL_HEIGHT + TEAR_HEIGHT + 0.24]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
+      <group ref={packRef}>
+        <mesh
+          position={[0, CAROUSEL_HOVER_PLANE_CENTER_Y, PACK_DEPTH / 2 + 0.18]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick?.(index);
+          }}
+          onPointerMove={handleHoverMove}
+          onPointerOut={resetHover}
+          onPointerOver={handleHoverMove}
+        >
+          <planeGeometry args={[CAROUSEL_HOVER_PLANE_WIDTH, CAROUSEL_HOVER_PLANE_HEIGHT]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
+        </mesh>
 
-      <mesh position={[0, -2.12, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.9, 48]} />
-        <meshBasicMaterial color="#000000" transparent opacity={active ? 0.16 : 0.1} />
-      </mesh>
+        <mesh position={[0, -2.12, -0.4]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[1.9, 48]} />
+          <meshBasicMaterial color="#000000" transparent opacity={active ? 0.16 : 0.1} />
+        </mesh>
 
-      <mesh>
-        <primitive attach="geometry" object={packGeometry} />
-        <meshPhysicalMaterial
-          {...PACK_MODEL_MATERIAL}
-          emissive="#0d2d3d"
-          emissiveIntensity={active ? 0.04 : 0.03}
-        />
-      </mesh>
-
+        <mesh>
+          <primitive attach="geometry" object={packGeometry} />
+          <meshPhysicalMaterial
+            {...PACK_MODEL_MATERIAL}
+            emissive="#0d2d3d"
+            emissiveIntensity={active ? 0.04 : 0.03}
+          />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -611,6 +735,7 @@ function PackCarouselRig({
 }: PackCarouselSceneProps) {
   const ringRef = useRef<Group>(null);
   const packGeometry = usePackModelGeometry();
+  const carouselStep = (Math.PI * 2) / Math.max(rotationOffsets.length, 1);
 
   useEffect(() => () => packGeometry.dispose(), [packGeometry]);
 
@@ -630,7 +755,7 @@ function PackCarouselRig({
 
     ringRef.current.rotation.y = MathUtils.damp(
       ringRef.current.rotation.y,
-      -orbitIndex * CAROUSEL_STEP,
+      -orbitIndex * carouselStep,
       6.4,
       delta,
     );
@@ -662,7 +787,7 @@ function PackCarouselRig({
               onClick={onPackClick}
               packGeometry={packGeometry}
               rotationOffset={rotationOffset}
-              slotAngle={index * CAROUSEL_STEP}
+              slotAngle={index * carouselStep}
             />
           ))}
         </group>

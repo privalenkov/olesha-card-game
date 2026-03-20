@@ -1,6 +1,6 @@
 .page--creator,
 .page--admin {
-  padding: 120px 28px 40px;
+  padding: 120px var(--page-gutter-desktop) 40px;
 }
 
 .creator-header,
@@ -16,7 +16,7 @@
 .admin-header strong {
   display: block;
   font-family: 'Inter', sans-serif;
-  font-size: clamp(1.8rem, 2.4vw, 2.6rem);
+  font-size: clamp(29px, 2.4vw, 42px);
 }
 
 .creator-header span,
@@ -122,12 +122,12 @@
 
 .creator-section__head strong {
   font-family: 'Inter', sans-serif;
-  font-size: 1.04rem;
+  font-size: 17px;
 }
 
 .creator-section__head span {
   color: var(--copy-faint);
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 
 .creator-admin-panel {
@@ -154,7 +154,7 @@
 
 .creator-field span {
   color: var(--copy-faint);
-  font-size: 0.84rem;
+  font-size: 13px;
 }
 
 .creator-field input,
@@ -220,7 +220,7 @@
 
 .creator-effect-grant strong {
   font-family: 'Inter', sans-serif;
-  font-size: 1rem;
+  font-size: 16px;
 }
 
 .creator-effect-grant span,
@@ -356,7 +356,7 @@
 
 .mask-editor__hint {
   color: var(--copy-faint);
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 
 .creator-empty {
@@ -401,7 +401,7 @@
 
 .proposal-card__body strong {
   font-family: 'Inter', sans-serif;
-  font-size: 1.32rem;
+  font-size: 21px;
 }
 
 .proposal-card__body span,
@@ -424,7 +424,7 @@
   display: grid;
   gap: 6px;
   color: var(--copy-faint);
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 
 .admin-users {
@@ -461,7 +461,7 @@
 
 .admin-dialog__head strong {
   font-family: 'Inter', sans-serif;
-  font-size: 1.28rem;
+  font-size: 20px;
 }
 
 .admin-dialog__head span {
@@ -505,7 +505,7 @@
 .release-notes-dialog__eyebrow {
   color: rgba(141, 229, 255, 0.92);
   font-family: 'Inter', sans-serif;
-  font-size: 0.82rem;
+  font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -517,14 +517,14 @@
 
 .release-notes-dialog__head strong {
   font-family: 'Inter', sans-serif;
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-size: clamp(29px, 4vw, 45px);
   line-height: 0.98;
 }
 
 .release-notes-dialog__head p {
   margin: 0;
   color: var(--copy-muted);
-  font-size: 1rem;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -606,7 +606,7 @@
 
 .admin-user-card__head strong {
   font-family: 'Inter', sans-serif;
-  font-size: 1.22rem;
+  font-size: 20px;
 }
 
 .admin-user-card__head span,
@@ -624,4 +624,3 @@
   display: flex;
   justify-content: flex-start;
 }
-

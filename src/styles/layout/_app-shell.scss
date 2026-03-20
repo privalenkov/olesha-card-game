@@ -14,7 +14,7 @@
   align-items: center;
   gap: 18px;
   width: 100%;
-  padding: 0 28px;
+  padding: 0 var(--page-gutter-desktop);
 }
 
 .topbar__spacer {
@@ -36,22 +36,22 @@
 .topbar__auth {
   justify-self: end;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 13px;
   flex-wrap: wrap;
 }
 
 .topbar__auth-button {
   padding: 12px 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  background: #EC0B43;
+  color: #F4F1DE;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  box-shadow: 0 0 28px rgba(255, 31, 90, 0.26);
+  box-shadow: 0 0 32px #ec0b43c9;
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
@@ -59,8 +59,8 @@
 }
 
 .topbar__auth-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 32px rgba(255, 31, 90, 0.34);
+  transform: scale(0.9);
+  box-shadow: 0 0 10px #ec0b43c9;
 }
 
 .topbar__auth-button--ghost {
@@ -73,29 +73,57 @@
   border-color: rgba(255, 255, 255, 0.18);
 }
 
+.topbar__auth-button--text {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #F4F1DE;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  transform-origin: center;
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 180ms ease;
+}
+
+.topbar__auth-button--text:hover {
+  transform: scale(1.1);
+  box-shadow: none;
+  color: #F4F1DE;
+}
+
 .topbar__hint {
   color: var(--copy-faint);
-  font-size: 0.72rem;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .topbar__hint--user {
+  color: #B3AF98;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-right: 22px;
 }
 
 .app-notifications {
   position: fixed;
   top: 92px;
-  right: 28px;
+  right: var(--page-gutter-desktop);
   z-index: 40;
   display: grid;
   gap: 12px;
-  width: min(360px, calc(100vw - 32px));
+  width: min(360px, calc(100vw - (var(--page-gutter-desktop) * 2)));
 }
 
 .app-notification {
@@ -127,14 +155,14 @@
 }
 
 .app-notification__copy strong {
-  font-size: 1rem;
+  font-size: 16px;
   font-weight: 700;
 }
 
 .app-notification__copy p {
   margin: 0;
   color: var(--copy-muted);
-  font-size: 0.94rem;
+  font-size: 15px;
 }
 
 .app-notification__actions {
@@ -149,7 +177,7 @@
   background: transparent;
   color: #fff;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 14px;
   letter-spacing: 0.04em;
 }
 
@@ -162,15 +190,14 @@
   border: 0;
   background: transparent;
   text-decoration: none;
-  color: rgba(247, 243, 233, 0.88);
+  color: #F4F1DE;
   transition:
     color 160ms ease,
     opacity 160ms ease,
     transform 160ms ease;
-  opacity: 0.76;
-  font-size: 0.8rem;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.05em;
+  letter-spacing: 100%;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -183,6 +210,4 @@
 .nav-link--active {
   color: var(--accent);
   opacity: 1;
-  transform: translateY(-1px);
 }
-

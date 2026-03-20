@@ -17,7 +17,7 @@
 }
 
 .page--collection {
-  padding: 120px 28px 40px;
+  padding: 120px var(--page-gutter-desktop) 40px;
 }
 
 .home-stage {
@@ -40,7 +40,7 @@
 .home-stage__status-wrap {
   position: absolute;
   left: 50%;
-  bottom: 72px;
+  bottom: 52px;
   z-index: 4;
   transform: translateX(-50%);
   display: grid;
@@ -52,42 +52,41 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   min-width: 168px;
   text-align: center;
   color: #f5f0df;
 }
 
 .home-stage__status strong {
-  font-size: clamp(3rem, 4.2vw, 4.8rem);
+  font-size: 30px;
   font-weight: 700;
-  line-height: 0.9;
-  letter-spacing: -0.05em;
+  line-height: 100%;
 }
 
 .home-stage__status span {
   color: #f5f0df;
-  font-size: 0.98rem;
+  font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 100%;
+  margin-top: 6px;
   text-transform: uppercase;
 }
 
 .home-stage__status small {
   color: var(--copy-faint);
-  font-size: 0.74rem;
+  font-size: 12px;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .home-stage__hint {
   color: var(--copy-faint);
-  font-size: 0.82rem;
+  font-size: 13px;
 }
 
 .home-stage__error {
   color: #ffb39b;
-  font-size: 0.9rem;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
 
@@ -109,7 +108,7 @@
 .pack-ritual__reveal-shell {
   position: relative;
   z-index: 1;
-  width: min(1480px, calc(100% - 64px));
+  width: min(1480px, calc(100% - (var(--page-gutter-desktop) * 2)));
   height: 100%;
   margin: 0 auto;
 }
@@ -139,7 +138,7 @@
 .pack-ritual__copy h1,
 .pack-ritual__tear-copy h1 {
   margin: 0;
-  font-size: clamp(2.8rem, 5vw, 5.6rem);
+  font-size: clamp(45px, 5vw, 90px);
   line-height: 0.92;
   letter-spacing: -0.05em;
 }
@@ -148,7 +147,7 @@
 .pack-ritual__tear-copy p {
   margin: 0;
   color: var(--copy-muted);
-  font-size: clamp(1rem, 1.4vw, 1.12rem);
+  font-size: clamp(16px, 1.4vw, 18px);
   max-width: 66ch;
 }
 
@@ -205,10 +204,10 @@
   left: 50%;
   top: 50%;
   z-index: 5;
-  min-width: 144px;
+  min-width: 82px;
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -50%) translateY(18px) scale(0.96);
+  transform: translate(-50%, -50%) translateY(1px) scale(0.985);
   transform-origin: center;
   will-change: opacity, transform;
   transition:
@@ -224,7 +223,7 @@
 }
 
 .action-button.pack-ritual__hero-open:hover:not(:disabled) {
-  transform: translate(-50%, -50%) translateY(-2px) scale(1.02);
+  transform: translate(-50%, -50%) translateY(-1px) scale(1.01);
   border-color: rgba(255, 255, 255, 0.26);
 }
 
@@ -236,7 +235,7 @@
 
 .pack-ritual__scene-hint {
   color: var(--copy-faint);
-  font-size: 0.92rem;
+  font-size: 15px;
   text-align: center;
 }
 
@@ -276,18 +275,6 @@
 
 .pack-carousel--3d.is-dragging {
   cursor: grabbing;
-}
-
-.pack-carousel__active-hitbox {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 2;
-  width: clamp(220px, 28vw, 400px);
-  height: clamp(360px, 62vh, 620px);
-  transform: translate(-50%, -50%);
-  touch-action: none;
-  cursor: pointer;
 }
 
 .pack-ritual__reveal-shell {
@@ -475,7 +462,7 @@
 
 .pack-reveal__counter strong {
   font-family: 'Inter', sans-serif;
-  font-size: clamp(1.8rem, 2vw, 2.4rem);
+  font-size: clamp(29px, 2vw, 38px);
   letter-spacing: -0.04em;
 }
 

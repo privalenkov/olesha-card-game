@@ -42,7 +42,7 @@ interface RevealProfile {
   cardDelayLabel: string;
 }
 
-const VISUAL_PACK_COUNT = 5;
+const VISUAL_PACK_COUNT = 8;
 const PACK_FLIP_PREVIEW_LIMIT = 0.72;
 const PACK_FLIP_TRIGGER_DISTANCE = 72;
 const CARD_LAUNCH_EXIT_DISTANCE = 860;
@@ -112,8 +112,7 @@ function getShortestCarouselDelta(targetIndex: number, activeIndex: number, tota
 }
 
 export function PackExperience() {
-  const { authConfigured, authenticated, error, login, openPack, state, timeUntilReset } =
-    useGame();
+  const { authenticated, error, openPack, state, timeUntilReset } = useGame();
   const [stage, setStage] = useState<ExperienceStage>('hero');
   const [heroRotationOffset, setHeroRotationOffset] = useState(0);
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -160,7 +159,6 @@ export function PackExperience() {
   const stackedCards = openedPack?.slice(currentIndex + 1) ?? [];
   const lastCard = openedPack ? currentIndex >= openedPack.length - 1 : false;
   const availablePacks = authenticated ? state.remainingPacks : state.dailyPackLimit;
-  const heroActionDisabled = authenticated ? state.remainingPacks <= 0 : !authConfigured;
 
   useEffect(() => {
     return () => {
@@ -178,6 +176,14 @@ export function PackExperience() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (authenticated) {
+      return;
+    }
+
+    setHeroButtonVisible(false);
+  }, [authenticated]);
 
   function showHeroButton() {
     setHeroButtonVisible(true);
@@ -468,6 +474,22 @@ export function PackExperience() {
     );
   }
 
+  function isCarouselPackZone(bounds: DOMRect, clientX: number, clientY: number) {
+    const localX = clientX - bounds.left;
+    const localY = clientY - bounds.top;
+    const zoneWidth = clamp(bounds.width * 0.28, 220, 400);
+    const zoneHeight = clamp(bounds.height * 0.62, 360, 620);
+    const zoneLeft = bounds.width / 2 - zoneWidth / 2;
+    const zoneTop = bounds.height / 2 - zoneHeight / 2;
+
+    return (
+      localX >= zoneLeft &&
+      localX <= zoneLeft + zoneWidth &&
+      localY >= zoneTop &&
+      localY <= zoneTop + zoneHeight
+    );
+  }
+
   function beginHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
     if (stage !== 'hero' && stage !== 'preparing') {
       return;
@@ -555,8 +577,7 @@ export function PackExperience() {
   }
 
   function handleHeroOpenAction() {
-    if (!authenticated) {
-      login();
+    if (!authenticated || state.remainingPacks <= 0) {
       return;
     }
 
@@ -568,6 +589,12 @@ export function PackExperience() {
       return;
     }
 
+    const insidePackZone = isCarouselPackZone(
+      event.currentTarget.getBoundingClientRect(),
+      event.clientX,
+      event.clientY,
+    );
+
     event.currentTarget.setPointerCapture(event.pointerId);
     setCarouselInteracting(true);
     carouselSwipeRef.current = {
@@ -577,27 +604,7 @@ export function PackExperience() {
       startY: event.clientY,
       lastStepX: event.clientX,
       moved: false,
-      mode: 'carousel',
-    };
-    setCarouselDragging(false);
-  }
-
-  function beginCarouselPackSwipe(event: ReactPointerEvent<HTMLDivElement>) {
-    if (stage !== 'carousel') {
-      return;
-    }
-
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setCarouselInteracting(true);
-    carouselSwipeRef.current = {
-      active: true,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      lastStepX: event.clientX,
-      moved: false,
-      mode: 'pack',
+      mode: insidePackZone ? 'pack' : 'carousel',
     };
     setCarouselDragging(false);
   }
@@ -942,28 +949,29 @@ export function PackExperience() {
                 tearDirection={1}
                 tearProgress={0}
               />
-              <button
-                className={`action-button action-button--solid pack-ritual__hero-open ${
-                  heroButtonVisible ? 'is-visible' : ''
-                }`}
-                disabled={heroActionDisabled}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleHeroOpenAction();
-                }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                }}
-                onPointerEnter={() => {
-                  showHeroButton();
-                }}
-                onPointerUp={(event) => {
-                  event.stopPropagation();
-                }}
-                type="button"
-              >
-                Открыть
-              </button>
+              {authenticated ? (
+                <button
+                  className={`action-button action-button--solid pack-ritual__hero-open ${
+                    heroButtonVisible ? 'is-visible' : ''
+                  }`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleHeroOpenAction();
+                  }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                  }}
+                  onPointerEnter={() => {
+                    showHeroButton();
+                  }}
+                  onPointerUp={(event) => {
+                    event.stopPropagation();
+                  }}
+                  type="button"
+                >
+                  Открыть
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -1015,14 +1023,6 @@ export function PackExperience() {
                   setStage('tear');
                 }}
                 rotationOffsets={visualPackRotationOffsets}
-              />
-
-              <div
-                className="pack-carousel__active-hitbox"
-                onPointerCancel={endCarouselSwipe}
-                onPointerDown={beginCarouselPackSwipe}
-                onPointerMove={moveCarouselSwipe}
-                onPointerUp={endCarouselSwipe}
               />
             </div>
           </div>

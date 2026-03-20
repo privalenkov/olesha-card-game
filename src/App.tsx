@@ -190,7 +190,7 @@ function AppShell() {
             <>
               <span className="topbar__hint topbar__hint--user">{user.name}</span>
               <button
-                className="topbar__auth-button topbar__auth-button--ghost"
+                className="topbar__auth-button topbar__auth-button--text"
                 onClick={async () => {
                   const nextName = window.prompt(
                     'Введите новый ник (латиница, цифры, "_" или "-")',
@@ -213,7 +213,11 @@ function AppShell() {
               >
                 Изменить ник
               </button>
-              <button className="topbar__auth-button" onClick={() => void logout()} type="button">
+              <button
+                className="topbar__auth-button topbar__auth-button--text"
+                onClick={() => void logout()}
+                type="button"
+              >
                 Выйти
               </button>
             </>
