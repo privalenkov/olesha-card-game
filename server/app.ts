@@ -4,7 +4,6 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
-import { OAuth2Client } from 'google-auth-library';
 import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
@@ -49,6 +48,25 @@ interface RateLimitEntry {
   resetAt: number;
 }
 
+interface GoogleTokenResponse {
+  access_token?: string;
+  expires_in?: number;
+  id_token?: string;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GoogleUserInfoResponse {
+  sub?: string;
+  email?: string;
+  email_verified?: boolean | string;
+  name?: string;
+  picture?: string;
+}
+
 const APP_CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -85,6 +103,87 @@ const MUTATION_RATE_LIMITS = {
 
 function isNodeErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function buildGoogleAuthUrl(state: string) {
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', serverConfig.googleClientId);
+  url.searchParams.set('redirect_uri', serverConfig.googleCallbackUrl);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('state', state);
+  url.searchParams.set('access_type', 'offline');
+  url.searchParams.set('prompt', 'consent');
+  return url.toString();
+}
+
+async function exchangeGoogleAuthorizationCode(code: string) {
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      code,
+      client_id: serverConfig.googleClientId,
+      client_secret: serverConfig.googleClientSecret,
+      grant_type: 'authorization_code',
+      redirect_uri: serverConfig.googleCallbackUrl,
+    }),
+  });
+  const responseText = await response.text();
+  let payload: GoogleTokenResponse | null = null;
+
+  try {
+    payload = JSON.parse(responseText) as GoogleTokenResponse;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const details =
+      payload?.error_description?.trim() ||
+      payload?.error?.trim() ||
+      responseText.trim() ||
+      response.statusText;
+    throw new Error(`Token endpoint returned ${response.status}: ${details}`);
+  }
+
+  return payload ?? {};
+}
+
+async function fetchGoogleUserInfo(accessToken: string) {
+  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const responseText = await response.text();
+  let payload: GoogleUserInfoResponse | null = null;
+
+  try {
+    payload = JSON.parse(responseText) as GoogleUserInfoResponse;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Userinfo endpoint returned ${response.status}: ${responseText.trim() || response.statusText}`,
+    );
+  }
+
+  return payload ?? {};
 }
 
 function normalizeNickname(value: unknown): string | null {
@@ -707,13 +806,6 @@ export async function buildApp() {
   });
   const store = createGameStore(serverConfig);
   const enforceRateLimit = createRateLimiter();
-  const oauthClient = serverConfig.googleAuthConfigured
-    ? new OAuth2Client(
-        serverConfig.googleClientId,
-        serverConfig.googleClientSecret,
-        serverConfig.googleCallbackUrl,
-      )
-    : null;
   let uploadsCleanupPromise: Promise<void> | null = null;
 
   await app.register(cookie);
@@ -844,7 +936,7 @@ export async function buildApp() {
       return;
     }
 
-    if (!oauthClient) {
+    if (!serverConfig.googleAuthConfigured) {
       reply
         .code(503)
         .send(apiError('AUTH_NOT_CONFIGURED', 'Google OAuth пока не настроен на сервере.'));
@@ -857,14 +949,7 @@ export async function buildApp() {
       maxAge: 10 * 60,
     });
 
-    const authUrl = oauthClient.generateAuthUrl({
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: ['openid', 'email', 'profile'],
-      state,
-    });
-
-    reply.redirect(authUrl);
+    reply.redirect(buildGoogleAuthUrl(state));
   });
 
   app.get('/api/auth/google/callback', async (request, reply) => {
@@ -872,7 +957,7 @@ export async function buildApp() {
       return;
     }
 
-    if (!oauthClient) {
+    if (!serverConfig.googleAuthConfigured) {
       reply.redirect(serverConfig.frontendRedirectUrl);
       return;
     }
@@ -887,21 +972,95 @@ export async function buildApp() {
       return;
     }
 
-    const { tokens } = await oauthClient.getToken(code);
+    let tokens: GoogleTokenResponse;
 
-    if (!tokens.id_token) {
-      reply.code(400).send(apiError('MISSING_ID_TOKEN', 'Google не вернул id_token.'));
+    try {
+      tokens = await exchangeGoogleAuthorizationCode(code);
+    } catch (error) {
+      request.log.error(
+        {
+          err: error,
+          googleCallbackUrl: serverConfig.googleCallbackUrl,
+          message: getErrorMessage(error),
+        },
+        'Google OAuth token exchange failed.',
+      );
+      reply
+        .code(502)
+        .send(
+          apiError(
+            'GOOGLE_AUTH_UNAVAILABLE',
+            'Сервер не смог завершить вход через Google. Попробуй ещё раз позже.',
+          ),
+        );
       return;
     }
 
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: serverConfig.googleClientId,
-    });
+    if (!tokens.id_token) {
+      request.log.error(
+        {
+          googleCallbackUrl: serverConfig.googleCallbackUrl,
+          tokenKeys: Object.keys(tokens),
+        },
+        'Google token response is missing id_token.',
+      );
+      reply
+        .code(502)
+        .send(
+          apiError(
+            'GOOGLE_AUTH_UNAVAILABLE',
+            'Сервер получил неполный ответ от Google. Попробуй ещё раз позже.',
+          ),
+        );
+      return;
+    }
 
-    const payload = ticket.getPayload();
+    if (!tokens.access_token) {
+      request.log.error(
+        {
+          googleCallbackUrl: serverConfig.googleCallbackUrl,
+          tokenKeys: Object.keys(tokens),
+        },
+        'Google token response is missing access_token.',
+      );
+      reply
+        .code(502)
+        .send(
+          apiError(
+            'GOOGLE_AUTH_UNAVAILABLE',
+            'Сервер получил неполный ответ от Google. Попробуй ещё раз позже.',
+          ),
+        );
+      return;
+    }
 
-    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+    let payload: GoogleUserInfoResponse;
+
+    try {
+      payload = await fetchGoogleUserInfo(tokens.access_token);
+    } catch (error) {
+      request.log.error(
+        {
+          err: error,
+          message: getErrorMessage(error),
+        },
+        'Google OAuth userinfo request failed.',
+      );
+      reply
+        .code(502)
+        .send(
+          apiError(
+            'GOOGLE_AUTH_UNAVAILABLE',
+            'Сервер не смог получить профиль Google. Попробуй ещё раз позже.',
+          ),
+        );
+      return;
+    }
+
+    const emailVerified =
+      payload.email_verified === true || payload.email_verified === 'true';
+
+    if (!payload?.sub || !payload.email || !emailVerified) {
       reply.code(403).send(apiError('INVALID_GOOGLE_PROFILE', 'Google-профиль не прошёл валидацию.'));
       return;
     }
