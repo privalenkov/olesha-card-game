@@ -23,6 +23,7 @@ import {
   SharedViewerLighting,
   SharedViewerPostProcessing,
   VIEWER_BASE_TILT_X,
+  VIEWER_CANVAS_BACKGROUND,
   VIEWER_CANVAS_DPR,
   VIEWER_CANVAS_FOV,
   VIEWER_HOVER_TILT_X,
@@ -801,7 +802,13 @@ function PackCarouselRig({
 export function PackScene(props: PackSceneProps) {
   return (
     <div className="pack-scene">
-      <Canvas camera={{ position: [0, 0.1, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
+      <Canvas
+        camera={{ position: [0, 0.1, 10.9], fov: VIEWER_CANVAS_FOV }}
+        dpr={VIEWER_CANVAS_DPR}
+        onCreated={({ gl }) => {
+          gl.setClearColor(VIEWER_CANVAS_BACKGROUND, 1);
+        }}
+      >
         <Suspense fallback={null}>
           <PackRig {...props} />
         </Suspense>
@@ -813,7 +820,13 @@ export function PackScene(props: PackSceneProps) {
 export function PackCarouselScene(props: PackCarouselSceneProps) {
   return (
     <div className="pack-scene pack-scene--carousel">
-      <Canvas camera={{ position: [0, 0.24, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
+      <Canvas
+        camera={{ position: [0, 0.24, 10.9], fov: VIEWER_CANVAS_FOV }}
+        dpr={VIEWER_CANVAS_DPR}
+        onCreated={({ gl }) => {
+          gl.setClearColor(VIEWER_CANVAS_BACKGROUND, 1);
+        }}
+      >
         <Suspense fallback={null}>
           <PackCarouselRig {...props} />
         </Suspense>

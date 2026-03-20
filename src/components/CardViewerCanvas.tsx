@@ -33,6 +33,7 @@ import {
   VIEWER_BASE_TILT_X,
   SharedViewerLighting,
   SharedViewerPostProcessing,
+  VIEWER_CANVAS_BACKGROUND,
   VIEWER_CANVAS_DPR,
   VIEWER_CANVAS_FOV,
   VIEWER_HOVER_TILT_X,
@@ -2244,6 +2245,9 @@ export function CardViewerCanvas({
       <Canvas
         camera={{ position: [0, 0, cameraZ], fov: VIEWER_CANVAS_FOV }}
         dpr={effectsPreset === 'stack' ? 1 : VIEWER_CANVAS_DPR}
+        onCreated={({ gl }) => {
+          gl.setClearColor(VIEWER_CANVAS_BACKGROUND, 1);
+        }}
       >
         <MemoCardRig
           card={card}

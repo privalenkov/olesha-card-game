@@ -11,6 +11,7 @@ export const VIEWER_LIGHTS = {
 
 export const VIEWER_CANVAS_FOV = 30;
 export const VIEWER_CANVAS_DPR: [number, number] = [1, 2];
+export const VIEWER_CANVAS_BACKGROUND = '#080910';
 export const VIEWER_VIGNETTE = {
   offset: 0.24,
   darkness: 0.36,
