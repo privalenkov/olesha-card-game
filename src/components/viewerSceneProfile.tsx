@@ -21,35 +21,65 @@ export const VIEWER_HOVER_TILT_Y = 0.34;
 export const VIEWER_IDLE_ROLL_SPEED = 0.45;
 export const VIEWER_IDLE_ROLL_AMPLITUDE = 0.018;
 
+interface SharedViewerLightingProps {
+  accentColor?: ColorRepresentation;
+  ambientColor?: ColorRepresentation;
+  ambientIntensity?: number;
+  hemisphereColor?: ColorRepresentation;
+  hemisphereGroundColor?: ColorRepresentation;
+  hemisphereIntensity?: number;
+  keyColor?: ColorRepresentation;
+  keyIntensity?: number;
+  rimColor?: ColorRepresentation;
+  rimIntensity?: number;
+  fillColor?: ColorRepresentation;
+  fillIntensity?: number;
+  accentIntensity?: number;
+}
+
 export function SharedViewerLighting({
   accentColor = '#74dbff',
-}: {
-  accentColor?: ColorRepresentation;
-}) {
+  ambientColor = '#e8eff8',
+  ambientIntensity = 0.36,
+  hemisphereColor = '#f6fbff',
+  hemisphereGroundColor = '#151923',
+  hemisphereIntensity = 0.78,
+  keyColor = '#fff1dd',
+  keyIntensity = 2.9,
+  rimColor = '#9ecbff',
+  rimIntensity = 1.05,
+  fillColor = '#cfe4ff',
+  fillIntensity = 14,
+  accentIntensity = 10,
+}: SharedViewerLightingProps) {
   return (
     <>
-      <ambientLight intensity={0.36} color="#e8eff8" />
-      <hemisphereLight intensity={0.78} color="#f6fbff" groundColor="#151923" />
+      <ambientLight intensity={ambientIntensity} color={ambientColor} />
+      <hemisphereLight
+        intensity={hemisphereIntensity}
+        color={hemisphereColor}
+        groundColor={hemisphereGroundColor}
+      />
       <directionalLight
         position={[VIEWER_LIGHTS.key.x, VIEWER_LIGHTS.key.y, VIEWER_LIGHTS.key.z]}
-        intensity={2.9}
-        color="#fff1dd"
+        intensity={keyIntensity}
+        color={keyColor}
       />
       <directionalLight
         position={[VIEWER_LIGHTS.rim.x, VIEWER_LIGHTS.rim.y, VIEWER_LIGHTS.rim.z]}
-        intensity={1.05}
-        color="#9ecbff"
+        intensity={rimIntensity}
+        color={rimColor}
       />
       <pointLight
         position={[VIEWER_LIGHTS.fill.x, VIEWER_LIGHTS.fill.y, VIEWER_LIGHTS.fill.z]}
-        intensity={14}
+        intensity={fillIntensity}
         distance={18}
         decay={2}
-        color="#cfe4ff"
+        color={fillColor}
       />
       <pointLight
         position={[VIEWER_LIGHTS.accent.x, VIEWER_LIGHTS.accent.y, VIEWER_LIGHTS.accent.z]}
-        intensity={10}
+        intensity={accentIntensity}
         distance={16}
         decay={2}
         color={accentColor}

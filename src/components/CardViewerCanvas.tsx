@@ -75,6 +75,55 @@ const holoTuning = {
   },
 } as const;
 
+const viewerLightStrengthByRarity: Record<Rarity, number> = {
+  common: 0.16,
+  uncommon: 0.26,
+  rare: 0.46,
+  epic: 0.68,
+  veryrare: 0.9,
+};
+
+function createViewerLightingPalette(rarity: Rarity, hue: string, accent: string) {
+  const richness = viewerLightStrengthByRarity[rarity];
+  const hueColor = new Color(hue);
+  const accentColor = new Color(accent);
+  const neutral = new Color('#edf4ff');
+  const warm = new Color('#fff2df');
+  const sky = new Color('#f7fbff');
+  const rimBase = new Color('#9ecbff');
+  const groundBase = new Color('#131722');
+
+  return {
+    ambientColor: neutral.clone().lerp(hueColor, 0.08 + richness * 0.08),
+    ambientIntensity: 0.34 + richness * 0.08,
+    hemisphereColor: sky.clone().lerp(accentColor, 0.12 + richness * 0.12),
+    hemisphereGroundColor: groundBase.clone().lerp(hueColor, 0.06 + richness * 0.08),
+    hemisphereIntensity: 0.76 + richness * 0.14,
+    keyColor: warm.clone().lerp(accentColor, 0.16 + richness * 0.22),
+    keyIntensity: 2.75 + richness * 0.45,
+    rimColor: rimBase.clone().lerp(hueColor, 0.22 + richness * 0.34),
+    rimIntensity: 1 + richness * 0.22,
+    fillColor: neutral.clone().lerp(hueColor, 0.18 + richness * 0.28),
+    fillIntensity: 12.8 + richness * 3.4,
+    accentColor: accentColor.clone().lerp(hueColor, 0.28 + richness * 0.16),
+    accentIntensity: 9.8 + richness * 4.4,
+  };
+}
+
+function createViewerHighlightPalette(rarity: Rarity, hue: string, accent: string) {
+  const richness = viewerLightStrengthByRarity[rarity];
+  const hueColor = new Color(hue);
+  const accentColor = new Color(accent);
+  const white = new Color('#ffffff');
+  const coolBack = new Color('#eef4ff');
+
+  return {
+    glare: accentColor.clone().lerp(hueColor, 0.5).lerp(white, 0.1 + richness * 0.06),
+    edgeFront: accentColor.clone().lerp(hueColor, 0.42).lerp(white, 0.12 + richness * 0.08),
+    edgeBack: hueColor.clone().lerp(coolBack, 0.16),
+  };
+}
+
 type ViewerEffectsPreset = 'full' | 'stack' | 'diagnostic';
 type CardSide = 'front' | 'back';
 type ViewerShakeMode = 'none' | 'rare' | 'epic' | 'veryrare';
@@ -485,6 +534,7 @@ const glossFragmentShader = `
   uniform vec3 uKeyLightPos;
   uniform vec3 uFillLightPos;
   uniform vec3 uAccentLightPos;
+  uniform vec3 uGlareColor;
   uniform float uGlossiness;
   uniform vec2 uPointer;
 
@@ -550,7 +600,8 @@ const glossFragmentShader = `
     highlight *= glossiness;
 
     float alpha = clamp(mask * highlight * mix(0.56, 0.94, glossiness), 0.0, 0.92);
-    vec3 color = vec3(1.0) * highlight * mask * (0.94 + glossiness * 0.22);
+    vec3 glareTint = mix(uGlareColor, vec3(1.0), 0.12 + glossiness * 0.08);
+    vec3 color = glareTint * highlight * mask * (0.94 + glossiness * 0.22);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -936,6 +987,14 @@ function CardRig({
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const tuning = holoTuning[card.rarity];
+  const viewerLighting = useMemo(
+    () => createViewerLightingPalette(card.rarity, meta.hue, meta.accent),
+    [card.rarity, meta.accent, meta.hue],
+  );
+  const highlightPalette = useMemo(
+    () => createViewerHighlightPalette(card.rarity, meta.hue, meta.accent),
+    [card.rarity, meta.accent, meta.hue],
+  );
   const glossiness = MathUtils.clamp(getLayerValue(card, 'spot_gloss', 'shimmer'), 0, 1);
   const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
   const sugarLayerWeights = useMemo(() => new Vector3(1, 0, 0), []);
@@ -1027,6 +1086,7 @@ function CardRig({
 
     if (glossShaderRef.current?.uniforms) {
       glossShaderRef.current.uniforms.uGlossMap.value = textures.glossMask;
+      glossShaderRef.current.uniforms.uGlareColor.value.copy(highlightPalette.glare);
       glossShaderRef.current.uniforms.uGlossiness.value = glossiness;
       glossShaderRef.current.uniformsNeedUpdate = true;
       glossShaderRef.current.needsUpdate = true;
@@ -1044,7 +1104,7 @@ function CardRig({
         material.uniformsNeedUpdate = true;
         material.needsUpdate = true;
       });
-  }, [glossiness, meta.accent, meta.hue, sugarIntensity, textures]);
+  }, [glossiness, highlightPalette.glare, meta.accent, meta.hue, sugarIntensity, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
@@ -1242,7 +1302,9 @@ function CardRig({
       edgeRef.current.uniforms.uTime.value = state.clock.elapsedTime;
       edgeRef.current.uniforms.uTilt.value = edgeTilt;
       edgeRef.current.uniforms.uTiltDirection.value.copy(edgeTiltDirection);
-      edgeRef.current.uniforms.uTint.value.set(frontFacing ? '#f7fbff' : '#eef4ff');
+      edgeRef.current.uniforms.uTint.value.copy(
+        frontFacing ? highlightPalette.edgeFront : highlightPalette.edgeBack,
+      );
     }
 
     if (enableEdgeHighlight && edgeMeshRef.current) {
@@ -1326,7 +1388,21 @@ function CardRig({
 
   return (
     <>
-      <SharedViewerLighting accentColor={meta.accent} />
+      <SharedViewerLighting
+        accentColor={viewerLighting.accentColor}
+        accentIntensity={viewerLighting.accentIntensity}
+        ambientColor={viewerLighting.ambientColor}
+        ambientIntensity={viewerLighting.ambientIntensity}
+        fillColor={viewerLighting.fillColor}
+        fillIntensity={viewerLighting.fillIntensity}
+        hemisphereColor={viewerLighting.hemisphereColor}
+        hemisphereGroundColor={viewerLighting.hemisphereGroundColor}
+        hemisphereIntensity={viewerLighting.hemisphereIntensity}
+        keyColor={viewerLighting.keyColor}
+        keyIntensity={viewerLighting.keyIntensity}
+        rimColor={viewerLighting.rimColor}
+        rimIntensity={viewerLighting.rimIntensity}
+      />
 
       {showDecorativeEffects ? (
         <mesh ref={ringRef} position={[0, 0.04, -1.24]}>
@@ -1419,7 +1495,7 @@ function CardRig({
                     blending={AdditiveBlending}
                     toneMapped={false}
                     uniforms={{
-                      uTint: { value: new Color('#f7fbff') },
+                      uTint: { value: highlightPalette.edgeFront.clone() },
                       uTime: { value: 0 },
                       uTilt: { value: 0 },
                       uTiltDirection: { value: new Vector2(0, 0) },
@@ -1536,6 +1612,7 @@ function CardRig({
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uGlareColor: { value: highlightPalette.glare.clone() },
                         uGlossiness: { value: glossiness },
                         uPointer: { value: new Vector2(0, 0) },
                       }}
