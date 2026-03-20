@@ -1,0 +1,186 @@
+@media (max-width: 860px) {
+  .app-shell {
+    padding: 0;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 0 16px;
+    justify-items: center;
+  }
+
+  .topbar__spacer {
+    display: none;
+  }
+
+  .topbar__nav,
+  .topbar__auth {
+    width: 100%;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .topbar__auth {
+    justify-self: center;
+  }
+
+  .hero-panel,
+  .collection-hero {
+    padding: 22px;
+  }
+
+  .pack-ritual__hero,
+  .pack-ritual__carousel-shell,
+  .pack-ritual__reveal-shell {
+    width: calc(100% - 32px);
+  }
+
+  .pack-ritual__hero {
+    padding-top: 34px;
+    padding-bottom: 150px;
+  }
+
+  .pack-ritual__copy h1,
+  .pack-ritual__tear-copy h1 {
+    font-size: clamp(2.4rem, 8vw, 4.2rem);
+  }
+
+  .pack-carousel {
+    min-height: 560px;
+  }
+
+  .pack-carousel--3d {
+    min-height: 100vh;
+    height: 100vh;
+  }
+
+  .pack-ritual__scene-shell {
+    min-height: 460px;
+    height: min(62vh, 620px);
+  }
+
+  .pack-ritual__scene-shell--fullscreen {
+    min-height: 100vh;
+    height: 100vh;
+  }
+
+  .home-stage__status-wrap {
+    bottom: 52px;
+  }
+
+  .pack-ritual__dock-stage {
+    border-radius: 28px;
+  }
+
+  .pack-reveal__stack {
+    width: min(64vw, 420px);
+  }
+
+  .pack-reveal__hud {
+    top: auto;
+    right: auto;
+    left: 50%;
+    bottom: 114px;
+    transform: translateX(-50%);
+    width: min(420px, calc(100% - 16px));
+    align-items: center;
+  }
+
+  .pack-reveal__counter {
+    text-align: center;
+  }
+
+  .hero-metrics,
+  .featured-grid,
+  .collection-breakdown {
+    grid-template-columns: 1fr;
+  }
+
+  .gesture-stage,
+  .reveal-stage__viewer,
+  .collection-preview-card {
+    min-height: 480px;
+  }
+
+  .gesture-stage--fullscreen {
+    min-height: 100vh;
+  }
+
+  .gesture-stage__tips {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .collection-grid--minimal {
+    grid-template-columns: repeat(auto-fit, minmax(124px, 124px));
+    gap: 14px;
+  }
+
+  .creator-layout,
+  .proposal-card {
+    grid-template-columns: 1fr;
+  }
+
+  .creator-header,
+  .admin-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .creator-preview {
+    position: relative;
+    top: 0;
+    height: min(78vh, 760px);
+    min-height: 560px;
+  }
+
+  .creator-row {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-breakdown--minimal {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-breakdown {
+    justify-content: center;
+  }
+
+  .page--collection {
+    padding: 112px 18px 28px;
+  }
+
+  .home-stage__status {
+    bottom: 32px;
+    width: calc(100% - 32px);
+  }
+
+  .collection-overlay__viewer {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .collection-overlay__close {
+    top: 22px;
+    right: 18px;
+  }
+
+  .admin-user-card__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .release-notes-dialog {
+    padding: 22px;
+    border-radius: 24px;
+  }
+
+  .release-notes-dialog__list li {
+    padding: 14px 14px 14px 40px;
+  }
+}
+

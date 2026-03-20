@@ -112,7 +112,8 @@ function getShortestCarouselDelta(targetIndex: number, activeIndex: number, tota
 }
 
 export function PackExperience() {
-  const { authenticated, error, openPack, state, timeUntilReset } = useGame();
+  const { authConfigured, authenticated, error, login, openPack, state, timeUntilReset } =
+    useGame();
   const [stage, setStage] = useState<ExperienceStage>('hero');
   const [heroRotationOffset, setHeroRotationOffset] = useState(0);
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -142,6 +143,7 @@ export function PackExperience() {
   const [carouselSliding, setCarouselSliding] = useState(false);
   const [carouselInteracting, setCarouselInteracting] = useState(false);
   const [stackEntryCardId, setStackEntryCardId] = useState<string | null>(null);
+  const [heroButtonVisible, setHeroButtonVisible] = useState(false);
 
   const currentCard = openedPack?.[currentIndex] ?? null;
   const revealProfile = currentCard ? revealProfiles[currentCard.rarity] : null;
@@ -157,6 +159,8 @@ export function PackExperience() {
     : tearAnchor;
   const stackedCards = openedPack?.slice(currentIndex + 1) ?? [];
   const lastCard = openedPack ? currentIndex >= openedPack.length - 1 : false;
+  const availablePacks = authenticated ? state.remainingPacks : state.dailyPackLimit;
+  const heroActionDisabled = authenticated ? state.remainingPacks <= 0 : !authConfigured;
 
   useEffect(() => {
     return () => {
@@ -174,6 +178,14 @@ export function PackExperience() {
       }
     };
   }, []);
+
+  function showHeroButton() {
+    setHeroButtonVisible(true);
+  }
+
+  function hideHeroButton() {
+    setHeroButtonVisible(false);
+  }
 
   useEffect(() => {
     if (stage !== 'revealing' || !currentCard) {
@@ -336,7 +348,6 @@ export function PackExperience() {
       window.clearTimeout(cardEntryTimerRef.current);
       cardEntryTimerRef.current = null;
     }
-
     setStage('hero');
     setHeroRotationOffset(0);
     setCarouselIndex(0);
@@ -353,6 +364,7 @@ export function PackExperience() {
     setTearDocked(false);
     setCardLaunchOffset(0);
     setStackEntryCardId(null);
+    setHeroButtonVisible(false);
     cardSwipeRef.current = initialCardSwipeGesture;
     heroFlipSwipeRef.current = initialCardSwipeGesture;
     carouselSwipeRef.current = initialCarouselSwipeGesture;
@@ -404,6 +416,7 @@ export function PackExperience() {
     setTearDocked(false);
     setCardLaunchOffset(0);
     setStackEntryCardId(null);
+    setHeroButtonVisible(false);
     setVisualPackRotationOffsets(Array.from({ length: VISUAL_PACK_COUNT }, () => heroRotationOffset));
     setCarouselIndex(0);
     setCarouselOrbitIndex(0);
@@ -439,13 +452,20 @@ export function PackExperience() {
     );
   }
 
-  function isCenteredPackFlipZone(bounds: DOMRect, clientX: number, clientY: number) {
+  function isHeroPackZone(bounds: DOMRect, clientX: number, clientY: number) {
     const localX = clientX - bounds.left;
     const localY = clientY - bounds.top;
-    const withinCenterX = localX >= bounds.width * 0.32 && localX <= bounds.width * 0.68;
-    const withinLowerHalf = localY >= bounds.height * 0.48 && localY <= bounds.height * 0.82;
+    const zoneWidth = clamp(bounds.width * 0.19, 240, 340);
+    const zoneHeight = clamp(bounds.height * 0.62, 470, 680);
+    const zoneLeft = bounds.width / 2 - zoneWidth / 2;
+    const zoneTop = bounds.height / 2 - zoneHeight / 2;
 
-    return withinCenterX && withinLowerHalf;
+    return (
+      localX >= zoneLeft &&
+      localX <= zoneLeft + zoneWidth &&
+      localY >= zoneTop &&
+      localY <= zoneTop + zoneHeight
+    );
   }
 
   function beginHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
@@ -453,9 +473,18 @@ export function PackExperience() {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
+    const insidePackZone = isHeroPackZone(
+      event.currentTarget.getBoundingClientRect(),
+      event.clientX,
+      event.clientY,
+    );
+    if (insidePackZone) {
+      showHeroButton();
+    } else {
+      hideHeroButton();
+    }
 
-    if (!isCenteredPackFlipZone(bounds, event.clientX, event.clientY)) {
+    if (!insidePackZone) {
       return;
     }
 
@@ -470,6 +499,17 @@ export function PackExperience() {
 
   function endHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
     const swipe = heroFlipSwipeRef.current;
+    const insidePackZone = isHeroPackZone(
+      event.currentTarget.getBoundingClientRect(),
+      event.clientX,
+      event.clientY,
+    );
+
+    if (insidePackZone) {
+      showHeroButton();
+    } else {
+      hideHeroButton();
+    }
 
     if (!swipe.active || swipe.pointerId !== event.pointerId) {
       return;
@@ -488,6 +528,17 @@ export function PackExperience() {
 
   function moveHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
     const swipe = heroFlipSwipeRef.current;
+    const insidePackZone = isHeroPackZone(
+      event.currentTarget.getBoundingClientRect(),
+      event.clientX,
+      event.clientY,
+    );
+
+    if (insidePackZone || swipe.active) {
+      showHeroButton();
+    } else {
+      hideHeroButton();
+    }
 
     if (!swipe.active || swipe.pointerId !== event.pointerId) {
       return;
@@ -501,6 +552,15 @@ export function PackExperience() {
     }
 
     setHeroFlipPreview(clamp(deltaX / 180, -1, 1) * PACK_FLIP_PREVIEW_LIMIT);
+  }
+
+  function handleHeroOpenAction() {
+    if (!authenticated) {
+      login();
+      return;
+    }
+
+    preparePackOpening();
   }
 
   function beginCarouselSwipe(event: ReactPointerEvent<HTMLDivElement>) {
@@ -860,9 +920,14 @@ export function PackExperience() {
         {stage === 'hero' ? (
           <div className="pack-ritual__fullscreen-stage">
             <div
-              className="pack-ritual__scene-shell pack-ritual__scene-shell--fullscreen"
+              className="pack-ritual__scene-shell pack-ritual__scene-shell--fullscreen pack-ritual__scene-shell--hero"
               onPointerCancel={endHeroFlipSwipe}
               onPointerDown={beginHeroFlipSwipe}
+              onPointerLeave={() => {
+                if (!heroFlipSwipeRef.current.active) {
+                  hideHeroButton();
+                }
+              }}
               onPointerMove={moveHeroFlipSwipe}
               onPointerUp={endHeroFlipSwipe}
             >
@@ -877,16 +942,27 @@ export function PackExperience() {
                 tearDirection={1}
                 tearProgress={0}
               />
-            </div>
-
-            <div className="pack-ritual__cta">
               <button
-                className="action-button action-button--solid pack-ritual__open"
-                disabled={authenticated && state.remainingPacks <= 0}
-                onClick={preparePackOpening}
+                className={`action-button action-button--solid pack-ritual__hero-open ${
+                  heroButtonVisible ? 'is-visible' : ''
+                }`}
+                disabled={heroActionDisabled}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleHeroOpenAction();
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onPointerEnter={() => {
+                  showHeroButton();
+                }}
+                onPointerUp={(event) => {
+                  event.stopPropagation();
+                }}
                 type="button"
               >
-                Выбрать пак
+                Открыть
               </button>
             </div>
           </div>
@@ -1053,11 +1129,12 @@ export function PackExperience() {
       </div>
 
       {stage === 'hero' ? (
-        <div className="home-stage__status">
-          <strong>
-            {state.remainingPacks} из {state.dailyPackLimit}
-          </strong>
-          <span>Обновление паков через: {timeUntilReset}</span>
+        <div className="home-stage__status-wrap">
+          <div className="home-stage__status">
+            <strong>{availablePacks}</strong>
+            <span>Доступно</span>
+            {authenticated ? <small>Следующий пак через {timeUntilReset}</small> : null}
+          </div>
           {error ? <span className="home-stage__error">{error}</span> : null}
         </div>
       ) : null}

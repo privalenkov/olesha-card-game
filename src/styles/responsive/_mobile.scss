@@ -1,0 +1,40 @@
+@media (max-width: 720px) {
+  .pack-ritual__hero {
+    padding-bottom: 172px;
+  }
+
+  .pack-carousel {
+    min-height: 500px;
+  }
+
+  .pack-carousel__controls {
+    bottom: 96px;
+    width: calc(100% - 28px);
+  }
+
+  .pack-carousel__swipe-hint {
+    text-align: center;
+  }
+
+  .pack-ritual__scene-shell {
+    min-height: 420px;
+    height: min(56vh, 560px);
+  }
+
+  .pack-ritual__cta {
+    bottom: 98px;
+  }
+
+  .pack-reveal__stack {
+    width: min(78vw, 360px);
+  }
+
+  .pack-reveal__hud {
+    bottom: 104px;
+  }
+
+  .creator-preview {
+    height: min(68vh, 640px);
+    min-height: 460px;
+  }
+}

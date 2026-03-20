@@ -1,0 +1,52 @@
+@media (max-width: 1180px) {
+  .hero-panel,
+  .collection-hero,
+  .reveal-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .pack-ritual__hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    padding-top: 54px;
+    padding-bottom: 150px;
+  }
+
+  .pack-ritual__copy {
+    align-items: center;
+  }
+
+  .pack-ritual__carousel-shell,
+  .pack-ritual__reveal-shell {
+    width: min(100%, calc(100% - 40px));
+  }
+
+  .pack-ritual__carousel-shell {
+    width: 100%;
+  }
+
+  .pack-ritual__scene-shell {
+    height: min(68vh, 760px);
+  }
+
+  .pack-ritual__cta {
+    bottom: 104px;
+  }
+
+  .pack-reveal__hud {
+    right: 24px;
+    width: min(300px, 32vw);
+  }
+
+  .hero-panel__copy h1,
+  .collection-hero__copy h1 {
+    max-width: 12ch;
+  }
+
+  .hero-panel__stage,
+  .collection-hero__preview {
+    min-height: 560px;
+  }
+}
+

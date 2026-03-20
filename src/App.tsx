@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal';
+import { requestProposalStart } from './game/api';
 import { GameProvider } from './game/GameContext';
 import { useGame } from './game/GameContext';
 import { CardCreatorPage } from './pages/CardCreatorPage';
@@ -20,6 +21,7 @@ function hasSeenCurrentReleaseNotes() {
 function AppShell() {
   const navigate = useNavigate();
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+  const [proposalBusy, setProposalBusy] = useState(false);
   const {
     authConfigured,
     authenticated,
@@ -27,6 +29,7 @@ function AppShell() {
     isAdmin,
     login,
     logout,
+    notify,
     notifications,
     status,
     updateNickname,
@@ -49,6 +52,40 @@ function AppShell() {
     }
 
     setReleaseNotesOpen(false);
+  }
+
+  async function handleProposalStart() {
+    if (!authenticated) {
+      if (authConfigured) {
+        login();
+      } else {
+        notify({
+          kind: 'error',
+          title: 'Авторизация недоступна',
+          message: 'Google OAuth пока не настроен.',
+        });
+      }
+
+      return;
+    }
+
+    setProposalBusy(true);
+
+    try {
+      const response = await requestProposalStart();
+      navigate(`/creator/${response.proposal.id}`);
+    } catch (error) {
+      notify({
+        kind: 'error',
+        title: 'Не удалось открыть редактор',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Попробуйте еще раз через несколько секунд.',
+      });
+    } finally {
+      setProposalBusy(false);
+    }
   }
 
   return (
@@ -104,8 +141,11 @@ function AppShell() {
       </div>
 
       <header className="topbar">
-        <div className="topbar__nav">
+        <div aria-hidden="true" className="topbar__spacer" />
+
+        <nav aria-label="Основная навигация" className="topbar__nav">
           <NavLink
+            end
             className={({ isActive }) =>
               isActive ? 'nav-link nav-link--active' : 'nav-link'
             }
@@ -119,8 +159,18 @@ function AppShell() {
             }
             to="/collection"
           >
-            Витрина
+            Коллекция
           </NavLink>
+          <button
+            className="nav-link nav-link--button"
+            disabled={proposalBusy}
+            onClick={() => {
+              void handleProposalStart();
+            }}
+            type="button"
+          >
+            {proposalBusy ? 'Открываем редактор' : 'Предложить свою карточку'}
+          </button>
           {isAdmin ? (
             <NavLink
               className={({ isActive }) =>
@@ -131,16 +181,16 @@ function AppShell() {
               Админка
             </NavLink>
           ) : null}
-        </div>
+        </nav>
 
         <div className="topbar__auth">
           {status === 'loading' ? (
             <span className="topbar__hint">Сессия...</span>
           ) : authenticated && user ? (
             <>
-              <span className="topbar__hint">{user.name}</span>
+              <span className="topbar__hint topbar__hint--user">{user.name}</span>
               <button
-                className="topbar__auth-button"
+                className="topbar__auth-button topbar__auth-button--ghost"
                 onClick={async () => {
                   const nextName = window.prompt(
                     'Введите новый ник (латиница, цифры, "_" или "-")',

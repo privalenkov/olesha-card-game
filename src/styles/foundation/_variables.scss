@@ -1,0 +1,27 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  background:
+    radial-gradient(circle at 88% 4%, rgba(255, 32, 90, 0.1), transparent 12%),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03), transparent 26%),
+    linear-gradient(180deg, #05060d 0%, #04050b 100%);
+  color: #f7f3e9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --surface: rgba(12, 13, 22, 0.82);
+  --surface-strong: rgba(13, 14, 24, 0.94);
+  --line: rgba(255, 255, 255, 0.08);
+  --copy-muted: rgba(247, 243, 233, 0.8);
+  --copy-faint: rgba(247, 243, 233, 0.5);
+  --accent: #ff1f5a;
+  --accent-strong: #ff3b74;
+  --cyan: #8de5ff;
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --shadow-xl: 0 30px 90px rgba(0, 0, 0, 0.4);
+}
