@@ -1,19 +1,23 @@
-import { useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import {
   AdditiveBlending,
+  BufferGeometry,
   Color,
+  Float32BufferAttribute,
   Group,
   MathUtils,
   Mesh,
   MeshBasicMaterial,
   Shape,
-  type Texture,
+  Vector3,
 } from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rarityMeta } from '../game/config';
 import type { OwnedCard } from '../game/types';
-import { usePackTexture } from '../three/textures';
+import packModelUrl from '../assets/mesh/pack.fbx?url';
 import {
   SharedViewerLighting,
   SharedViewerPostProcessing,
@@ -51,10 +55,11 @@ interface PackCarouselSceneProps {
   onPackClick?: (index: number) => void;
 }
 
-const PACK_WIDTH = 3.08;
-const PACK_BODY_HEIGHT = 3.78;
+const PACK_WIDTH = 2.3;
+const PACK_BODY_HEIGHT = 3.9;
 const PACK_BOTTOM_CRIMP = 0.42;
 const PACK_DEPTH = 0.14;
+const PACK_TOTAL_HEIGHT = PACK_BODY_HEIGHT + PACK_BOTTOM_CRIMP;
 const TEAR_WIDTH = 3.2;
 const TEAR_HEIGHT = 0.54;
 const DEFAULT_PACK_SCALE = 0.8;
@@ -71,60 +76,107 @@ const PACK_BODY_MATERIAL = {
   clearcoatRoughness: 0.18,
   reflectivity: 0.18,
 } as const;
-const PACK_FACE_MATERIAL = {
-  metalness: 0.08,
-  roughness: 0.84,
-  clearcoat: 0.12,
-  clearcoatRoughness: 0.28,
-  reflectivity: 0.08,
-} as const;
-const PACK_BACK_MATERIAL = {
-  metalness: 0.06,
-  roughness: 0.9,
-  clearcoat: 0.08,
-  clearcoatRoughness: 0.3,
+const PACK_MODEL_MATERIAL = {
+  color: '#d6e0e5',
+  metalness: 0.1,
+  roughness: 0.86,
+  clearcoat: 0.14,
+  clearcoatRoughness: 0.32,
   reflectivity: 0.06,
 } as const;
 
-function createMainPackShape(width: number, bodyHeight: number, crimpHeight: number) {
-  const halfWidth = width / 2;
-  const topY = bodyHeight / 2;
-  const crimpTopY = -bodyHeight / 2;
-  const crimpBottomY = crimpTopY - crimpHeight;
-  const teeth = 18;
-  const step = width / teeth;
-  const toothDepth = 0.07;
-  const shape = new Shape();
+useLoader.preload(FBXLoader, packModelUrl);
 
-  shape.moveTo(-halfWidth * 0.86, topY);
-  shape.lineTo(halfWidth * 0.86, topY);
-  shape.bezierCurveTo(
-    halfWidth * 1.01,
-    topY * 0.72,
-    halfWidth * 1.06,
-    -bodyHeight * 0.08,
-    halfWidth * 0.93,
-    crimpTopY,
-  );
+function getPositionKey(x: number, y: number, z: number, tolerance: number) {
+  return [
+    Math.round(x / tolerance),
+    Math.round(y / tolerance),
+    Math.round(z / tolerance),
+  ].join(':');
+}
 
-  for (let tooth = teeth - 1; tooth >= 0; tooth -= 1) {
-    const right = -halfWidth + step * (tooth + 1);
-    const mid = right - step / 2;
-    const left = right - step;
-    shape.lineTo(mid, crimpBottomY);
-    shape.lineTo(left, crimpBottomY + toothDepth);
-  }
+function usePackModelGeometry() {
+  const packModel = useLoader(FBXLoader, packModelUrl);
 
-  shape.bezierCurveTo(
-    -halfWidth * 1.06,
-    -bodyHeight * 0.08,
-    -halfWidth * 1.01,
-    topY * 0.72,
-    -halfWidth * 0.86,
-    topY,
-  );
-  shape.closePath();
-  return shape;
+  return useMemo(() => {
+    packModel.updateWorldMatrix(true, true);
+    const sourceMesh = packModel.getObjectByProperty('isMesh', true) as Mesh | undefined;
+
+    if (!sourceMesh) {
+      throw new Error('Pack FBX mesh not found');
+    }
+
+    const geometry = sourceMesh.geometry.clone();
+    const size = new Vector3();
+
+    geometry.applyMatrix4(sourceMesh.matrixWorld);
+    geometry.rotateY(Math.PI / 2);
+    geometry.computeBoundingBox();
+    geometry.boundingBox?.getSize(size);
+    geometry.center();
+    const scaleX = PACK_WIDTH / Math.max(size.x, 0.001);
+    const scaleY = PACK_TOTAL_HEIGHT / Math.max(size.y, 0.001);
+    const scaleZ = PACK_DEPTH / Math.max(size.z, 0.001);
+    geometry.scale(scaleX, scaleY, scaleZ);
+    const normalTolerance = 1e-4;
+    const smoothingGeometry = geometry.clone();
+    smoothingGeometry.deleteAttribute('uv');
+    smoothingGeometry.deleteAttribute('normal');
+
+    const weldedGeometry = mergeVertices(smoothingGeometry, normalTolerance);
+    weldedGeometry.computeVertexNormals();
+
+    const weldedPositions = weldedGeometry.getAttribute('position');
+    const weldedNormals = weldedGeometry.getAttribute('normal');
+    const positionToNormal = new Map<string, [number, number, number]>();
+
+    for (let index = 0; index < weldedPositions.count; index += 1) {
+      positionToNormal.set(
+        getPositionKey(
+          weldedPositions.getX(index),
+          weldedPositions.getY(index),
+          weldedPositions.getZ(index),
+          normalTolerance,
+        ),
+        [
+          weldedNormals.getX(index),
+          weldedNormals.getY(index),
+          weldedNormals.getZ(index),
+        ],
+      );
+    }
+
+    const positions = geometry.getAttribute('position');
+    const existingNormals = geometry.getAttribute('normal');
+    const normals = new Float32Array(positions.count * 3);
+
+    for (let index = 0; index < positions.count; index += 1) {
+      const normal =
+        positionToNormal.get(
+          getPositionKey(
+            positions.getX(index),
+            positions.getY(index),
+            positions.getZ(index),
+            normalTolerance,
+          ),
+        ) ?? [
+          existingNormals?.getX(index) ?? 0,
+          existingNormals?.getY(index) ?? 0,
+          existingNormals?.getZ(index) ?? 1,
+        ];
+
+      normals[index * 3] = normal[0];
+      normals[index * 3 + 1] = normal[1];
+      normals[index * 3 + 2] = normal[2];
+    }
+
+    geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
+    geometry.computeBoundingSphere();
+    smoothingGeometry.dispose();
+    weldedGeometry.dispose();
+
+    return geometry;
+  }, [packModel]);
 }
 
 function createTearStripShape(width: number, height: number) {
@@ -271,14 +323,11 @@ function PackRig({
   const tearPivotRef = useRef<Group>(null);
   const tearOffsetRef = useRef<Group>(null);
   const slitRef = useRef<Mesh>(null);
-  const frontTexture = usePackTexture('front');
-  const backTexture = usePackTexture('back');
-
-  const mainShape = useMemo(
-    () => createMainPackShape(PACK_WIDTH, PACK_BODY_HEIGHT, PACK_BOTTOM_CRIMP),
-    [],
-  );
+  const packGeometry = usePackModelGeometry();
   const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
+  const showTearSeal = phase === 'tearing' || tearProgress > 0.001;
+
+  useEffect(() => () => packGeometry.dispose(), [packGeometry]);
 
   useFrame((state, delta) => {
     if (!groupRef.current || !tearPivotRef.current || !tearOffsetRef.current || !slitRef.current) {
@@ -371,41 +420,20 @@ function PackRig({
 
       <Float speed={1.35} rotationIntensity={0.06} floatIntensity={0.18}>
         <group ref={groupRef} scale={packScale}>
-          <mesh position={[0, 0, -PACK_DEPTH / 2]}>
-            <extrudeGeometry
-              args={[
-                mainShape,
-                {
-                  depth: PACK_DEPTH,
-                  bevelEnabled: false,
-                  curveSegments: 24,
-                },
-              ]}
-            />
-            <meshPhysicalMaterial {...PACK_BODY_MATERIAL} />
-          </mesh>
-
-          <mesh position={[0, 0, PACK_DEPTH / 2 + 0.006]}>
-            <shapeGeometry args={[mainShape]} />
+          <mesh>
+            <primitive attach="geometry" object={packGeometry} />
             <meshPhysicalMaterial
-              map={frontTexture}
-              {...PACK_FACE_MATERIAL}
+              {...PACK_MODEL_MATERIAL}
               emissive="#0d2d3d"
-              emissiveIntensity={0.05}
+              emissiveIntensity={0.03}
             />
           </mesh>
 
-          <mesh position={[0, 0, -PACK_DEPTH / 2 - 0.006]} rotation={[0, Math.PI, 0]}>
-            <shapeGeometry args={[mainShape]} />
-            <meshPhysicalMaterial
-              map={backTexture}
-              {...PACK_BACK_MATERIAL}
-              emissive="#091c27"
-              emissiveIntensity={0.04}
-            />
-          </mesh>
-
-          <group ref={tearPivotRef} position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.02]}>
+          <group
+            ref={tearPivotRef}
+            position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.02]}
+            visible={showTearSeal}
+          >
             <group ref={tearOffsetRef}>
               <mesh position={[0, 0, -PACK_DEPTH / 2]}>
                 <extrudeGeometry
@@ -436,6 +464,7 @@ function PackRig({
           <mesh
             ref={slitRef}
             position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.12]}
+            visible={showTearSeal}
           >
             <planeGeometry args={[0.54, 0.06]} />
             <meshBasicMaterial
@@ -465,28 +494,22 @@ function PackRig({
 }
 
 function CarouselPack({
-  backTexture,
   dragPreview,
-  frontTexture,
   hoverEnabled,
   slotAngle,
   active,
   index,
   onClick,
-  mainShape,
-  tearShape,
+  packGeometry,
   rotationOffset,
 }: {
-  backTexture: Texture;
   dragPreview: number;
-  frontTexture: Texture;
   hoverEnabled: boolean;
   slotAngle: number;
   active: boolean;
   index: number;
   onClick?: (index: number) => void;
-  mainShape: Shape;
-  tearShape: Shape;
+  packGeometry: BufferGeometry;
   rotationOffset: number;
 }) {
   const ref = useRef<Group>(null);
@@ -556,7 +579,7 @@ function CarouselPack({
           onClick?.(index);
         }}
       >
-        <planeGeometry args={[PACK_WIDTH * 1.18, PACK_BODY_HEIGHT + PACK_BOTTOM_CRIMP + TEAR_HEIGHT + 0.24]} />
+        <planeGeometry args={[PACK_WIDTH * 1.18, PACK_TOTAL_HEIGHT + TEAR_HEIGHT + 0.24]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
@@ -565,73 +588,12 @@ function CarouselPack({
         <meshBasicMaterial color="#000000" transparent opacity={active ? 0.16 : 0.1} />
       </mesh>
 
-      <mesh position={[0, 0, -PACK_DEPTH / 2]}>
-        <extrudeGeometry
-          args={[
-            mainShape,
-            {
-              depth: PACK_DEPTH,
-              bevelEnabled: false,
-              curveSegments: 24,
-            },
-          ]}
-        />
-        <meshPhysicalMaterial {...PACK_BODY_MATERIAL} />
-      </mesh>
-
-      <mesh position={[0, 0, PACK_DEPTH / 2 + 0.006]}>
-        <shapeGeometry args={[mainShape]} />
+      <mesh>
+        <primitive attach="geometry" object={packGeometry} />
         <meshPhysicalMaterial
-          map={frontTexture}
-          {...PACK_FACE_MATERIAL}
+          {...PACK_MODEL_MATERIAL}
           emissive="#0d2d3d"
-          emissiveIntensity={active ? 0.07 : 0.05}
-        />
-      </mesh>
-
-      <mesh position={[0, 0, -PACK_DEPTH / 2 - 0.006]} rotation={[0, Math.PI, 0]}>
-        <shapeGeometry args={[mainShape]} />
-        <meshPhysicalMaterial
-          map={backTexture}
-          {...PACK_BACK_MATERIAL}
-          emissive="#091c27"
-          emissiveIntensity={active ? 0.055 : 0.04}
-        />
-      </mesh>
-
-      <group position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.02]}>
-        <mesh position={[0, 0, -PACK_DEPTH / 2]}>
-          <extrudeGeometry
-            args={[
-              tearShape,
-              {
-                depth: PACK_DEPTH * 0.92,
-                bevelEnabled: false,
-                curveSegments: 20,
-              },
-            ]}
-          />
-          <meshPhysicalMaterial {...PACK_BODY_MATERIAL} color="#0f5e7f" />
-        </mesh>
-
-        <mesh position={[0, TEAR_HEIGHT * 0.42, PACK_DEPTH / 2 + 0.01]}>
-          <shapeGeometry args={[tearShape]} />
-          <meshBasicMaterial color="#61d7f7" transparent opacity={0.16} />
-        </mesh>
-
-        <mesh position={[0, TEAR_HEIGHT * 0.28, PACK_DEPTH / 2 + 0.02]}>
-          <planeGeometry args={[0.72, 0.13]} />
-          <meshBasicMaterial color="#0a1419" transparent opacity={0.92} />
-        </mesh>
-      </group>
-
-      <mesh position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.12]}>
-        <planeGeometry args={[0.54, 0.06]} />
-        <meshBasicMaterial
-          color="#fff8de"
-          transparent
-          opacity={0.045}
-          blending={AdditiveBlending}
+          emissiveIntensity={active ? 0.04 : 0.03}
         />
       </mesh>
 
@@ -648,13 +610,9 @@ function PackCarouselRig({
   onPackClick,
 }: PackCarouselSceneProps) {
   const ringRef = useRef<Group>(null);
-  const frontTexture = usePackTexture('front');
-  const backTexture = usePackTexture('back');
-  const mainShape = useMemo(
-    () => createMainPackShape(PACK_WIDTH, PACK_BODY_HEIGHT, PACK_BOTTOM_CRIMP),
-    [],
-  );
-  const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
+  const packGeometry = usePackModelGeometry();
+
+  useEffect(() => () => packGeometry.dispose(), [packGeometry]);
 
   useFrame((state, delta) => {
     state.camera.position.x = MathUtils.damp(state.camera.position.x, 0, 4, delta);
@@ -698,16 +656,13 @@ function PackCarouselRig({
             <CarouselPack
               key={`carousel-pack-${index}`}
               active={index === activeIndex}
-              backTexture={backTexture}
               dragPreview={index === activeIndex ? dragPreview : 0}
-              frontTexture={frontTexture}
               hoverEnabled={hoverEnabled}
               index={index}
-              mainShape={mainShape}
               onClick={onPackClick}
+              packGeometry={packGeometry}
               rotationOffset={rotationOffset}
               slotAngle={index * CAROUSEL_STEP}
-              tearShape={tearShape}
             />
           ))}
         </group>
@@ -722,7 +677,9 @@ export function PackScene(props: PackSceneProps) {
   return (
     <div className="pack-scene">
       <Canvas camera={{ position: [0, 0.1, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
-        <PackRig {...props} />
+        <Suspense fallback={null}>
+          <PackRig {...props} />
+        </Suspense>
       </Canvas>
     </div>
   );
@@ -732,7 +689,9 @@ export function PackCarouselScene(props: PackCarouselSceneProps) {
   return (
     <div className="pack-scene pack-scene--carousel">
       <Canvas camera={{ position: [0, 0.24, 10.9], fov: VIEWER_CANVAS_FOV }} dpr={VIEWER_CANVAS_DPR}>
-        <PackCarouselRig {...props} />
+        <Suspense fallback={null}>
+          <PackCarouselRig {...props} />
+        </Suspense>
       </Canvas>
     </div>
   );
