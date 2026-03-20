@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { OAuth2Client, type Credentials, type TokenPayload } from 'google-auth-library';
 import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
@@ -49,24 +50,20 @@ interface RateLimitEntry {
   resetAt: number;
 }
 
-interface GoogleTokenResponse {
-  access_token?: string;
-  expires_in?: number;
-  id_token?: string;
-  refresh_token?: string;
-  scope?: string;
-  token_type?: string;
-  error?: string;
-  error_description?: string;
+interface GooglePreparedRequest {
+  url?: string | URL;
+  method?: string;
+  headers?: Headers | Record<string, string> | Array<[string, string]>;
+  body?: unknown;
+  data?: unknown;
+  timeout?: number;
+  validateStatus?: (status: number) => boolean;
 }
 
-interface GoogleUserInfoResponse {
-  sub?: string;
-  email?: string;
-  email_verified?: boolean | string;
-  name?: string;
-  picture?: string;
-}
+type GoogleTransportResponse<T> = Response & {
+  config: GooglePreparedRequest;
+  data: T;
+};
 
 const APP_CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -101,6 +98,15 @@ const MUTATION_RATE_LIMITS = {
   admin: { max: 120, windowMs: 10 * 60 * 1000 },
   packsOpen: { max: 12, windowMs: 60 * 1000 },
 } satisfies Record<string, RateLimitWindow>;
+
+const GOOGLE_OAUTH_HOSTS = new Set([
+  'oauth2.googleapis.com',
+  'openidconnect.googleapis.com',
+  'www.googleapis.com',
+]);
+
+const GOOGLE_OAUTH_TIMEOUT_MS = 15_000;
+const googleOAuthHttpsAgent = new https.Agent({ family: 4 });
 
 function isNodeErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
@@ -150,136 +156,225 @@ function formatErrorDetails(error: unknown): string {
   return details.join(' | ');
 }
 
-function buildGoogleAuthUrl(state: string) {
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  url.searchParams.set('client_id', serverConfig.googleClientId);
-  url.searchParams.set('redirect_uri', serverConfig.googleCallbackUrl);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'openid email profile');
-  url.searchParams.set('state', state);
-  url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'consent');
-  return url.toString();
+async function serializeGoogleRequestBody(data: unknown): Promise<string | Buffer | undefined> {
+  if (data === undefined || data === null) {
+    return undefined;
+  }
+
+  if (typeof data === 'string' || Buffer.isBuffer(data)) {
+    return data;
+  }
+
+  if (data instanceof URLSearchParams) {
+    return data.toString();
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    return Buffer.from(await data.arrayBuffer());
+  }
+
+  if (typeof data === 'object') {
+    return JSON.stringify(data);
+  }
+
+  return String(data);
 }
 
-async function requestGoogleJson(
+function parseGoogleResponseData<T>(responseText: string, headers: Headers): T | string | null {
+  if (!responseText) {
+    return null;
+  }
+
+  const contentType = headers.get('content-type')?.toLowerCase() ?? '';
+
+  if (contentType.includes('json') || responseText.startsWith('{') || responseText.startsWith('[')) {
+    try {
+      return JSON.parse(responseText) as T;
+    } catch {
+      return responseText;
+    }
+  }
+
+  return responseText;
+}
+
+async function requestGoogleResponseText(
   urlValue: string,
   {
     method = 'GET',
-    headers = {},
+    headers = new Headers(),
     body,
+    timeoutMs = GOOGLE_OAUTH_TIMEOUT_MS,
   }: {
     method?: string;
-    headers?: Record<string, string>;
-    body?: string;
+    headers?: Headers;
+    body?: string | Buffer;
+    timeoutMs?: number;
   } = {},
 ) {
   const url = new URL(urlValue);
+  const requestHeaders = Object.fromEntries(headers.entries());
 
-  return new Promise<{ statusCode: number; responseText: string }>((resolve, reject) => {
-    const request = https.request(
-      {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port ? Number(url.port) : undefined,
-        path: `${url.pathname}${url.search}`,
-        method,
-        headers,
-        family: 4,
-      },
-      (response) => {
-        let responseText = '';
-        response.setEncoding('utf8');
-        response.on('data', (chunk) => {
-          responseText += chunk;
-        });
-        response.on('end', () => {
-          resolve({
-            statusCode: response.statusCode ?? 0,
-            responseText,
+  return new Promise<{ statusCode: number; responseText: string; responseHeaders: Headers }>(
+    (resolve, reject) => {
+      const request = https.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port ? Number(url.port) : undefined,
+          path: `${url.pathname}${url.search}`,
+          method,
+          headers: requestHeaders,
+          agent: googleOAuthHttpsAgent,
+          family: 4,
+        },
+        (response) => {
+          let responseText = '';
+          const responseHeaders = new Headers();
+
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (typeof value === 'string') {
+              responseHeaders.set(name, value);
+              continue;
+            }
+
+            if (Array.isArray(value)) {
+              for (const entry of value) {
+                responseHeaders.append(name, entry);
+              }
+            }
+          }
+
+          response.setEncoding('utf8');
+          response.on('data', (chunk) => {
+            responseText += chunk;
           });
-        });
+          response.on('end', () => {
+            resolve({
+              statusCode: response.statusCode ?? 0,
+              responseText,
+              responseHeaders,
+            });
+          });
+        },
+      );
+
+      request.setTimeout(timeoutMs, () => {
+        const timeoutError = new Error(`Request to ${url.hostname} timed out`);
+        (timeoutError as NodeJS.ErrnoException).code = 'ETIMEDOUT';
+        request.destroy(timeoutError);
+      });
+      request.on('error', reject);
+
+      if (body !== undefined) {
+        request.write(body);
+      }
+
+      request.end();
+    },
+  );
+}
+
+async function googleOauthIpv4Adapter<T = unknown>(
+  options: GooglePreparedRequest,
+  defaultAdapter: (options: GooglePreparedRequest) => Promise<GoogleTransportResponse<T>>,
+): Promise<GoogleTransportResponse<T>> {
+  const requestUrl =
+    options.url instanceof URL
+      ? options.url
+      : typeof options.url === 'string'
+        ? new URL(options.url)
+        : null;
+
+  if (!requestUrl || !GOOGLE_OAUTH_HOSTS.has(requestUrl.hostname)) {
+    return defaultAdapter(options);
+  }
+
+  try {
+    const headers = new Headers(options.headers);
+    const body = await serializeGoogleRequestBody(options.body ?? options.data);
+    const { statusCode, responseText, responseHeaders } = await requestGoogleResponseText(
+      requestUrl.toString(),
+      {
+        method: options.method ?? 'GET',
+        headers,
+        body,
+        timeoutMs: options.timeout ?? GOOGLE_OAUTH_TIMEOUT_MS,
       },
     );
+    const data = parseGoogleResponseData<T>(responseText, responseHeaders) as T;
+    const response = new Response(responseText, {
+      status: statusCode,
+      headers: responseHeaders,
+    }) as GoogleTransportResponse<T>;
 
-    request.setTimeout(15000, () => {
-      const timeoutError = new Error(`Request to ${url.hostname} timed out`);
-      (timeoutError as NodeJS.ErrnoException).code = 'ETIMEDOUT';
-      request.destroy(timeoutError);
-    });
-    request.on('error', reject);
+    response.config = options;
+    response.data = data;
 
-    if (body) {
-      request.write(body);
+    const validateStatus = options.validateStatus ?? ((status: number) => status >= 200 && status < 300);
+
+    if (!validateStatus(statusCode)) {
+      const error = new Error(`Request failed with status code ${statusCode}`) as Error & {
+        response?: GoogleTransportResponse<T>;
+      };
+      error.response = response;
+      throw error;
     }
 
-    request.end();
+    return response;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error(getErrorMessage(error), { cause: error });
+  }
+}
+
+const googleOAuthClient = new OAuth2Client({
+  clientId: serverConfig.googleClientId,
+  clientSecret: serverConfig.googleClientSecret,
+  redirectUri: serverConfig.googleCallbackUrl,
+  transporterOptions: {
+    adapter: googleOauthIpv4Adapter as any,
+    timeout: GOOGLE_OAUTH_TIMEOUT_MS,
+  },
+});
+
+function buildGoogleAuthUrl(state: string) {
+  return googleOAuthClient.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: ['openid', 'email', 'profile'],
+    state,
   });
 }
 
 async function exchangeGoogleAuthorizationCode(code: string) {
-  const { statusCode, responseText } = await requestGoogleJson(
-    'https://oauth2.googleapis.com/token',
-    {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        code,
-        client_id: serverConfig.googleClientId,
-        client_secret: serverConfig.googleClientSecret,
-        grant_type: 'authorization_code',
-        redirect_uri: serverConfig.googleCallbackUrl,
-      }).toString(),
-    },
-  );
-  let payload: GoogleTokenResponse | null = null;
-
-  try {
-    payload = JSON.parse(responseText) as GoogleTokenResponse;
-  } catch {
-    payload = null;
-  }
-
-  if (statusCode < 200 || statusCode >= 300) {
-    const details =
-      payload?.error_description?.trim() ||
-      payload?.error?.trim() ||
-      responseText.trim() ||
-      'Unknown Google token error';
-    throw new Error(`Token endpoint returned ${statusCode}: ${details}`);
-  }
-
-  return payload ?? {};
+  const { tokens } = await googleOAuthClient.getToken(code);
+  return tokens;
 }
 
-async function fetchGoogleUserInfo(accessToken: string) {
-  const { statusCode, responseText } = await requestGoogleJson(
-    'https://openidconnect.googleapis.com/v1/userinfo',
-    {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-  let payload: GoogleUserInfoResponse | null = null;
+async function fetchGoogleProfileFromIdToken(idToken: string) {
+  const ticket = await googleOAuthClient.verifyIdToken({
+    idToken,
+    audience: serverConfig.googleClientId,
+  });
+  const payload = ticket.getPayload();
 
-  try {
-    payload = JSON.parse(responseText) as GoogleUserInfoResponse;
-  } catch {
-    payload = null;
+  if (!payload) {
+    throw new Error('Google ID token payload is empty.');
   }
 
-  if (statusCode < 200 || statusCode >= 300) {
-    throw new Error(
-      `Userinfo endpoint returned ${statusCode}: ${responseText.trim() || 'Unknown Google userinfo error'}`,
-    );
-  }
-
-  return payload ?? {};
+  return payload;
 }
 
 function normalizeNickname(value: unknown): string | null {
@@ -1068,7 +1163,7 @@ export async function buildApp() {
       return;
     }
 
-    let tokens: GoogleTokenResponse;
+    let tokens: Credentials;
 
     try {
       tokens = await exchangeGoogleAuthorizationCode(code);
@@ -1113,29 +1208,10 @@ export async function buildApp() {
       return;
     }
 
-    if (!tokens.access_token) {
-      request.log.error(
-        {
-          googleCallbackUrl: serverConfig.googleCallbackUrl,
-          tokenKeys: Object.keys(tokens),
-        },
-        'Google token response is missing access_token.',
-      );
-      reply
-        .code(502)
-        .send(
-          apiError(
-            'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер получил неполный ответ от Google. Попробуй ещё раз позже.',
-          ),
-        );
-      return;
-    }
-
-    let payload: GoogleUserInfoResponse;
+    let payload: TokenPayload;
 
     try {
-      payload = await fetchGoogleUserInfo(tokens.access_token);
+      payload = await fetchGoogleProfileFromIdToken(tokens.id_token);
     } catch (error) {
       const errorDetails = formatErrorDetails(error);
       request.log.error(
@@ -1143,22 +1219,21 @@ export async function buildApp() {
           err: error,
           message: getErrorMessage(error),
         },
-        'Google OAuth userinfo request failed.',
+        'Google OAuth ID token verification failed.',
       );
-      request.log.error(`Google OAuth userinfo request failed details: ${errorDetails}`);
+      request.log.error(`Google OAuth ID token verification failed details: ${errorDetails}`);
       reply
         .code(502)
         .send(
           apiError(
             'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер не смог получить профиль Google. Попробуй ещё раз позже.',
+            'Сервер не смог проверить профиль Google. Попробуй ещё раз позже.',
           ),
         );
       return;
     }
 
-    const emailVerified =
-      payload.email_verified === true || payload.email_verified === 'true';
+    const emailVerified = payload.email_verified === true;
 
     if (!payload?.sub || !payload.email || !emailVerified) {
       reply.code(403).send(apiError('INVALID_GOOGLE_PROFILE', 'Google-профиль не прошёл валидацию.'));
