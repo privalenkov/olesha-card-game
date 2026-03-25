@@ -331,22 +331,6 @@
   height: 100%;
 }
 
-.pack-ritual__tear-trace {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.pack-ritual__tear-trace line {
-  stroke: #fdf2cf;
-  stroke-width: 2.6;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 8px rgba(255, 246, 212, 0.66));
-}
-
 .pack-reveal {
   position: relative;
   z-index: 3;

@@ -3,6 +3,8 @@ import { Canvas, type ThreeEvent, useFrame, useLoader } from '@react-three/fiber
 import { Float } from '@react-three/drei';
 import {
   AdditiveBlending,
+  Bone,
+  Box3,
   BufferGeometry,
   Color,
   DoubleSide,
@@ -12,13 +14,15 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
-  Shape,
+  SkinnedMesh,
   Vector3,
 } from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rarityMeta } from '../game/config';
 import type { OwnedCard } from '../game/types';
+import packFlapModelUrl from '../assets/mesh/pack-flap.fbx?url';
 import packModelUrl from '../assets/mesh/pack.fbx?url';
 import {
   SharedViewerLighting,
@@ -68,7 +72,6 @@ const PACK_BODY_HEIGHT = 3.9;
 const PACK_BOTTOM_CRIMP = 0.42;
 const PACK_DEPTH = 0.14;
 const PACK_TOTAL_HEIGHT = PACK_BODY_HEIGHT + PACK_BOTTOM_CRIMP;
-const TEAR_WIDTH = 3.2;
 const TEAR_HEIGHT = 0.54;
 const DEFAULT_PACK_SCALE = 0.8;
 const DEFAULT_PACK_SCENE_CAMERA_Y = 0.1;
@@ -84,14 +87,6 @@ const CAROUSEL_TO_TEAR_SETTLE_DISTANCE = 0.06;
 const CAROUSEL_TO_TEAR_SETTLE_SCALE_EPSILON = 0.015;
 const CAROUSEL_TO_TEAR_INACTIVE_DEPTH_OFFSET = 0.92;
 const CAROUSEL_TO_TEAR_INACTIVE_SCALE_FACTOR = 0.95;
-const PACK_BODY_MATERIAL = {
-  color: '#0d4c66',
-  metalness: 0.24,
-  roughness: 0.56,
-  clearcoat: 0.78,
-  clearcoatRoughness: 0.18,
-  reflectivity: 0.18,
-} as const;
 const TEAR_STAGE_DOCK_OFFSET_Y = -2.45;
 const TEAR_STAGE_WORLD_Y = TEAR_STAGE_DOCK_OFFSET_Y + 0.02;
 const PACK_MODEL_MATERIAL = {
@@ -104,6 +99,7 @@ const PACK_MODEL_MATERIAL = {
 } as const;
 
 useLoader.preload(FBXLoader, packModelUrl);
+useLoader.preload(FBXLoader, packFlapModelUrl);
 
 function getPositionKey(x: number, y: number, z: number, tolerance: number) {
   return [
@@ -197,28 +193,97 @@ function usePackModelGeometry() {
   }, [packModel]);
 }
 
-function createTearStripShape(width: number, height: number) {
-  const halfWidth = width / 2;
-  const teeth = 18;
-  const step = width / teeth;
-  const toothDepth = 0.07;
-  const shape = new Shape();
+interface PackFlapRigModel {
+  model: Group;
+  bones: Bone[];
+  baseRotations: Array<{ x: number; y: number; z: number }>;
+  dispose: () => void;
+}
 
-  shape.moveTo(-halfWidth, 0);
-  shape.lineTo(halfWidth, 0);
-  shape.lineTo(halfWidth, height - toothDepth);
+function usePackFlapRigModel() {
+  const packFlapModel = useLoader(FBXLoader, packFlapModelUrl);
 
-  for (let tooth = teeth - 1; tooth >= 0; tooth -= 1) {
-    const right = -halfWidth + step * (tooth + 1);
-    const mid = right - step / 2;
-    const left = right - step;
-    shape.lineTo(mid, height);
-    shape.lineTo(left, height - toothDepth);
-  }
+  return useMemo<PackFlapRigModel>(() => {
+    const model = cloneSkeleton(packFlapModel) as Group;
+    const root = new Group();
+    const size = new Vector3();
+    const center = new Vector3();
+    const bounds = new Box3();
 
-  shape.lineTo(-halfWidth, 0);
-  shape.closePath();
-  return shape;
+    let nextBodyMesh: Mesh | null = null;
+    let nextFlapMesh: SkinnedMesh | null = null;
+
+    model.traverse((node) => {
+      if ((node as SkinnedMesh).isSkinnedMesh && !nextFlapMesh) {
+        nextFlapMesh = node as SkinnedMesh;
+        return;
+      }
+
+      if ((node as Mesh).isMesh && !nextBodyMesh) {
+        nextBodyMesh = node as Mesh;
+      }
+    });
+
+    if (!nextBodyMesh || !nextFlapMesh) {
+      throw new Error('Pack flap FBX must contain body mesh and flap skinned mesh.');
+    }
+
+    const bodyMesh = nextBodyMesh as Mesh;
+    const flapMesh = nextFlapMesh as SkinnedMesh;
+
+    bounds.setFromObject(model);
+    bounds.getSize(size);
+    bounds.getCenter(center);
+
+    model.scale.set(
+      PACK_DEPTH / Math.max(size.x, 0.001),
+      PACK_TOTAL_HEIGHT / Math.max(size.y, 0.001),
+      PACK_WIDTH / Math.max(size.z, 0.001),
+    );
+    model.position.set(
+      -center.x * model.scale.x,
+      -center.y * model.scale.y,
+      -center.z * model.scale.z,
+    );
+    root.rotation.y = Math.PI / 2;
+    root.add(model);
+    root.updateWorldMatrix(true, true);
+
+    const bodyMaterial = new MeshPhysicalMaterial({
+      ...PACK_MODEL_MATERIAL,
+      emissive: '#0d2d3d',
+      emissiveIntensity: 0.03,
+      side: DoubleSide,
+    });
+    const flapMaterial = new MeshPhysicalMaterial({
+      ...PACK_MODEL_MATERIAL,
+      emissive: '#0d2d3d',
+      emissiveIntensity: 0.05,
+      side: DoubleSide,
+    });
+
+    bodyMesh.material = bodyMaterial;
+    flapMesh.material = flapMaterial;
+    bodyMesh.frustumCulled = false;
+    flapMesh.frustumCulled = false;
+
+    const bones = flapMesh.skeleton.bones.filter((bone: Bone) => !bone.name.endsWith('_end'));
+    const baseRotations = bones.map((bone: Bone) => ({
+      x: bone.rotation.x,
+      y: bone.rotation.y,
+      z: bone.rotation.z,
+    }));
+
+    return {
+      model: root,
+      bones,
+      baseRotations,
+      dispose: () => {
+        bodyMaterial.dispose();
+        flapMaterial.dispose();
+      },
+    };
+  }, [packFlapModel]);
 }
 
 function getHoverYawDirection(rotationY: number) {
@@ -348,8 +413,6 @@ function PackRig({
   snapOffsetOnMount = false,
 }: PackSceneProps) {
   const groupRef = useRef<Group>(null);
-  const tearPivotRef = useRef<Group>(null);
-  const tearOffsetRef = useRef<Group>(null);
   const slitRef = useRef<Mesh>(null);
   const hoverTargetRef = useRef({ x: 0, y: 0 });
   const hoverPointerRef = useRef({ x: 0, y: 0 });
@@ -357,10 +420,12 @@ function PackRig({
   const offsetSnappedRef = useRef(false);
   const offsetSettledCallbackRef = useRef<(() => void) | undefined>(onOffsetSettled);
   const packGeometry = usePackModelGeometry();
-  const tearShape = useMemo(() => createTearStripShape(TEAR_WIDTH, TEAR_HEIGHT), []);
-  const showTearSeal = phase === 'tearing' || tearProgress > 0.001;
+  const packRigModel = usePackFlapRigModel();
+  const useRiggedFlap = !hoverEnabled || phase !== 'sealed' || tearProgress > 0.001;
+  const showTearSlit = phase === 'tearing' || tearProgress > 0.001;
 
   useEffect(() => () => packGeometry.dispose(), [packGeometry]);
+  useEffect(() => () => packRigModel.dispose(), [packRigModel]);
   useEffect(() => {
     offsetSettledCallbackRef.current = onOffsetSettled;
   }, [onOffsetSettled]);
@@ -380,13 +445,16 @@ function PackRig({
   }, [offsetY, phase, snapOffsetOnMount]);
 
   useFrame((state, delta) => {
-    if (!groupRef.current || !tearPivotRef.current || !tearOffsetRef.current || !slitRef.current) {
+    if (!groupRef.current || !slitRef.current) {
       return;
     }
 
     const opened = phase !== 'sealed';
     const peelTarget = opened ? 1 : tearProgress;
-    const anchorX = MathUtils.lerp(-TEAR_WIDTH * 0.28, TEAR_WIDTH * 0.28, tearAnchor);
+    const flapBones = packRigModel.bones;
+    const lastBoneIndex = Math.max(flapBones.length - 1, 1);
+    const anchorBias = MathUtils.lerp(-1, 1, tearAnchor);
+
     hoverPointerRef.current.x = MathUtils.damp(
       hoverPointerRef.current.x,
       hoverEnabled ? hoverTargetRef.current.x : 0,
@@ -442,45 +510,48 @@ function PackRig({
       offsetSettledCallbackRef.current();
     }
 
-    tearPivotRef.current.position.x = MathUtils.damp(
-      tearPivotRef.current.position.x,
-      anchorX,
-      5.4,
-      delta,
-    );
-    tearPivotRef.current.position.y = MathUtils.damp(
-      tearPivotRef.current.position.y,
-      PACK_BODY_HEIGHT / 2 + 0.02 + peelTarget * 0.08,
-      5,
-      delta,
-    );
-    tearPivotRef.current.position.z = MathUtils.damp(
-      tearPivotRef.current.position.z,
-      PACK_DEPTH / 2 + 0.02 + peelTarget * 0.42,
-      5,
-      delta,
-    );
-    tearPivotRef.current.rotation.x = MathUtils.damp(
-      tearPivotRef.current.rotation.x,
-      peelTarget * -2.06,
-      5,
-      delta,
-    );
-    tearPivotRef.current.rotation.z = MathUtils.damp(
-      tearPivotRef.current.rotation.z,
-      peelTarget * tearDirection * 0.18,
-      4.8,
-      delta,
-    );
+    flapBones.forEach((bone, index) => {
+      const baseRotation = packRigModel.baseRotations[index];
+      const normalizedIndex = lastBoneIndex === 0 ? 1 : index / lastBoneIndex;
+      const activePeelTarget = useRiggedFlap ? peelTarget : 0;
+      const tipWeight = Math.pow(normalizedIndex, 1.32);
+      const anchorWeight = MathUtils.clamp(1 - Math.abs(normalizedIndex - tearAnchor) * 1.7, 0, 1);
+      const bendWeight = Math.max(tipWeight, anchorWeight * 0.82);
+      const curlX = activePeelTarget * (0.16 + bendWeight * 1.08);
+      const twistY =
+        activePeelTarget *
+        tearDirection *
+        (0.015 + bendWeight * 0.16) *
+        (0.52 + Math.abs(anchorBias) * 0.48);
+      const splayZ = activePeelTarget * tearDirection * (0.04 + bendWeight * 0.36);
+      const rootCurl = (1 - normalizedIndex) * activePeelTarget * 0.22;
 
-    tearOffsetRef.current.position.x = MathUtils.damp(
-      tearOffsetRef.current.position.x,
-      -anchorX,
-      5.2,
+      bone.rotation.x = MathUtils.damp(
+        bone.rotation.x,
+        baseRotation.x - curlX - rootCurl,
+        6,
+        delta,
+      );
+      bone.rotation.y = MathUtils.damp(
+        bone.rotation.y,
+        baseRotation.y + twistY,
+        6.2,
+        delta,
+      );
+      bone.rotation.z = MathUtils.damp(
+        bone.rotation.z,
+        baseRotation.z + splayZ,
+        6.2,
+        delta,
+      );
+    });
+
+    slitRef.current.position.x = MathUtils.damp(
+      slitRef.current.position.x,
+      MathUtils.lerp(-PACK_WIDTH * 0.18, PACK_WIDTH * 0.18, tearAnchor),
+      5,
       delta,
     );
-
-    slitRef.current.position.x = MathUtils.damp(slitRef.current.position.x, anchorX * 0.92, 5, delta);
     const slitMaterial = slitRef.current.material as MeshBasicMaterial;
     slitMaterial.opacity = MathUtils.damp(
       slitMaterial.opacity,
@@ -529,51 +600,25 @@ function PackRig({
             <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
           </mesh>
 
-          <mesh>
-            <primitive attach="geometry" object={packGeometry} />
-            <meshPhysicalMaterial
-              {...PACK_MODEL_MATERIAL}
-              emissive="#0d2d3d"
-              emissiveIntensity={0.03}
-            />
-          </mesh>
+          {!useRiggedFlap ? (
+            <mesh>
+              <primitive attach="geometry" object={packGeometry} />
+              <meshPhysicalMaterial
+                {...PACK_MODEL_MATERIAL}
+                emissive="#0d2d3d"
+                emissiveIntensity={0.03}
+              />
+            </mesh>
+          ) : null}
 
-          <group
-            ref={tearPivotRef}
-            position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.02]}
-            visible={showTearSeal}
-          >
-            <group ref={tearOffsetRef}>
-              <mesh position={[0, 0, -PACK_DEPTH / 2]}>
-                <extrudeGeometry
-                  args={[
-                    tearShape,
-                    {
-                      depth: PACK_DEPTH * 0.92,
-                      bevelEnabled: false,
-                      curveSegments: 20,
-                    },
-                  ]}
-                />
-                <meshPhysicalMaterial {...PACK_BODY_MATERIAL} color="#0f5e7f" />
-              </mesh>
-
-              <mesh position={[0, TEAR_HEIGHT * 0.42, PACK_DEPTH / 2 + 0.01]}>
-                <shapeGeometry args={[tearShape]} />
-                <meshBasicMaterial color="#61d7f7" transparent opacity={0.16} />
-              </mesh>
-
-              <mesh position={[0, TEAR_HEIGHT * 0.28, PACK_DEPTH / 2 + 0.02]}>
-                <planeGeometry args={[0.72, 0.13]} />
-                <meshBasicMaterial color="#0a1419" transparent opacity={0.92} />
-              </mesh>
-            </group>
+          <group visible={useRiggedFlap}>
+            <primitive object={packRigModel.model} />
           </group>
 
           <mesh
             ref={slitRef}
             position={[0, PACK_BODY_HEIGHT / 2 + 0.02, PACK_DEPTH / 2 + 0.12]}
-            visible={showTearSeal}
+            visible={showTearSlit}
           >
             <planeGeometry args={[0.54, 0.06]} />
             <meshBasicMaterial

@@ -1164,17 +1164,6 @@ export function PackExperience() {
                 tearProgress={tearProgress}
               />
 
-              {stage === 'tear' && tearGesture.active ? (
-                <svg className="pack-ritual__tear-trace" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <line
-                    x1={(tearGesture.startX / tearGesture.width) * 100}
-                    x2={(tearGesture.currentX / tearGesture.width) * 100}
-                    y1={(tearGesture.startY / tearGesture.height) * 100}
-                    y2={(tearGesture.currentY / tearGesture.height) * 100}
-                  />
-                </svg>
-              ) : null}
-
             </div>
           </div>
         ) : null}
