@@ -27,7 +27,12 @@ import {
   Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
-import type { CardTreatmentEffect, OwnedCard, Rarity } from '../game/types';
+import {
+  normalizeCardTreatmentEffect,
+  type CardTreatmentEffect,
+  type OwnedCard,
+  type Rarity,
+} from '../game/types';
 import { useCardTextures, useStackCardBackTexture } from '../three/textures';
 import {
   VIEWER_BASE_TILT_X,
@@ -125,6 +130,22 @@ function createViewerHighlightPalette(rarity: Rarity, hue: string, accent: strin
   };
 }
 
+function createCrackedLightPalette(
+  lighting: ReturnType<typeof createViewerLightingPalette>,
+) {
+  return {
+    ambient: lighting.ambientColor.clone().multiplyScalar(lighting.ambientIntensity * 0.34),
+    sky: lighting.hemisphereColor.clone().multiplyScalar(lighting.hemisphereIntensity * 0.32),
+    ground: lighting.hemisphereGroundColor
+      .clone()
+      .multiplyScalar(0.12 + lighting.hemisphereIntensity * 0.16),
+    key: lighting.keyColor.clone().multiplyScalar(lighting.keyIntensity * 0.18),
+    fill: lighting.fillColor.clone().multiplyScalar(lighting.fillIntensity * 0.034),
+    accent: lighting.accentColor.clone().multiplyScalar(lighting.accentIntensity * 0.04),
+    rim: lighting.rimColor.clone().multiplyScalar(lighting.rimIntensity * 0.32),
+  };
+}
+
 type ViewerEffectsPreset = 'full' | 'stack' | 'diagnostic';
 type CardSide = 'front' | 'back';
 type ViewerShakeMode = 'none' | 'rare' | 'epic' | 'veryrare';
@@ -148,7 +169,7 @@ function getLayerValue(
   type: CardTreatmentEffect,
   field: 'opacity' | 'shimmer' | 'relief',
 ) {
-  const layer = card.effectLayers?.find((item) => item.type === type);
+  const layer = card.effectLayers?.find((item) => normalizeCardTreatmentEffect(item.type) === type);
   if (!layer) {
     return field === 'relief' ? 0 : 1;
   }
@@ -720,81 +741,6 @@ const holoFragmentShader = `
 
 const holoSharedVertex = cardSurfaceVertexShader;
 
-const classicHoloFragmentShader = `
-  uniform sampler2D uMaskMap;
-  uniform vec3 uAccent;
-  uniform vec3 uHue;
-  uniform vec3 uKeyLightPos;
-  uniform vec3 uFillLightPos;
-  uniform vec3 uAccentLightPos;
-  uniform float uTime;
-  uniform float uStrength;
-  uniform float uFresnelPower;
-  uniform vec2 uPointer;
-  uniform float uSeed;
-
-  varying vec2 vUv;
-  varying vec3 vWorldNormal;
-  varying vec3 vWorldPosition;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-  }
-
-  vec3 spectrum(float t) {
-    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
-  }
-
-  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
-    vec3 lightDir = normalize(lightPos - vWorldPosition);
-    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
-  }
-
-  void main() {
-    vec2 uv = vUv;
-    vec3 normal = normalize(vWorldNormal);
-    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-    float dotNV = max(dot(normal, viewDir), 0.0);
-    float fresnel = pow(1.0 - dotNV, uFresnelPower);
-
-    float mask = texture2D(uMaskMap, uv).r;
-    if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
-
-    float micro = noise(uv * vec2(140.0, 200.0) + uTime * 0.06);
-
-    // Pure angle-based iridescence: colors shift with card tilt
-    float angularPhase = fresnel * 5.2 + uPointer.x * 3.8 + uPointer.y * 2.8;
-    float locationPhase = (uv.x * 2.4 + uv.y * 1.8 + uSeed) * 0.38;
-    float rainbowPhase = angularPhase + locationPhase + micro * 0.14 + uTime * 0.05;
-
-    vec3 rainbow = spectrum(rainbowPhase);
-    vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * sin(rainbowPhase * 0.7));
-    vec3 color = mix(tint * 0.3, rainbow, 0.84 + fresnel * 0.12);
-
-    float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, 22.0);
-    float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, 34.0);
-    float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 18.0);
-    float glint = keyGlint + fillGlint * 0.48 + accentGlint * 0.74;
-
-    float intensity = mask * (0.28 + fresnel * 2.4 + glint * 1.6 + uStrength * 0.5);
-    color *= intensity;
-    float alpha = clamp(intensity * (0.42 + uStrength * 0.48), 0.0, 0.96);
-
-    gl_FragColor = vec4(color, alpha);
-  }
-`;
-
 const waveHoloFragmentShader = `
   uniform sampler2D uMaskMap;
   uniform vec3 uAccent;
@@ -890,6 +836,14 @@ const crackedHoloFragmentShader = `
   uniform vec3 uKeyLightPos;
   uniform vec3 uFillLightPos;
   uniform vec3 uAccentLightPos;
+  uniform vec3 uRimLightPos;
+  uniform vec3 uAmbientLight;
+  uniform vec3 uSkyLight;
+  uniform vec3 uGroundLight;
+  uniform vec3 uKeyLightColor;
+  uniform vec3 uFillLightColor;
+  uniform vec3 uAccentLightColor;
+  uniform vec3 uRimLightColor;
   uniform float uTime;
   uniform float uStrength;
   uniform float uFresnelPower;
@@ -931,6 +885,26 @@ const crackedHoloFragmentShader = `
   float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
     vec3 lightDir = normalize(lightPos - vWorldPosition);
     return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  vec3 sceneLightFromNormal(vec3 surfNormal) {
+    vec3 keyDir = normalize(uKeyLightPos - vWorldPosition);
+    vec3 fillDir = normalize(uFillLightPos - vWorldPosition);
+    vec3 accentDir = normalize(uAccentLightPos - vWorldPosition);
+    vec3 rimDir = normalize(uRimLightPos - vWorldPosition);
+    float keyDiffuse = max(dot(surfNormal, keyDir), 0.0);
+    float fillDiffuse = max(dot(surfNormal, fillDir), 0.0);
+    float accentDiffuse = max(dot(surfNormal, accentDir), 0.0);
+    float rimDiffuse = pow(max(dot(surfNormal, rimDir), 0.0), 1.35);
+    float hemiMix = clamp(surfNormal.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 hemisphere = mix(uGroundLight, uSkyLight, hemiMix);
+    return
+      uAmbientLight +
+      hemisphere +
+      uKeyLightColor * keyDiffuse +
+      uFillLightColor * fillDiffuse +
+      uAccentLightColor * accentDiffuse +
+      uRimLightColor * rimDiffuse;
   }
 
   vec2 rotate2d(vec2 p, float angle) {
@@ -1074,13 +1048,14 @@ const crackedHoloFragmentShader = `
     float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, 46.0);
     float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 26.0);
     float glint = keyGlint + fillGlint * 0.44 + accentGlint * 0.68;
+    float shardPresence = clamp(shardField * 0.96 + shardEdge * 0.44, 0.0, 1.0);
 
     vec3 silver = mix(
-      vec3(0.48, 0.5, 0.54),
-      vec3(0.9, 0.92, 0.96),
-      0.26 + fresnel * 0.48 + glint * 0.08 + microSpark * 0.1
+      vec3(0.42, 0.44, 0.48),
+      vec3(0.88, 0.9, 0.94),
+      clamp(0.08 + fresnel * 0.22 + glint * 0.06 + microSpark * 0.06, 0.0, 1.0)
     );
-    vec3 color = silver * mask * (0.06 + fresnel * 0.18 + glint * 0.06);
+    vec3 color = silver * mask * shardPresence * (0.02 + fresnel * 0.06 + glint * 0.02);
 
     vec2 dominantRand = hash2(vec2(dominant.y * 5.13 + 1.7, dominant.y * 9.41 + 3.2));
     float facetTilt = mix(0.12, 0.78, dominant.z);
@@ -1115,12 +1090,15 @@ const crackedHoloFragmentShader = `
       mix(22.0, 66.0, dominant.z)
     );
     float facetGlint = facetKey + facetFill * 0.38 + facetAccent * 0.74;
+    vec3 facetSceneLight = clamp(sceneLightFromNormal(facetNormal), vec3(0.0), vec3(2.8));
+    float facetSceneBrightness = dot(facetSceneLight, vec3(0.2126, 0.7152, 0.0722));
 
     float triPhase = dominant.y * 6.28318 + dominantRand.y * 2.4 + dominant.z * 1.7;
     float angularPhase = facetFresnel * 5.8 + uPointer.x * 4.1 + uPointer.y * 3.1;
     float rainbowPhase = triPhase + angularPhase + microSpark * 0.14 + uTime * 0.04;
     vec3 rainbow = spectrum(rainbowPhase);
     vec3 facetTint = mix(mix(uHue, uAccent, dominantRand.x), rainbow, 0.84 + dominant.z * 0.1);
+    vec3 facetLighting = mix(vec3(facetSceneBrightness), facetSceneLight, 0.54);
 
     float tiltMagnitude = length(uPointer);
     float shardReflect =
@@ -1128,16 +1106,17 @@ const crackedHoloFragmentShader = `
       (
         facetFresnel * mix(0.42, 1.92, dominant.z) +
         facetGlint * mix(0.48, 1.48, dominant.z) +
+        facetSceneBrightness * mix(0.24, 0.78, dominant.z) +
         tiltMagnitude * 0.22
       ) *
       (0.46 + uStrength * 0.9);
 
-    color += facetTint * shardReflect;
-    color += vec3(1.0) * shardEdge * (0.02 + facetGlint * 0.18) * (0.45 + dominant.z * 0.8);
-    color += rainbow * mask * 0.05 * (microSpark * 0.4 + fresnel * 0.18);
+    color += facetTint * facetLighting * shardReflect;
+    color += vec3(1.0) * shardEdge * (0.02 + facetGlint * 0.18 + facetSceneBrightness * 0.08) * (0.45 + dominant.z * 0.8);
+    color += rainbow * shardPresence * 0.03 * (microSpark * 0.4 + fresnel * 0.18);
 
     float alpha = clamp(
-      mask * (0.06 + fresnel * 0.12 + shardField * 0.14) +
+      mask * shardPresence * (0.03 + fresnel * 0.06) +
       shardReflect * 0.52 +
       shardEdge * 0.1,
       0.0,
@@ -1409,7 +1388,6 @@ function CardRig({
   const sugarFinishShaderRef = useRef<ShaderMaterial>(null);
   const sparkleFinishShaderRef = useRef<ShaderMaterial>(null);
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
-  const classicHoloShaderRef = useRef<ShaderMaterial>(null);
   const waveHoloShaderRef = useRef<ShaderMaterial>(null);
   const crackedHoloShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
@@ -1432,6 +1410,10 @@ function CardRig({
   const viewerLighting = useMemo(
     () => createViewerLightingPalette(card.rarity, meta.hue, meta.accent),
     [card.rarity, meta.accent, meta.hue],
+  );
+  const crackedLightPalette = useMemo(
+    () => createCrackedLightPalette(viewerLighting),
+    [viewerLighting],
   );
   const highlightPalette = useMemo(
     () => createViewerHighlightPalette(card.rarity, meta.hue, meta.accent),
@@ -1547,14 +1529,6 @@ function CardRig({
         material.needsUpdate = true;
       });
 
-    if (classicHoloShaderRef.current?.uniforms) {
-      classicHoloShaderRef.current.uniforms.uMaskMap.value = textures.classicHoloMask;
-      classicHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
-      classicHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
-      classicHoloShaderRef.current.uniformsNeedUpdate = true;
-      classicHoloShaderRef.current.needsUpdate = true;
-    }
-
     if (waveHoloShaderRef.current?.uniforms) {
       waveHoloShaderRef.current.uniforms.uMaskMap.value = textures.waveHoloMask;
       waveHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
@@ -1567,10 +1541,31 @@ function CardRig({
       crackedHoloShaderRef.current.uniforms.uMaskMap.value = textures.crackedHoloMask;
       crackedHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
       crackedHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      crackedHoloShaderRef.current.uniforms.uAmbientLight.value.copy(crackedLightPalette.ambient);
+      crackedHoloShaderRef.current.uniforms.uSkyLight.value.copy(crackedLightPalette.sky);
+      crackedHoloShaderRef.current.uniforms.uGroundLight.value.copy(crackedLightPalette.ground);
+      crackedHoloShaderRef.current.uniforms.uKeyLightColor.value.copy(crackedLightPalette.key);
+      crackedHoloShaderRef.current.uniforms.uFillLightColor.value.copy(crackedLightPalette.fill);
+      crackedHoloShaderRef.current.uniforms.uAccentLightColor.value.copy(crackedLightPalette.accent);
+      crackedHoloShaderRef.current.uniforms.uRimLightColor.value.copy(crackedLightPalette.rim);
       crackedHoloShaderRef.current.uniformsNeedUpdate = true;
       crackedHoloShaderRef.current.needsUpdate = true;
     }
-  }, [glossiness, highlightPalette.glare, meta.accent, meta.hue, sugarIntensity, textures]);
+  }, [
+    crackedLightPalette.accent,
+    crackedLightPalette.ambient,
+    crackedLightPalette.fill,
+    crackedLightPalette.ground,
+    crackedLightPalette.key,
+    crackedLightPalette.rim,
+    crackedLightPalette.sky,
+    glossiness,
+    highlightPalette.glare,
+    meta.accent,
+    meta.hue,
+    sugarIntensity,
+    textures,
+  ]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
   useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
@@ -1768,7 +1763,7 @@ function CardRig({
         material.uniforms.uSugarIntensity.value = sugarIntensity;
       });
 
-    [classicHoloShaderRef.current, waveHoloShaderRef.current, crackedHoloShaderRef.current]
+    [waveHoloShaderRef.current, crackedHoloShaderRef.current]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
@@ -2255,32 +2250,6 @@ function CardRig({
                     />
                   </mesh>
 
-                  <mesh position={[0, 0, faceOffset + 0.017]}>
-                    <primitive attach="geometry" object={faceGeometry} />
-                    <shaderMaterial
-                      ref={classicHoloShaderRef}
-                      transparent
-                      depthWrite={false}
-                      blending={AdditiveBlending}
-                      toneMapped={false}
-                      uniforms={{
-                        uTime: { value: 0 },
-                        uMaskMap: { value: textures.classicHoloMask },
-                        uAccent: { value: new Color(meta.accent) },
-                        uHue: { value: new Color(meta.hue) },
-                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
-                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
-                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
-                        uFresnelPower: { value: tuning.fresnelPower },
-                        uPointer: { value: new Vector2(0, 0) },
-                        uSeed: { value: (card.holographicSeed % 6.28318) },
-                      }}
-                      vertexShader={holoSharedVertex}
-                      fragmentShader={classicHoloFragmentShader}
-                    />
-                  </mesh>
-
                   <mesh position={[0, 0, faceOffset + 0.018]}>
                     <primitive attach="geometry" object={faceGeometry} />
                     <shaderMaterial
@@ -2323,6 +2292,14 @@ function CardRig({
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uRimLightPos: { value: VIEWER_LIGHTS.rim.clone() },
+                        uAmbientLight: { value: crackedLightPalette.ambient.clone() },
+                        uSkyLight: { value: crackedLightPalette.sky.clone() },
+                        uGroundLight: { value: crackedLightPalette.ground.clone() },
+                        uKeyLightColor: { value: crackedLightPalette.key.clone() },
+                        uFillLightColor: { value: crackedLightPalette.fill.clone() },
+                        uAccentLightColor: { value: crackedLightPalette.accent.clone() },
+                        uRimLightColor: { value: crackedLightPalette.rim.clone() },
                         uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
                         uFresnelPower: { value: tuning.fresnelPower },
                         uPointer: { value: new Vector2(0, 0) },

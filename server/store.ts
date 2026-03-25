@@ -34,7 +34,12 @@ import type {
   Rarity,
   RemoteGameState,
 } from '../src/game/types.js';
-import { clampEffectShimmer, getDefaultCardVisuals } from '../src/game/types.js';
+import {
+  clampEffectShimmer,
+  getDefaultCardVisuals,
+  normalizeCardTreatmentEffect,
+  normalizeCardTreatmentEffects,
+} from '../src/game/types.js';
 import type { ServerConfig } from './config.js';
 import { getDayKey, getNextResetAt } from './time.js';
 
@@ -404,15 +409,22 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
   }
 
   return effectLayers
-    .map((layer) => ({
-      id: layer.id.trim(),
-      type: layer.type,
-      maskUrl: normalizeMaskUrl(layer.maskUrl),
-      opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
-      shimmer: clampEffectShimmer(layer.type, layer.shimmer ?? 1),
-      relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
-    }))
-    .filter((layer) => layer.id.length > 0);
+    .map((layer) => {
+      const type = normalizeCardTreatmentEffect(layer.type);
+      if (!type) {
+        return null;
+      }
+
+      return {
+        id: layer.id.trim(),
+        type,
+        maskUrl: normalizeMaskUrl(layer.maskUrl),
+        opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
+        shimmer: clampEffectShimmer(type, layer.shimmer ?? 1),
+        relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
+      };
+    })
+    .filter((layer): layer is CardEffectLayer => Boolean(layer && layer.id.length > 0));
 }
 
 function filterEffectLayersByAllowedTypes(
@@ -859,7 +871,9 @@ function toCardProposal(row: ProposalRow): CardProposal {
         getDefaultCardVisuals().decorativePattern,
       ),
     }),
-    allowedEffects: parseJsonArray<CardTreatmentEffect>(row.allowed_effects_json, []),
+    allowedEffects: normalizeCardTreatmentEffects(
+      parseJsonArray<string>(row.allowed_effects_json, []),
+    ),
     maxEffectLayers: row.max_effect_layers,
     effectLayers: normalizeEffectLayers(
       parseJsonArray<CardEffectLayer>(row.effect_layers_json, []),

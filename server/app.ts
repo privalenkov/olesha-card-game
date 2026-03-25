@@ -8,9 +8,9 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
-  CARD_TREATMENT_EFFECT_OPTIONS,
   clampEffectShimmer,
   getDefaultCardVisuals,
+  normalizeCardTreatmentEffect,
   type CardDecorativePattern,
   type AdminProposalOverridePayload,
   type ApiErrorResponse,
@@ -463,10 +463,7 @@ function normalizeProposalPayload(
     const layer = rawLayer as Record<string, unknown>;
     const id = typeof layer.id === 'string' ? layer.id.trim() : '';
     const type =
-      typeof layer.type === 'string' &&
-      CARD_TREATMENT_EFFECT_OPTIONS.includes(layer.type as CardEffectLayer['type'])
-        ? (layer.type as CardEffectLayer['type'])
-        : null;
+      typeof layer.type === 'string' ? normalizeCardTreatmentEffect(layer.type) : null;
     const maskUrl = typeof layer.maskUrl === 'string' ? layer.maskUrl.trim() : '';
     const opacity =
       typeof layer.opacity === 'number' && Number.isFinite(layer.opacity) ? layer.opacity : NaN;
@@ -545,14 +542,15 @@ function normalizeAdminProposalOverridePayload(value: unknown): AdminProposalOve
   const seen = new Set<CardTreatmentEffect>();
 
   for (const rawEffect of rawAllowedEffects) {
-    if (
-      typeof rawEffect !== 'string' ||
-      !CARD_TREATMENT_EFFECT_OPTIONS.includes(rawEffect as CardTreatmentEffect)
-    ) {
+    if (typeof rawEffect !== 'string') {
       return null;
     }
 
-    const effect = rawEffect as CardTreatmentEffect;
+    const effect = normalizeCardTreatmentEffect(rawEffect);
+    if (!effect) {
+      return null;
+    }
+
     if (seen.has(effect)) {
       continue;
     }

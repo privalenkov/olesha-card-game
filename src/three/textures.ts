@@ -9,6 +9,7 @@ import { finishMeta, rarityMeta } from '../game/config';
 import {
   type CardEffectLayer,
   getDefaultCardVisuals,
+  normalizeCardTreatmentEffect,
   type CardFrameStyle,
   type CardTreatmentEffect,
   type CardVisuals,
@@ -320,7 +321,18 @@ function getCardVisuals(card: OwnedCard): CardVisuals {
 }
 
 function getCardEffectLayers(card: OwnedCard): CardEffectLayer[] {
-  return card.effectLayers ?? [];
+  const layers = card.effectLayers ?? [];
+  const seenTypes = new Set<CardTreatmentEffect>();
+
+  return layers.flatMap((layer) => {
+    const type = normalizeCardTreatmentEffect(layer.type);
+    if (!type || seenTypes.has(type)) {
+      return [];
+    }
+
+    seenTypes.add(type);
+    return [{ ...layer, type }];
+  });
 }
 
 function clipDecorativePatternOutsideHero(
@@ -495,38 +507,6 @@ function drawSpotHoloEffect(
     ctx.fillRect(0, -height * 0.2, width * 0.05, height * 1.5);
     ctx.restore();
   }
-  ctx.globalCompositeOperation = 'source-over';
-}
-
-function drawClassicHoloEffect(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  accent: string,
-  hue: string,
-) {
-  // Clean smooth rainbow gradient — simulates angle-based iridescent foil
-  const rainbow = ctx.createLinearGradient(0, height * 0.1, width, height * 0.9);
-  rainbow.addColorStop(0.0, '#ff7eb3');
-  rainbow.addColorStop(0.14, '#ff9a5c');
-  rainbow.addColorStop(0.28, '#ffe566');
-  rainbow.addColorStop(0.42, '#a6ff8e');
-  rainbow.addColorStop(0.56, '#7ee8ff');
-  rainbow.addColorStop(0.7, accent);
-  rainbow.addColorStop(0.84, hue);
-  rainbow.addColorStop(1.0, '#ff7eb3');
-  ctx.fillStyle = rainbow;
-  ctx.fillRect(0, 0, width, height);
-
-  // Subtle diagonal shimmer sweep
-  ctx.globalCompositeOperation = 'overlay';
-  const sweep = ctx.createLinearGradient(0, height, width, 0);
-  sweep.addColorStop(0, 'rgba(255,255,255,0)');
-  sweep.addColorStop(0.45, 'rgba(255,255,255,0.18)');
-  sweep.addColorStop(0.55, 'rgba(255,255,255,0.32)');
-  sweep.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = sweep;
-  ctx.fillRect(0, 0, width, height);
   ctx.globalCompositeOperation = 'source-over';
 }
 
@@ -854,9 +834,6 @@ function drawTreatmentLayer(
       case 'prismatic_edge':
         drawPrismaticEdgeEffect(effectContext, width, height, accent, hue);
         break;
-      case 'holo_classic':
-        drawClassicHoloEffect(effectContext, width, height, accent, hue);
-        break;
       case 'holo_wave':
         drawWaveHoloEffect(effectContext, width, height, accent, hue);
         break;
@@ -1160,22 +1137,6 @@ function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLIma
   composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
     blur: 1.5,
     alphaMultiplier: 0.92,
-  });
-  return canvas;
-}
-
-function drawClassicHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
-  if (!ctx) {
-    return canvas;
-  }
-
-  composeEffectMaskPass(ctx, card, maskImages, ['holo_classic'], {
-    blur: 2,
-    alphaMultiplier: 1,
-  });
-  composeEffectMaskPass(ctx, card, maskImages, ['holo_classic'], {
-    alphaMultiplier: 1,
   });
   return canvas;
 }
@@ -2110,7 +2071,6 @@ export function useCardTextures(card: OwnedCard | null) {
       sparkleMask: setupDataTexture(drawSparkleMaskMap(card, effectMaskImages)),
       prismMask: setupDataTexture(drawPrismaticMaskMap(card, effectMaskImages)),
       holoTreatmentMap: setupDataTexture(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
-      classicHoloMask: setupDataTexture(drawClassicHoloMaskMap(card, effectMaskImages)),
       waveHoloMask: setupDataTexture(drawWaveHoloMaskMap(card, effectMaskImages)),
       crackedHoloMask: setupDataTexture(drawCrackedHoloMaskMap(card, effectMaskImages)),
     };
