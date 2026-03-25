@@ -498,6 +498,211 @@ function drawSpotHoloEffect(
   ctx.globalCompositeOperation = 'source-over';
 }
 
+function drawClassicHoloEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  hue: string,
+) {
+  // Clean smooth rainbow gradient — simulates angle-based iridescent foil
+  const rainbow = ctx.createLinearGradient(0, height * 0.1, width, height * 0.9);
+  rainbow.addColorStop(0.0, '#ff7eb3');
+  rainbow.addColorStop(0.14, '#ff9a5c');
+  rainbow.addColorStop(0.28, '#ffe566');
+  rainbow.addColorStop(0.42, '#a6ff8e');
+  rainbow.addColorStop(0.56, '#7ee8ff');
+  rainbow.addColorStop(0.7, accent);
+  rainbow.addColorStop(0.84, hue);
+  rainbow.addColorStop(1.0, '#ff7eb3');
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, width, height);
+
+  // Subtle diagonal shimmer sweep
+  ctx.globalCompositeOperation = 'overlay';
+  const sweep = ctx.createLinearGradient(0, height, width, 0);
+  sweep.addColorStop(0, 'rgba(255,255,255,0)');
+  sweep.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+  sweep.addColorStop(0.55, 'rgba(255,255,255,0.32)');
+  sweep.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sweep;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawWaveHoloEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  hue: string,
+) {
+  // Large organic blobs with different rainbow colors — wave/bubble holography look
+  const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+  baseGradient.addColorStop(0, '#7ee8ff88');
+  baseGradient.addColorStop(0.25, `${accent}88`);
+  baseGradient.addColorStop(0.5, '#ffe56688');
+  baseGradient.addColorStop(0.75, `${hue}88`);
+  baseGradient.addColorStop(1, '#b38fff88');
+  ctx.fillStyle = baseGradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.globalCompositeOperation = 'overlay';
+  const blobColors = [
+    'rgba(127,232,255,0.72)',
+    'rgba(255,130,179,0.68)',
+    'rgba(255,229,100,0.7)',
+    'rgba(166,255,142,0.66)',
+    'rgba(179,143,255,0.7)',
+    'rgba(255,160,90,0.66)',
+  ];
+  const blobData = [
+    [0.12, 0.18, 0.38], [0.72, 0.08, 0.42], [0.38, 0.55, 0.46],
+    [0.82, 0.62, 0.36], [0.22, 0.82, 0.44], [0.58, 0.32, 0.4],
+    [0.46, 0.72, 0.34], [0.88, 0.38, 0.38],
+  ];
+  blobData.forEach(([bx, by, br], i) => {
+    const grad = ctx.createRadialGradient(
+      bx * width, by * height, 0,
+      bx * width, by * height, br * width,
+    );
+    grad.addColorStop(0, blobColors[i % blobColors.length]);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+  });
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawCrackedHoloEffect(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  hue: string,
+) {
+  const seeded = (value: number) => {
+    const x = Math.sin(value * 12.9898 + 78.233) * 43758.5453123;
+    return x - Math.floor(x);
+  };
+
+  const base = ctx.createLinearGradient(0, 0, width, height);
+  base.addColorStop(0, '#757b84');
+  base.addColorStop(0.18, '#d7dde5');
+  base.addColorStop(0.42, '#8c929a');
+  base.addColorStop(0.68, '#e3e8ef');
+  base.addColorStop(1, '#7e848c');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, width, height);
+
+  const veil = ctx.createLinearGradient(width * 0.08, 0, width * 0.92, height);
+  veil.addColorStop(0, `${accent}18`);
+  veil.addColorStop(0.2, '#9be7ff26');
+  veil.addColorStop(0.46, `${hue}22`);
+  veil.addColorStop(0.7, '#ffe57a20');
+  veil.addColorStop(1, `${accent}1a`);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.fillStyle = veil;
+  ctx.fillRect(0, 0, width, height);
+
+  const bloom = ctx.createRadialGradient(
+    width * 0.52,
+    height * 0.48,
+    width * 0.04,
+    width * 0.52,
+    height * 0.48,
+    width * 0.72,
+  );
+  bloom.addColorStop(0, 'rgba(255,255,255,0.18)');
+  bloom.addColorStop(0.42, 'rgba(255,255,255,0.08)');
+  bloom.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = bloom;
+  ctx.fillRect(0, 0, width, height);
+
+  const shardPalette = [
+    `${accent}a8`,
+    `${hue}94`,
+    '#7ee8ffd8',
+    '#ffe76dcf',
+    '#ffffffee',
+    '#ff9bd0be',
+  ];
+
+  const drawShardLayer = (count: number, sizeMin: number, sizeMax: number, alphaScale: number) => {
+    for (let index = 0; index < count; index += 1) {
+      const seed = index + count * (sizeMin + 0.17);
+      const x = seeded(seed * 1.13) * (width + 120) - 60;
+      const y = seeded(seed * 1.91) * (height + 120) - 60;
+      const rotation = seeded(seed * 2.37) * Math.PI * 2;
+      const heightSize = sizeMin + seeded(seed * 2.77) * (sizeMax - sizeMin);
+      const leftBase = 3 + seeded(seed * 3.11) * heightSize * 1.05;
+      const rightBase = 4 + seeded(seed * 3.43) * heightSize * 1.75;
+      const tail = 0.45 + seeded(seed * 3.89) * 2.8;
+      const skew = (-0.5 + seeded(seed * 4.21)) * heightSize * 0.55;
+      const alpha = (0.2 + seeded(seed * 4.61) * 0.75) * alphaScale;
+      const primaryColor = shardPalette[Math.floor(seeded(seed * 4.93) * shardPalette.length)];
+      const secondaryColor = shardPalette[Math.floor(seeded(seed * 5.29) * shardPalette.length)];
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.globalAlpha = alpha;
+
+      const gradient = ctx.createLinearGradient(
+        -leftBase * tail,
+        -heightSize,
+        rightBase * tail,
+        heightSize,
+      );
+      gradient.addColorStop(0, 'rgba(255,255,255,0)');
+      gradient.addColorStop(0.18, primaryColor);
+      gradient.addColorStop(0.52, 'rgba(255,255,255,0.96)');
+      gradient.addColorStop(0.78, secondaryColor);
+      gradient.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gradient;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -heightSize);
+      ctx.lineTo(-leftBase * (0.75 + tail), heightSize * (0.16 + seeded(seed * 5.61) * 0.54));
+      ctx.lineTo(
+        rightBase * (0.4 + tail * 0.8) + skew,
+        heightSize * (0.08 + seeded(seed * 5.97) * 0.9),
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      if (seeded(seed * 6.31) > 0.58) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+        ctx.lineWidth = 0.6 + seeded(seed * 6.67) * 0.9;
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  };
+
+  ctx.globalCompositeOperation = 'lighter';
+  drawShardLayer(120, 10, 32, 0.34);
+  drawShardLayer(220, 6, 20, 0.28);
+  drawShardLayer(320, 3, 12, 0.22);
+
+  ctx.globalCompositeOperation = 'screen';
+  for (let index = 0; index < 36; index += 1) {
+    const seed = 700 + index;
+    const x = seeded(seed * 1.7) * width;
+    const y = seeded(seed * 2.1) * height;
+    const radius = 22 + seeded(seed * 2.5) * 90;
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    glow.addColorStop(0, seeded(seed * 2.9) > 0.5 ? `${accent}36` : `${hue}2c`);
+    glow.addColorStop(0.4, 'rgba(255,255,255,0.04)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+}
+
 function drawTextureSugarEffect(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -648,6 +853,15 @@ function drawTreatmentLayer(
         break;
       case 'prismatic_edge':
         drawPrismaticEdgeEffect(effectContext, width, height, accent, hue);
+        break;
+      case 'holo_classic':
+        drawClassicHoloEffect(effectContext, width, height, accent, hue);
+        break;
+      case 'holo_wave':
+        drawWaveHoloEffect(effectContext, width, height, accent, hue);
+        break;
+      case 'holo_cracked':
+        drawCrackedHoloEffect(effectContext, width, height, accent, hue);
         break;
     }
   };
@@ -946,6 +1160,54 @@ function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLIma
   composeEffectMaskPass(ctx, card, maskImages, ['prismatic_edge'], {
     blur: 1.5,
     alphaMultiplier: 0.92,
+  });
+  return canvas;
+}
+
+function drawClassicHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_classic'], {
+    blur: 2,
+    alphaMultiplier: 1,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_classic'], {
+    alphaMultiplier: 1,
+  });
+  return canvas;
+}
+
+function drawWaveHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_wave'], {
+    blur: 3,
+    alphaMultiplier: 1,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_wave'], {
+    alphaMultiplier: 1,
+  });
+  return canvas;
+}
+
+function drawCrackedHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_cracked'], {
+    blur: 1.5,
+    alphaMultiplier: 1,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['holo_cracked'], {
+    alphaMultiplier: 1,
   });
   return canvas;
 }
@@ -1848,6 +2110,9 @@ export function useCardTextures(card: OwnedCard | null) {
       sparkleMask: setupDataTexture(drawSparkleMaskMap(card, effectMaskImages)),
       prismMask: setupDataTexture(drawPrismaticMaskMap(card, effectMaskImages)),
       holoTreatmentMap: setupDataTexture(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
+      classicHoloMask: setupDataTexture(drawClassicHoloMaskMap(card, effectMaskImages)),
+      waveHoloMask: setupDataTexture(drawWaveHoloMaskMap(card, effectMaskImages)),
+      crackedHoloMask: setupDataTexture(drawCrackedHoloMaskMap(card, effectMaskImages)),
     };
   }, [artImage, card, decorativePatternImage, effectMaskImages]);
 }

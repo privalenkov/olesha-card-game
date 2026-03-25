@@ -8,7 +8,10 @@ export type CardTreatmentEffect =
   | 'texture_sugar'
   | 'sparkle_foil'
   | 'emboss'
-  | 'prismatic_edge';
+  | 'prismatic_edge'
+  | 'holo_classic'
+  | 'holo_wave'
+  | 'holo_cracked';
 export type ProposalStatus = 'draft' | 'pending' | 'approved' | 'deleted';
 export type AppNotificationKind = 'info' | 'success' | 'error';
 
@@ -61,6 +64,9 @@ export const CARD_TREATMENT_EFFECT_OPTIONS: CardTreatmentEffect[] = [
   'sparkle_foil',
   'emboss',
   'prismatic_edge',
+  'holo_classic',
+  'holo_wave',
+  'holo_cracked',
 ];
 
 export const CARD_TREATMENT_EFFECT_LABELS: Record<CardTreatmentEffect, string> = {
@@ -70,6 +76,9 @@ export const CARD_TREATMENT_EFFECT_LABELS: Record<CardTreatmentEffect, string> =
   sparkle_foil: 'Искристая ламинация',
   emboss: 'Рельефная ламинация',
   prismatic_edge: 'Призматическая ламинация',
+  holo_classic: 'Классическая голография',
+  holo_wave: 'Волновая голография',
+  holo_cracked: 'Битое стекло',
 };
 
 export const CARD_TREATMENT_EFFECT_DESCRIPTIONS: Record<CardTreatmentEffect, string> = {
@@ -79,6 +88,9 @@ export const CARD_TREATMENT_EFFECT_DESCRIPTIONS: Record<CardTreatmentEffect, str
   sparkle_foil: 'Ламинация с яркими искрами и плотными бликами.',
   emboss: 'Ламинация с выпуклым рельефом, который ловит свет.',
   prismatic_edge: 'Призматический перелив для кантов и контуров.',
+  holo_classic: 'Чистое радужное переливание по маске — меняет цвет при наклоне карточки.',
+  holo_wave: 'Крупные органические ячейки с волновым радужным переливом.',
+  holo_cracked: 'Осколочная текстура: мелкие грани переливаются каждая в своём цвете.',
 };
 
 export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = {
@@ -135,6 +147,9 @@ export function getDefaultEffectLayer(
     sparkle_foil: 0.86,
     emboss: 0.74,
     prismatic_edge: 0.9,
+    holo_classic: 0.88,
+    holo_wave: 0.9,
+    holo_cracked: 0.88,
   };
 
   return {
@@ -142,7 +157,7 @@ export function getDefaultEffectLayer(
     type,
     maskUrl: '',
     opacity: opacityByType[type],
-    shimmer: type === 'spot_gloss' ? 0.6 : 1,
+    shimmer: type === 'spot_gloss' ? 0.6 : type === 'holo_classic' || type === 'holo_wave' || type === 'holo_cracked' ? 1.1 : 1,
     relief: 0,
   };
 }

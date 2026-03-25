@@ -678,21 +678,17 @@ const holoFragmentShader = `
     float prism = texture2D(uPrismMap, uv).r;
 
     float micro = noise(
-      uv * vec2(220.0 + uDensity * 80.0, 320.0 + uDensity * 120.0) + uTime * 0.12
+      uv * vec2(160.0 + uDensity * 60.0, 220.0 + uDensity * 80.0) + uTime * 0.08
     );
-    float stripe = sin(
-      uv.y * (32.0 + uDensity * 42.0) + uv.x * 22.0 + uTime * (1.1 + uStrength)
-    );
-    float angleWave = sin((uv.x + uv.y) * 18.0 + fresnel * 9.0 - uTime * 0.6);
-    float diffraction = 0.5 + 0.5 * stripe;
-    float rainbowPhase =
-      diffraction * 0.55 +
-      angleWave * 0.18 +
-      fresnel * 0.42 +
-      micro * 0.15 +
-      treatment * 0.08 +
-      prism * 0.12;
-    vec3 rainbow = spectrum(rainbowPhase + uTime * 0.03);
+
+    // Angle-driven rainbow — no stripes, pure iridescent tilt response
+    float tiltX = uPointer.x;
+    float tiltY = uPointer.y;
+    float angularPhase = fresnel * 4.8 + tiltX * 3.6 + tiltY * 2.4;
+    float locationPhase = (uv.x * 2.0 + uv.y * 1.4) * 0.32;
+    float angleWave = sin(fresnel * 5.0 + tiltX * 2.6 - uTime * 0.44);
+    float rainbowPhase = angularPhase + locationPhase + micro * 0.16 + treatment * 0.1 + prism * 0.14 + uTime * 0.04;
+    vec3 rainbow = spectrum(rainbowPhase);
 
     float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, mix(40.0, 14.0, uGlint));
     float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, mix(54.0, 20.0, uGlint));
@@ -704,19 +700,449 @@ const holoFragmentShader = `
     );
     float glint = keyGlint + fillGlint * 0.55 + accentGlint * 0.85;
     float sweep = pow(
-      max(1.0 - abs(uv.x - (0.5 + uPointer.x * 0.12 + sin(uTime * 0.7) * 0.08)), 0.0),
-      12.0
+      max(1.0 - abs(uv.x - (0.5 + tiltX * 0.14 + sin(uTime * 0.6) * 0.06)), 0.0),
+      10.0
     );
 
     float zoneIntensity = smoothstep(0.02, 0.95, max(zone, treatment * 0.92));
     float holo = zoneIntensity * (0.16 + mask * 0.8 + treatment * 0.58 + prism * 0.36);
-    holo *= (0.16 + fresnel * (1.0 + prism * 0.42) + glint * (0.96 + treatment * 0.42) + sweep * 0.26);
-    holo *= 0.56 + diffraction * 0.34 + micro * 0.16;
+    holo *= (0.18 + fresnel * (1.1 + prism * 0.42) + glint * (0.96 + treatment * 0.42) + sweep * 0.22);
+    holo *= 0.62 + micro * 0.28;
 
     vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * angleWave);
-    vec3 color = mix(tint, rainbow, 0.84 + prism * 0.08) * holo;
+    vec3 color = mix(tint, rainbow, 0.86 + prism * 0.08) * holo;
     color += spectrum(rainbowPhase + 0.18) * prism * (fresnel * 0.5 + glint * 0.22);
     float alpha = clamp(holo * (0.38 + uStrength * 0.44 + treatment * 0.12), 0.0, 0.92);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+const holoSharedVertex = cardSurfaceVertexShader;
+
+const classicHoloFragmentShader = `
+  uniform sampler2D uMaskMap;
+  uniform vec3 uAccent;
+  uniform vec3 uHue;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uTime;
+  uniform float uStrength;
+  uniform float uFresnelPower;
+  uniform vec2 uPointer;
+  uniform float uSeed;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
+  vec3 spectrum(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
+  }
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec3 normal = normalize(vWorldNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float dotNV = max(dot(normal, viewDir), 0.0);
+    float fresnel = pow(1.0 - dotNV, uFresnelPower);
+
+    float mask = texture2D(uMaskMap, uv).r;
+    if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
+
+    float micro = noise(uv * vec2(140.0, 200.0) + uTime * 0.06);
+
+    // Pure angle-based iridescence: colors shift with card tilt
+    float angularPhase = fresnel * 5.2 + uPointer.x * 3.8 + uPointer.y * 2.8;
+    float locationPhase = (uv.x * 2.4 + uv.y * 1.8 + uSeed) * 0.38;
+    float rainbowPhase = angularPhase + locationPhase + micro * 0.14 + uTime * 0.05;
+
+    vec3 rainbow = spectrum(rainbowPhase);
+    vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * sin(rainbowPhase * 0.7));
+    vec3 color = mix(tint * 0.3, rainbow, 0.84 + fresnel * 0.12);
+
+    float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, 22.0);
+    float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, 34.0);
+    float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 18.0);
+    float glint = keyGlint + fillGlint * 0.48 + accentGlint * 0.74;
+
+    float intensity = mask * (0.28 + fresnel * 2.4 + glint * 1.6 + uStrength * 0.5);
+    color *= intensity;
+    float alpha = clamp(intensity * (0.42 + uStrength * 0.48), 0.0, 0.96);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+const waveHoloFragmentShader = `
+  uniform sampler2D uMaskMap;
+  uniform vec3 uAccent;
+  uniform vec3 uHue;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uTime;
+  uniform float uStrength;
+  uniform float uFresnelPower;
+  uniform vec2 uPointer;
+  uniform float uSeed;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  vec3 spectrum(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
+  }
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec3 normal = normalize(vWorldNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float dotNV = max(dot(normal, viewDir), 0.0);
+    float fresnel = pow(1.0 - dotNV, uFresnelPower);
+
+    float mask = texture2D(uMaskMap, uv).r;
+    if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
+
+    // Large organic Voronoi cells — each cell has its own unique rainbow phase
+    vec2 cellUv = uv * 3.6 + vec2(uSeed * 0.46, uSeed * 0.33);
+    vec2 iCell = floor(cellUv);
+    vec2 fCell = fract(cellUv);
+
+    float minDist1 = 10.0;
+    float nearestSeed = 0.0;
+
+    for (int y = -2; y <= 2; y++) {
+      for (int x = -2; x <= 2; x++) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 cellId = iCell + neighbor;
+        float s = hash(cellId + vec2(uSeed * 3.17, uSeed * 1.73));
+        // Slowly drifting organic cell centers
+        vec2 center = neighbor + 0.5 + 0.38 * sin(vec2(s * 6.28318, s * 4.71 + 1.0) + uTime * 0.09);
+        float dist = length(center - fCell);
+        if (dist < minDist1) {
+          minDist1 = dist;
+          nearestSeed = s;
+        }
+      }
+    }
+
+    // Each cell has a unique fixed phase offset — that is what creates the color variation
+    // between cells. The angular shift with tilt makes ALL cells shift in spectrum together.
+    float cellPhase = nearestSeed * 6.28318;
+    float angularPhase = fresnel * 5.0 + uPointer.x * 3.8 + uPointer.y * 2.8;
+    float rainbowPhase = angularPhase + cellPhase + uTime * 0.04;
+
+    vec3 rainbow = spectrum(rainbowPhase);
+
+    float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, 22.0);
+    float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, 32.0);
+    float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 18.0);
+    float glint = keyGlint + fillGlint * 0.5 + accentGlint * 0.72;
+
+    // Neutral at rest — rainbow emerges with tilt via fresnel + pointer
+    float tiltMagnitude = length(uPointer);
+    float reflectStrength = clamp(fresnel * 2.4 + tiltMagnitude * 1.0, 0.0, 1.0);
+
+    float intensity = mask * (reflectStrength * uStrength * 1.4 + glint * 1.2);
+    vec3 color = rainbow * intensity;
+    float alpha = clamp(intensity * (0.44 + uStrength * 0.46), 0.0, 0.96);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+const crackedHoloFragmentShader = `
+  uniform sampler2D uMaskMap;
+  uniform vec3 uAccent;
+  uniform vec3 uHue;
+  uniform vec3 uKeyLightPos;
+  uniform vec3 uFillLightPos;
+  uniform vec3 uAccentLightPos;
+  uniform float uTime;
+  uniform float uStrength;
+  uniform float uFresnelPower;
+  uniform vec2 uPointer;
+  uniform float uSeed;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+  varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  vec2 hash2(vec2 p) {
+    return vec2(
+      hash(p + vec2(1.7, 9.2)),
+      hash(p + vec2(8.3, 2.8))
+    );
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
+  vec3 spectrum(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.16, 0.34)));
+  }
+
+  float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
+    vec3 lightDir = normalize(lightPos - vWorldPosition);
+    return pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), power);
+  }
+
+  vec2 rotate2d(vec2 p, float angle) {
+    float cs = cos(angle);
+    float sn = sin(angle);
+    return mat2(cs, -sn, sn, cs) * p;
+  }
+
+  vec2 warpUv(vec2 uv, float angle, vec2 stretch, vec2 offset) {
+    return rotate2d((uv - 0.5) * stretch, angle) + 0.5 + offset;
+  }
+
+  float edgeFn(vec2 a, vec2 b, vec2 p) {
+    return (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x);
+  }
+
+  vec2 triangleShape(vec2 p, vec2 a, vec2 b, vec2 c) {
+    float orientation = sign(edgeFn(a, b, c));
+    if (orientation == 0.0) {
+      orientation = 1.0;
+    }
+
+    float e1 = edgeFn(a, b, p) * orientation;
+    float e2 = edgeFn(b, c, p) * orientation;
+    float e3 = edgeFn(c, a, p) * orientation;
+    float perimeter = max(length(b - a) + length(c - b) + length(a - c), 0.0001);
+    float edgeDistance = min(e1, min(e2, e3)) / perimeter;
+    float coverage = smoothstep(-0.0024, 0.0024, edgeDistance);
+    float edge = exp(-abs(edgeDistance) * 420.0) * coverage;
+    return vec2(coverage, edge);
+  }
+
+  vec4 sampleTriShard(vec2 uv, vec2 density, float seedOffset) {
+    vec2 scaled = uv * density;
+    vec2 cell = floor(scaled);
+    vec2 local = fract(scaled);
+
+    float bestCoverage = 0.0;
+    float bestSeed = 0.0;
+    float bestReflect = 0.0;
+    float bestEdge = 0.0;
+
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 cellId = cell + neighbor;
+        vec2 randA = hash2(cellId + vec2(seedOffset, seedOffset * 1.37));
+        vec2 randB = hash2(cellId + vec2(seedOffset * 2.11, seedOffset * 0.71));
+        vec2 randC = hash2(cellId + vec2(seedOffset * 0.53, seedOffset * 2.81));
+
+        float presence = step(0.34 + 0.14 * fract(seedOffset * 0.37), randA.y);
+        vec2 center = neighbor + mix(vec2(0.08), vec2(0.92), randA);
+        vec2 p = rotate2d(local - center, randB.x * 6.28318);
+
+        float height = mix(0.06, 0.34, randB.y);
+        float leftBase = mix(0.018, height * 1.1, randC.x * randC.x);
+        float rightBase = mix(0.022, height * 1.45, randC.y);
+        float tail = mix(0.12, 1.7, randA.x);
+        float skew = mix(-0.18, 0.18, randB.y);
+
+        vec2 a = vec2(0.0, -height);
+        vec2 b = vec2(-leftBase * (0.8 + tail), height * (0.18 + randC.x * 0.62));
+        vec2 c = vec2(
+          rightBase * (0.42 + tail * 0.78) + skew,
+          height * (0.1 + randC.y * 0.86)
+        );
+
+        vec2 shape = triangleShape(p, a, b, c);
+        float coverage = shape.x * presence;
+
+        if (coverage > bestCoverage) {
+          bestCoverage = coverage;
+          bestEdge = shape.y;
+          bestSeed = hash(cellId + vec2(seedOffset * 0.91, seedOffset * 1.73));
+          bestReflect = mix(
+            0.18,
+            1.0,
+            fract(randA.x * 3.7 + randB.y * 5.1 + randC.x * 7.9)
+          );
+        }
+      }
+    }
+
+    return vec4(bestCoverage, bestSeed, bestReflect, bestEdge);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec3 normal = normalize(vWorldNormal);
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float dotNV = max(dot(normal, viewDir), 0.0);
+    float fresnel = pow(1.0 - dotNV, uFresnelPower);
+
+    float mask = texture2D(uMaskMap, uv).r;
+    if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
+
+    vec2 uvA = warpUv(
+      uv,
+      0.34 + uSeed * 0.19,
+      vec2(1.02, 1.18),
+      vec2(uSeed * 0.11, -uSeed * 0.07)
+    );
+    vec2 uvB = warpUv(
+      uv,
+      -0.92 + uSeed * 0.13,
+      vec2(1.14, 0.98),
+      vec2(-0.17, 0.09)
+    );
+    vec2 uvC = warpUv(
+      uv,
+      1.41 - uSeed * 0.07,
+      vec2(0.94, 1.26),
+      vec2(0.08, -0.21)
+    );
+
+    vec4 triA = sampleTriShard(uvA, vec2(20.0, 28.0) + uSeed * vec2(4.0, 5.0), 2.3);
+    vec4 triB = sampleTriShard(
+      uvB + vec2(0.013, -0.009),
+      vec2(34.0, 46.0) + uSeed * vec2(6.0, 8.0),
+      5.7
+    );
+    vec4 triC = sampleTriShard(
+      uvC + vec2(-0.019, 0.014),
+      vec2(48.0, 66.0) + uSeed * vec2(10.0, 12.0),
+      9.1
+    );
+
+    vec4 dominant = triA;
+    if (triB.x > dominant.x) {
+      dominant = triB;
+    }
+    if (triC.x > dominant.x) {
+      dominant = triC;
+    }
+
+    float shardField = clamp(triA.x * 0.44 + triB.x * 0.68 + triC.x * 0.82, 0.0, 1.0);
+    float shardEdge = max(triA.w * triA.x, max(triB.w * triB.x, triC.w * triC.x));
+    float microSpark = noise(uv * vec2(280.0, 420.0) + uTime * 0.03);
+
+    float keyGlint = specularFromLight(uKeyLightPos, normal, viewDir, 34.0);
+    float fillGlint = specularFromLight(uFillLightPos, normal, viewDir, 46.0);
+    float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 26.0);
+    float glint = keyGlint + fillGlint * 0.44 + accentGlint * 0.68;
+
+    vec3 silver = mix(
+      vec3(0.48, 0.5, 0.54),
+      vec3(0.9, 0.92, 0.96),
+      0.26 + fresnel * 0.48 + glint * 0.08 + microSpark * 0.1
+    );
+    vec3 color = silver * mask * (0.06 + fresnel * 0.18 + glint * 0.06);
+
+    vec2 dominantRand = hash2(vec2(dominant.y * 5.13 + 1.7, dominant.y * 9.41 + 3.2));
+    float facetTilt = mix(0.12, 0.78, dominant.z);
+    float facetAngle = dominant.y * 6.28318 + dominantRand.x * 4.0;
+    vec2 facetAxis = vec2(cos(facetAngle), sin(facetAngle));
+    vec3 facetNormal = normalize(
+      normal +
+      vWorldTangent * facetAxis.x * facetTilt * mix(0.9, 1.6, dominantRand.x) +
+      vWorldBitangent * facetAxis.y * facetTilt * mix(0.5, 1.3, dominantRand.y)
+    );
+    float facetFresnel = pow(
+      clamp(1.0 - max(dot(facetNormal, viewDir), 0.0), 0.0, 1.0),
+      max(uFresnelPower * 0.82, 0.56)
+    );
+
+    float facetKey = specularFromLight(
+      uKeyLightPos,
+      facetNormal,
+      viewDir,
+      mix(26.0, 78.0, dominant.z)
+    );
+    float facetFill = specularFromLight(
+      uFillLightPos,
+      facetNormal,
+      viewDir,
+      mix(34.0, 86.0, dominant.z)
+    );
+    float facetAccent = specularFromLight(
+      uAccentLightPos,
+      facetNormal,
+      viewDir,
+      mix(22.0, 66.0, dominant.z)
+    );
+    float facetGlint = facetKey + facetFill * 0.38 + facetAccent * 0.74;
+
+    float triPhase = dominant.y * 6.28318 + dominantRand.y * 2.4 + dominant.z * 1.7;
+    float angularPhase = facetFresnel * 5.8 + uPointer.x * 4.1 + uPointer.y * 3.1;
+    float rainbowPhase = triPhase + angularPhase + microSpark * 0.14 + uTime * 0.04;
+    vec3 rainbow = spectrum(rainbowPhase);
+    vec3 facetTint = mix(mix(uHue, uAccent, dominantRand.x), rainbow, 0.84 + dominant.z * 0.1);
+
+    float tiltMagnitude = length(uPointer);
+    float shardReflect =
+      shardField *
+      (
+        facetFresnel * mix(0.42, 1.92, dominant.z) +
+        facetGlint * mix(0.48, 1.48, dominant.z) +
+        tiltMagnitude * 0.22
+      ) *
+      (0.46 + uStrength * 0.9);
+
+    color += facetTint * shardReflect;
+    color += vec3(1.0) * shardEdge * (0.02 + facetGlint * 0.18) * (0.45 + dominant.z * 0.8);
+    color += rainbow * mask * 0.05 * (microSpark * 0.4 + fresnel * 0.18);
+
+    float alpha = clamp(
+      mask * (0.06 + fresnel * 0.12 + shardField * 0.14) +
+      shardReflect * 0.52 +
+      shardEdge * 0.1,
+      0.0,
+      0.96
+    );
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -983,6 +1409,9 @@ function CardRig({
   const sugarFinishShaderRef = useRef<ShaderMaterial>(null);
   const sparkleFinishShaderRef = useRef<ShaderMaterial>(null);
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
+  const classicHoloShaderRef = useRef<ShaderMaterial>(null);
+  const waveHoloShaderRef = useRef<ShaderMaterial>(null);
+  const crackedHoloShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
   const edgeMeshRef = useRef<Mesh>(null);
   const impactFlashRef = useRef<MeshBasicMaterial>(null);
@@ -1117,6 +1546,30 @@ function CardRig({
         material.uniformsNeedUpdate = true;
         material.needsUpdate = true;
       });
+
+    if (classicHoloShaderRef.current?.uniforms) {
+      classicHoloShaderRef.current.uniforms.uMaskMap.value = textures.classicHoloMask;
+      classicHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
+      classicHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      classicHoloShaderRef.current.uniformsNeedUpdate = true;
+      classicHoloShaderRef.current.needsUpdate = true;
+    }
+
+    if (waveHoloShaderRef.current?.uniforms) {
+      waveHoloShaderRef.current.uniforms.uMaskMap.value = textures.waveHoloMask;
+      waveHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
+      waveHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      waveHoloShaderRef.current.uniformsNeedUpdate = true;
+      waveHoloShaderRef.current.needsUpdate = true;
+    }
+
+    if (crackedHoloShaderRef.current?.uniforms) {
+      crackedHoloShaderRef.current.uniforms.uMaskMap.value = textures.crackedHoloMask;
+      crackedHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
+      crackedHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
+      crackedHoloShaderRef.current.uniformsNeedUpdate = true;
+      crackedHoloShaderRef.current.needsUpdate = true;
+    }
   }, [glossiness, highlightPalette.glare, meta.accent, meta.hue, sugarIntensity, textures]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
@@ -1313,6 +1766,15 @@ function CardRig({
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
         material.uniforms.uSugarIntensity.value = sugarIntensity;
+      });
+
+    [classicHoloShaderRef.current, waveHoloShaderRef.current, crackedHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uTime.value = state.clock.elapsedTime;
+        material.uniforms.uPointer.value.copy(pointer);
+        material.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
+        material.uniforms.uFresnelPower.value = tuning.fresnelPower;
       });
 
     const frontFacing = Math.cos(totalYaw) >= 0;
@@ -1763,34 +2225,114 @@ function CardRig({
               </mesh>
 
               {showFrontTreatments ? (
-                <mesh position={[0, 0, faceOffset + 0.016]}>
-                  <primitive attach="geometry" object={faceGeometry} />
-                  <shaderMaterial
-                    ref={shaderRef}
-                    transparent
-                    depthWrite={false}
-                    blending={AdditiveBlending}
-                    uniforms={{
-                      uTime: { value: 0 },
-                      uMaskMap: { value: textures.foil },
-                      uZoneMap: { value: textures.foilZone },
-                      uTreatmentMap: { value: textures.holoTreatmentMap },
-                      uPrismMap: { value: textures.prismMask },
-                      uAccent: { value: new Color(meta.accent) },
-                      uHue: { value: new Color(meta.hue) },
-                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
-                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
-                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
-                      uDensity: { value: tuning.density },
-                      uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
-                      uFresnelPower: { value: tuning.fresnelPower },
-                      uPointer: { value: new Vector2(0, 0) },
-                    }}
-                    vertexShader={cardSurfaceVertexShader}
-                    fragmentShader={holoFragmentShader}
-                  />
-                </mesh>
+                <>
+                  <mesh position={[0, 0, faceOffset + 0.016]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={shaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      uniforms={{
+                        uTime: { value: 0 },
+                        uMaskMap: { value: textures.foil },
+                        uZoneMap: { value: textures.foilZone },
+                        uTreatmentMap: { value: textures.holoTreatmentMap },
+                        uPrismMap: { value: textures.prismMask },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uDensity: { value: tuning.density },
+                        uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
+                        uFresnelPower: { value: tuning.fresnelPower },
+                        uPointer: { value: new Vector2(0, 0) },
+                      }}
+                      vertexShader={cardSurfaceVertexShader}
+                      fragmentShader={holoFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.017]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={classicHoloShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uTime: { value: 0 },
+                        uMaskMap: { value: textures.classicHoloMask },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uFresnelPower: { value: tuning.fresnelPower },
+                        uPointer: { value: new Vector2(0, 0) },
+                        uSeed: { value: (card.holographicSeed % 6.28318) },
+                      }}
+                      vertexShader={holoSharedVertex}
+                      fragmentShader={classicHoloFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.018]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={waveHoloShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uTime: { value: 0 },
+                        uMaskMap: { value: textures.waveHoloMask },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uFresnelPower: { value: tuning.fresnelPower },
+                        uPointer: { value: new Vector2(0, 0) },
+                        uSeed: { value: (card.holographicSeed % 6.28318) },
+                      }}
+                      vertexShader={holoSharedVertex}
+                      fragmentShader={waveHoloFragmentShader}
+                    />
+                  </mesh>
+
+                  <mesh position={[0, 0, faceOffset + 0.019]}>
+                    <primitive attach="geometry" object={faceGeometry} />
+                    <shaderMaterial
+                      ref={crackedHoloShaderRef}
+                      transparent
+                      depthWrite={false}
+                      blending={AdditiveBlending}
+                      toneMapped={false}
+                      uniforms={{
+                        uTime: { value: 0 },
+                        uMaskMap: { value: textures.crackedHoloMask },
+                        uAccent: { value: new Color(meta.accent) },
+                        uHue: { value: new Color(meta.hue) },
+                        uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                        uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                        uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uFresnelPower: { value: tuning.fresnelPower },
+                        uPointer: { value: new Vector2(0, 0) },
+                        uSeed: { value: (card.holographicSeed % 6.28318) },
+                      }}
+                      vertexShader={holoSharedVertex}
+                      fragmentShader={crackedHoloFragmentShader}
+                    />
+                  </mesh>
+                </>
               ) : null}
 
               {showDecorativeEffects ? (
