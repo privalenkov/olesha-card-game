@@ -3,10 +3,11 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import {
+  CARD_MASK_EDITOR_HEIGHT,
+  CARD_MASK_EDITOR_WIDTH,
+} from '../game/cardDimensions';
 import type { CardEffectLayer } from '../game/types';
-
-const MASK_EDITOR_WIDTH = 688;
-const MASK_EDITOR_HEIGHT = 964;
 
 interface CardEffectMaskEditorProps {
   disabled?: boolean;
@@ -20,8 +21,8 @@ interface CardEffectMaskEditorProps {
 
 function createMaskCanvas() {
   const canvas = document.createElement('canvas');
-  canvas.width = MASK_EDITOR_WIDTH;
-  canvas.height = MASK_EDITOR_HEIGHT;
+  canvas.width = CARD_MASK_EDITOR_WIDTH;
+  canvas.height = CARD_MASK_EDITOR_HEIGHT;
   return canvas;
 }
 
@@ -73,10 +74,10 @@ export function CardEffectMaskEditor({
       return;
     }
 
-    source.width = MASK_EDITOR_WIDTH;
-    source.height = MASK_EDITOR_HEIGHT;
-    overlay.width = MASK_EDITOR_WIDTH;
-    overlay.height = MASK_EDITOR_HEIGHT;
+    source.width = CARD_MASK_EDITOR_WIDTH;
+    source.height = CARD_MASK_EDITOR_HEIGHT;
+    overlay.width = CARD_MASK_EDITOR_WIDTH;
+    overlay.height = CARD_MASK_EDITOR_HEIGHT;
 
     const sourceContext = getMaskContext(source);
     if (!sourceContext) {
@@ -110,11 +111,11 @@ export function CardEffectMaskEditor({
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * MASK_EDITOR_WIDTH;
-    const y = ((event.clientY - rect.top) / rect.height) * MASK_EDITOR_HEIGHT;
+    const x = ((event.clientX - rect.left) / rect.width) * CARD_MASK_EDITOR_WIDTH;
+    const y = ((event.clientY - rect.top) / rect.height) * CARD_MASK_EDITOR_HEIGHT;
     return {
-      x: Math.max(0, Math.min(MASK_EDITOR_WIDTH, x)),
-      y: Math.max(0, Math.min(MASK_EDITOR_HEIGHT, y)),
+      x: Math.max(0, Math.min(CARD_MASK_EDITOR_WIDTH, x)),
+      y: Math.max(0, Math.min(CARD_MASK_EDITOR_HEIGHT, y)),
     };
   };
 
@@ -130,8 +131,8 @@ export function CardEffectMaskEditor({
       softness <= 0.04 ? radius : radius * Math.max(0, 1 - softnessCurve);
     const minX = Math.max(0, Math.floor(point.x - outerRadius - 1));
     const minY = Math.max(0, Math.floor(point.y - outerRadius - 1));
-    const maxX = Math.min(MASK_EDITOR_WIDTH, Math.ceil(point.x + outerRadius + 1));
-    const maxY = Math.min(MASK_EDITOR_HEIGHT, Math.ceil(point.y + outerRadius + 1));
+    const maxX = Math.min(CARD_MASK_EDITOR_WIDTH, Math.ceil(point.x + outerRadius + 1));
+    const maxY = Math.min(CARD_MASK_EDITOR_HEIGHT, Math.ceil(point.y + outerRadius + 1));
     const width = Math.max(0, maxX - minX);
     const height = Math.max(0, maxY - minY);
 

@@ -11,6 +11,12 @@ import {
 } from '../game/api';
 import { buildPreviewOwnedCard } from '../game/cardDraft';
 import { useGame } from '../game/GameContext';
+import {
+  CARD_MASK_EDITOR_HEIGHT,
+  CARD_MASK_EDITOR_WIDTH,
+  CARD_TEXTURE_HEIGHT,
+  CARD_TEXTURE_WIDTH,
+} from '../game/cardDimensions';
 import { rarityMeta } from '../game/config';
 import { rarityOrder } from '../game/rarityBalance';
 import {
@@ -59,8 +65,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 async function normalizeImportedMaskDataUrl(dataUrl: string) {
   const image = await loadImage(dataUrl);
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  canvas.width = CARD_TEXTURE_WIDTH;
+  canvas.height = CARD_TEXTURE_HEIGHT;
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -1292,8 +1298,10 @@ export function CardCreatorPage() {
                   <div className="creator-field">
                     <span>Подсказка по размеру</span>
                     <small>
-                      Лучше загружать маску в пропорции карточки: 688x964 px для редактора или
-                      1024x1536 px для максимально четкого рендера. Белое включает ламинацию.
+                      Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
+                      {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
+                      {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает
+                      ламинацию.
                     </small>
                   </div>
                 </div>

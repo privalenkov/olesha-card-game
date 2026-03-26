@@ -5,6 +5,14 @@ import {
   SRGBColorSpace,
   type Texture,
 } from 'three';
+import {
+  CARD_PREVIEW_HEIGHT,
+  CARD_PREVIEW_WIDTH,
+  CARD_TEXTURE_HEIGHT,
+  CARD_TEXTURE_LAYOUT_HEIGHT,
+  CARD_TEXTURE_LAYOUT_WIDTH,
+  CARD_TEXTURE_WIDTH,
+} from '../game/cardDimensions';
 import { finishMeta, rarityMeta } from '../game/config';
 import {
   type CardEffectLayer,
@@ -15,9 +23,6 @@ import {
   type CardVisuals,
   type OwnedCard,
 } from '../game/types';
-
-const CARD_PREVIEW_WIDTH = 344;
-const CARD_PREVIEW_HEIGHT = 482;
 
 interface CardFrontTextureOptions {
   treatmentPaintStrength?: number;
@@ -343,7 +348,7 @@ function clipDecorativePatternOutsideHero(
   heroHeight: number,
 ) {
   const clipPath = new Path2D();
-  clipPath.rect(0, 0, 1024, 1536);
+  clipPath.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
   clipPath.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
   ctx.clip(clipPath, 'evenodd');
 }
@@ -394,7 +399,7 @@ function drawDecorativePatternMask(
   card: OwnedCard,
   decorativePatternImage: HTMLImageElement | null,
 ) {
-  const canvas = createCanvas(1024, 1536);
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -424,6 +429,31 @@ function createCanvas(width: number, height: number) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
+  return canvas;
+}
+
+function createCardTextureLayoutCanvas() {
+  return createCanvas(CARD_TEXTURE_LAYOUT_WIDTH, CARD_TEXTURE_LAYOUT_HEIGHT);
+}
+
+function finalizeCardTextureCanvas(sourceCanvas: HTMLCanvasElement) {
+  if (
+    sourceCanvas.width === CARD_TEXTURE_WIDTH &&
+    sourceCanvas.height === CARD_TEXTURE_HEIGHT
+  ) {
+    return sourceCanvas;
+  }
+
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return sourceCanvas;
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
   return canvas;
 }
 
@@ -916,7 +946,10 @@ function composeEffectMaskPass(
 }
 
 function drawGlossMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -935,7 +968,10 @@ const EMBOSS_HEIGHT_MARGIN = 18;
 const EMBOSS_NORMAL_INTENSITY = 5.2;
 
 function drawEmbossHeightMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -959,8 +995,8 @@ function drawEmbossHeightMap(card: OwnedCard, maskImages: Array<HTMLImageElement
 }
 
 function drawBaseSurfaceHeightMap(card: OwnedCard) {
-  const width = 1024;
-  const height = 1536;
+  const width = CARD_TEXTURE_LAYOUT_WIDTH;
+  const height = CARD_TEXTURE_LAYOUT_HEIGHT;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
 
@@ -1077,7 +1113,10 @@ function drawNormalMapFromHeight(heightCanvas: HTMLCanvasElement, intensity = 1)
 }
 
 function drawSugarMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1093,7 +1132,10 @@ function drawSugarMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | 
 }
 
 function drawSparkleMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1109,7 +1151,10 @@ function drawSparkleMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement 
 }
 
 function drawPrismaticMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1125,7 +1170,10 @@ function drawPrismaticMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElemen
 }
 
 function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1142,7 +1190,10 @@ function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLIma
 }
 
 function drawWaveHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1158,7 +1209,10 @@ function drawWaveHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement
 }
 
 function drawCrackedHoloMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
-  const { canvas, ctx } = createMaskCanvas(1024, 1536);
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
   if (!ctx) {
     return canvas;
   }
@@ -1496,9 +1550,7 @@ function drawCardFront(
   decorativePatternImage: HTMLImageElement | null,
   options: CardFrontTextureOptions = {},
 ) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -1677,9 +1729,7 @@ function drawCardFront(
 }
 
 function drawCardBack(card: OwnedCard) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -1722,9 +1772,7 @@ function drawCardBack(card: OwnedCard) {
 }
 
 function drawFoilLayer(card: OwnedCard) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -1854,9 +1902,7 @@ function drawFoilLayer(card: OwnedCard) {
 }
 
 function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElement | null>) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -1977,9 +2023,7 @@ export function usePackTexture(face: 'front' | 'back') {
 }
 
 function drawStackCardBack() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1536;
+  const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -2033,7 +2077,7 @@ function drawStackCardBack() {
 }
 
 export function useStackCardBackTexture() {
-  return useMemo(() => setupTexture(drawStackCardBack()), []);
+  return useMemo(() => setupTexture(finalizeCardTextureCanvas(drawStackCardBack())), []);
 }
 
 export function useCardTextures(card: OwnedCard | null) {
@@ -2050,29 +2094,49 @@ export function useCardTextures(card: OwnedCard | null) {
       return null;
     }
 
-    const embossHeightMap = drawEmbossHeightMap(card, effectMaskImages);
-    const surfaceHeightMap = drawSurfaceHeightMap(card, effectMaskImages);
+    const embossHeightMap = finalizeCardTextureCanvas(drawEmbossHeightMap(card, effectMaskImages));
+    const surfaceHeightMap = finalizeCardTextureCanvas(
+      drawSurfaceHeightMap(card, effectMaskImages),
+    );
 
     return {
       front: setupTexture(
-        drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
-          includeTreatmentLayers: false,
-        }),
+        finalizeCardTextureCanvas(
+          drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
+            includeTreatmentLayers: false,
+          }),
+        ),
       ),
-      back: setupTexture(drawCardBack(card)),
-      foil: setupTexture(drawFoilLayer(card), true),
-      foilZone: setupDataTexture(drawHoloZoneMask(card, effectMaskImages)),
-      glossMask: setupDataTexture(drawGlossMaskMap(card, effectMaskImages)),
+      back: setupTexture(finalizeCardTextureCanvas(drawCardBack(card))),
+      foil: setupTexture(finalizeCardTextureCanvas(drawFoilLayer(card)), true),
+      foilZone: setupDataTexture(
+        finalizeCardTextureCanvas(drawHoloZoneMask(card, effectMaskImages)),
+      ),
+      glossMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawGlossMaskMap(card, effectMaskImages)),
+      ),
       embossMap: setupDataTexture(embossHeightMap),
       surfaceNormalMap: setupDataTexture(
         drawNormalMapFromHeight(surfaceHeightMap, EMBOSS_NORMAL_INTENSITY),
       ),
-      sugarMask: setupDataTexture(drawSugarMaskMap(card, effectMaskImages)),
-      sparkleMask: setupDataTexture(drawSparkleMaskMap(card, effectMaskImages)),
-      prismMask: setupDataTexture(drawPrismaticMaskMap(card, effectMaskImages)),
-      holoTreatmentMap: setupDataTexture(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
-      waveHoloMask: setupDataTexture(drawWaveHoloMaskMap(card, effectMaskImages)),
-      crackedHoloMask: setupDataTexture(drawCrackedHoloMaskMap(card, effectMaskImages)),
+      sugarMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawSugarMaskMap(card, effectMaskImages)),
+      ),
+      sparkleMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawSparkleMaskMap(card, effectMaskImages)),
+      ),
+      prismMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawPrismaticMaskMap(card, effectMaskImages)),
+      ),
+      holoTreatmentMap: setupDataTexture(
+        finalizeCardTextureCanvas(drawReactiveHoloTreatmentMap(card, effectMaskImages)),
+      ),
+      waveHoloMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawWaveHoloMaskMap(card, effectMaskImages)),
+      ),
+      crackedHoloMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawCrackedHoloMaskMap(card, effectMaskImages)),
+      ),
     };
   }, [artImage, card, decorativePatternImage, effectMaskImages]);
 }
@@ -2091,9 +2155,11 @@ export function useCardPreviewImage(card: OwnedCard | null) {
       return '';
     }
 
-    const sourceCanvas = drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
-      treatmentPaintStrength: 0.8,
-    });
+    const sourceCanvas = finalizeCardTextureCanvas(
+      drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
+        treatmentPaintStrength: 0.8,
+      }),
+    );
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = CARD_PREVIEW_WIDTH;
     previewCanvas.height = CARD_PREVIEW_HEIGHT;
@@ -2120,7 +2186,9 @@ export function useDecorativePatternMaskImage(card: OwnedCard | null) {
       return '';
     }
 
-    const sourceCanvas = drawDecorativePatternMask(card, decorativePatternImage);
+    const sourceCanvas = finalizeCardTextureCanvas(
+      drawDecorativePatternMask(card, decorativePatternImage),
+    );
 
     try {
       return sourceCanvas.toDataURL('image/png');

@@ -28,6 +28,12 @@ import {
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
 import {
+  CARD_ASPECT_HEIGHT,
+  CARD_ASPECT_WIDTH,
+  CARD_TEXTURE_HEIGHT,
+  CARD_TEXTURE_WIDTH,
+} from '../game/cardDimensions';
+import {
   normalizeCardTreatmentEffect,
   type CardTreatmentEffect,
   type OwnedCard,
@@ -190,8 +196,6 @@ const initialPointerPress: PointerPressState = {
   startX: 0,
 };
 
-const CARD_ASPECT_WIDTH = 344;
-const CARD_ASPECT_HEIGHT = 482;
 const CARD_HEIGHT = 4.08;
 const CARD_WIDTH = (CARD_HEIGHT * CARD_ASPECT_WIDTH) / CARD_ASPECT_HEIGHT;
 
@@ -319,7 +323,7 @@ const finishTreatmentFragmentShader = `
   }
 
   vec3 microNormalFromHeight(vec2 uv, vec3 baseNormal) {
-    vec2 texel = vec2(1.0 / 1024.0, 1.0 / 1536.0);
+    vec2 texel = vec2(1.0 / ${CARD_TEXTURE_WIDTH}.0, 1.0 / ${CARD_TEXTURE_HEIGHT}.0);
     float hx = sugarHeightField(uv + vec2(texel.x, 0.0)) - sugarHeightField(uv - vec2(texel.x, 0.0));
     float hy = sugarHeightField(uv + vec2(0.0, texel.y)) - sugarHeightField(uv - vec2(0.0, texel.y));
     return normalize(
