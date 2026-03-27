@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard, Rarity } from '../game/types';
 import { CardCreatorLink } from './CardCreatorLink';
@@ -178,6 +178,15 @@ export function PackExperience() {
   const dockPackOffsetY = stage === 'opening' ? -5.4 : dockPackSnapped ? -2.45 : 0.08;
   const revealStackMode =
     stage === 'opening' ? 'opening' : stage === 'revealing' || stage === 'complete' ? 'revealing' : null;
+  const handleRevealCardIntroComplete = useCallback((completedIntroKey: string) => {
+    if (completedIntroKey === 'stack-anchor') {
+      return;
+    }
+
+    setVisibleCreatorCardId((currentVisibleCardId) =>
+      currentVisibleCardId === completedIntroKey ? currentVisibleCardId : completedIntroKey,
+    );
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -919,13 +928,7 @@ export function PackExperience() {
                   revealImpactRarity={revealImpactRarity}
                   revealImpactDurationMs={revealImpactDurationMs}
                   onUserFlip={onUserFlip}
-                  onIntroComplete={() => {
-                    if (renderStackOnly) {
-                      return;
-                    }
-
-                    setVisibleCreatorCardId(card.instanceId);
-                  }}
+                  onIntroComplete={handleRevealCardIntroComplete}
                   scaleMultiplier={0.7}
                   transparentBackground
                 />

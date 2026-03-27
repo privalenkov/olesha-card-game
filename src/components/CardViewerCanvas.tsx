@@ -1367,7 +1367,7 @@ function CardRig({
 }: {
   card: OwnedCard;
   introKey: string;
-  onIntroComplete?: () => void;
+  onIntroComplete?: (introKey: string) => void;
   scaleMultiplier: number;
   stackBackCount: number;
   activeLiftProgress: number;
@@ -1606,7 +1606,7 @@ function CardRig({
 
     if (!introCompleteNotifiedRef.current && introRef.current >= 1 && (renderStackOnly || textures)) {
       introCompleteNotifiedRef.current = true;
-      onIntroComplete?.();
+      onIntroComplete?.(introKey);
     }
 
     const stackEntryOffset = Math.pow(stackEntryRef.current, 0.86);
@@ -2369,7 +2369,7 @@ function CardRig({
 
 const MemoCardRig = memo(CardRig);
 
-export function CardViewerCanvas({
+function CardViewerCanvasComponent({
   card,
   introKey,
   cameraZ = 7,
@@ -2410,7 +2410,7 @@ export function CardViewerCanvas({
   skipIntroAnimation?: boolean;
   transparentBackground?: boolean;
   onUserFlip?: (side: CardSide) => void;
-  onIntroComplete?: () => void;
+  onIntroComplete?: (introKey: string) => void;
 }) {
   const resolvedInitialSide = forcedSide ?? initialSide;
   const suppressClickRef = useRef(false);
@@ -2822,3 +2822,6 @@ export function CardViewerCanvas({
     </div>
   );
 }
+
+export const CardViewerCanvas = memo(CardViewerCanvasComponent);
+CardViewerCanvas.displayName = 'CardViewerCanvas';

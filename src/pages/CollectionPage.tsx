@@ -54,6 +54,9 @@ export function CollectionPage() {
         }
       : collectionOwner;
   const collectionReady = collectionStatus === 'ready' || collectionStatus === 'error';
+  const handleActiveCardIntroComplete = useCallback(() => {
+    setActiveCardCreatorVisible(true);
+  }, []);
 
   useEffect(() => {
     setActiveCardCreatorVisible(false);
@@ -430,9 +433,7 @@ export function CollectionPage() {
                   cameraZ={10.6}
                   scaleMultiplier={0.7}
                   effectsPreset="full"
-                  onIntroComplete={() => {
-                    setActiveCardCreatorVisible(true);
-                  }}
+                  onIntroComplete={handleActiveCardIntroComplete}
                 />
               </div>
               <CardCreatorLink
