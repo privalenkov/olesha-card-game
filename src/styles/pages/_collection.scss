@@ -191,11 +191,41 @@
 }
 
 .collection-card--preview::before {
-  display: none;
+  z-index: 2;
+  background:
+    radial-gradient(
+      circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.42) 0%,
+      rgba(189, 232, 255, 0.18) 14%,
+      rgba(255, 255, 255, 0.08) 26%,
+      rgba(255, 255, 255, 0) 42%
+    );
+  opacity: 0;
+  mix-blend-mode: screen;
+  transition:
+    opacity 160ms ease,
+    background-position 120ms ease;
 }
 
 .collection-card--preview::after {
-  display: none;
+  z-index: 2;
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 255, 255, 0) 18%,
+      rgba(255, 255, 255, 0.04) 34%,
+      rgba(255, 255, 255, 0.32) 49%,
+      rgba(180, 236, 255, 0.18) 54%,
+      rgba(255, 255, 255, 0.04) 62%,
+      rgba(255, 255, 255, 0) 74%
+    );
+  background-position: var(--mx, 50%) var(--my, 50%);
+  background-size: 180% 180%;
+  opacity: 0;
+  mix-blend-mode: screen;
+  transition:
+    opacity 160ms ease,
+    background-position 120ms ease;
 }
 
 .collection-card--preview:hover {
@@ -204,6 +234,11 @@
     0 24px 48px rgba(0, 0, 0, 0.34),
     0 0 0 1px rgba(255, 255, 255, 0.06);
   filter: brightness(1.04);
+}
+
+.collection-card--preview:hover::before,
+.collection-card--preview:hover::after {
+  opacity: 1;
 }
 
 .collection-card__image {

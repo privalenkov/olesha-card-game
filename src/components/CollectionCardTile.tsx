@@ -15,6 +15,8 @@ export function CollectionCardTile({
       className="collection-card collection-card--preview"
       onClick={() => onOpen(card)}
       onPointerLeave={(event) => {
+        event.currentTarget.style.setProperty('--mx', '50%');
+        event.currentTarget.style.setProperty('--my', '50%');
         event.currentTarget.style.setProperty('--rx', '0deg');
         event.currentTarget.style.setProperty('--ry', '0deg');
       }}
@@ -25,6 +27,8 @@ export function CollectionCardTile({
         const rotateY = (x - 0.5) * 26;
         const rotateX = (0.5 - y) * 26;
 
+        event.currentTarget.style.setProperty('--mx', `${(x * 100).toFixed(2)}%`);
+        event.currentTarget.style.setProperty('--my', `${(y * 100).toFixed(2)}%`);
         event.currentTarget.style.setProperty('--rx', `${rotateX}deg`);
         event.currentTarget.style.setProperty('--ry', `${rotateY}deg`);
       }}
