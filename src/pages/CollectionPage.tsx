@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { CardCreatorLink } from '../components/CardCreatorLink';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { CollectionCardTile } from '../components/CollectionCardTile';
 import { ApiError, fetchPublicShowcase, requestProposalStart } from '../game/api';
@@ -21,6 +22,7 @@ export function CollectionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { authConfigured, authenticated, login, user } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
+  const [activeCardCreatorVisible, setActiveCardCreatorVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
   const [proposalBusy, setProposalBusy] = useState(false);
   const [collectionOwner, setCollectionOwner] = useState<PublicPlayerProfile | null>(null);
@@ -52,6 +54,10 @@ export function CollectionPage() {
         }
       : collectionOwner;
   const collectionReady = collectionStatus === 'ready' || collectionStatus === 'error';
+
+  useEffect(() => {
+    setActiveCardCreatorVisible(false);
+  }, [activeCard?.instanceId]);
 
   const resetCollectionState = useCallback(() => {
     setCollectionOwner(null);
@@ -416,13 +422,27 @@ export function CollectionPage() {
             onClick={(event) => event.stopPropagation()}
             role="presentation"
           >
-            <CardViewerCanvas
-              card={activeCard}
-              introKey={activeCard.instanceId}
-              cameraZ={10.6}
-              scaleMultiplier={0.7}
-              effectsPreset="full"
-            />
+            <div className="collection-overlay__viewer-stage">
+              <div className="collection-overlay__viewer-canvas">
+                <CardViewerCanvas
+                  card={activeCard}
+                  introKey={activeCard.instanceId}
+                  cameraZ={10.6}
+                  scaleMultiplier={0.7}
+                  effectsPreset="full"
+                  onIntroComplete={() => {
+                    setActiveCardCreatorVisible(true);
+                  }}
+                />
+              </div>
+              <CardCreatorLink
+                card={activeCard}
+                cameraZ={10.6}
+                scaleMultiplier={0.7}
+                visible={activeCardCreatorVisible}
+                className="card-creator-link-anchor--overlay"
+              />
+            </div>
           </div>
         </div>
       ) : null}

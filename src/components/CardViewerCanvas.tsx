@@ -32,6 +32,7 @@ import {
   CARD_ASPECT_WIDTH,
   CARD_TEXTURE_HEIGHT,
   CARD_TEXTURE_WIDTH,
+  CARD_WORLD_HEIGHT,
 } from '../game/cardDimensions';
 import {
   normalizeCardTreatmentEffect,
@@ -196,7 +197,7 @@ const initialPointerPress: PointerPressState = {
   startX: 0,
 };
 
-const CARD_HEIGHT = 4.08;
+const CARD_HEIGHT = CARD_WORLD_HEIGHT;
 const CARD_WIDTH = (CARD_HEIGHT * CARD_ASPECT_WIDTH) / CARD_ASPECT_HEIGHT;
 
 const CARD_BODY = {
@@ -1347,6 +1348,7 @@ function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
 function CardRig({
   card,
   introKey,
+  onIntroComplete,
   scaleMultiplier,
   stackBackCount,
   activeLiftProgress,
@@ -1365,6 +1367,7 @@ function CardRig({
 }: {
   card: OwnedCard;
   introKey: string;
+  onIntroComplete?: () => void;
   scaleMultiplier: number;
   stackBackCount: number;
   activeLiftProgress: number;
@@ -1400,6 +1403,7 @@ function CardRig({
   const impactGlowRef = useRef<MeshBasicMaterial>(null);
   const impactParticleRefs = useRef<(Group | null)[]>([]);
   const introRef = useRef(0);
+  const introCompleteNotifiedRef = useRef(false);
   const stackEntryRef = useRef(0);
   const impactRef = useRef({
     active: false,
@@ -1472,6 +1476,7 @@ function CardRig({
 
   useEffect(() => {
     introRef.current = skipIntroAnimation ? 1 : 0;
+    introCompleteNotifiedRef.current = false;
   }, [introKey, skipIntroAnimation]);
 
   useEffect(() => {
@@ -1598,6 +1603,12 @@ function CardRig({
     introRef.current = Math.min(introRef.current + delta * 1.6, 1);
     stackEntryRef.current = Math.max(stackEntryRef.current - delta / 0.42, 0);
     const easedIntro = 1 - (1 - introRef.current) * (1 - introRef.current);
+
+    if (!introCompleteNotifiedRef.current && introRef.current >= 1 && (renderStackOnly || textures)) {
+      introCompleteNotifiedRef.current = true;
+      onIntroComplete?.();
+    }
+
     const stackEntryOffset = Math.pow(stackEntryRef.current, 0.86);
     const baseFlip = flipTargetRef.current;
     const dragPreview = dragPreviewRef.current;
@@ -2378,6 +2389,7 @@ export function CardViewerCanvas({
   skipIntroAnimation = false,
   transparentBackground = false,
   onUserFlip,
+  onIntroComplete,
 }: {
   card: OwnedCard;
   introKey: string;
@@ -2398,6 +2410,7 @@ export function CardViewerCanvas({
   skipIntroAnimation?: boolean;
   transparentBackground?: boolean;
   onUserFlip?: (side: CardSide) => void;
+  onIntroComplete?: () => void;
 }) {
   const resolvedInitialSide = forcedSide ?? initialSide;
   const suppressClickRef = useRef(false);
@@ -2788,6 +2801,7 @@ export function CardViewerCanvas({
         <MemoCardRig
           card={card}
           introKey={introKey}
+          onIntroComplete={onIntroComplete}
           scaleMultiplier={scaleMultiplier}
           stackBackCount={stackBackCount}
           activeLiftProgress={activeLiftProgress}

@@ -216,6 +216,7 @@ export interface CardDefinition {
   defaultFinish?: CardFinish;
   visuals?: CardVisuals;
   creatorName?: string | null;
+  creatorShareSlug?: string | null;
   effectLayers?: CardEffectLayer[];
 }
 

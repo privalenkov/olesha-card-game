@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard, Rarity } from '../game/types';
+import { CardCreatorLink } from './CardCreatorLink';
 import { CardViewerCanvas } from './CardViewerCanvas';
 import { PackCarouselScene, PackScene } from './PackScene';
 import { preloadCardTextureAssets } from '../three/textures';
@@ -152,6 +153,7 @@ export function PackExperience() {
   const [carouselSliding, setCarouselSliding] = useState(false);
   const [carouselInteracting, setCarouselInteracting] = useState(false);
   const [stackEntryCardId, setStackEntryCardId] = useState<string | null>(null);
+  const [visibleCreatorCardId, setVisibleCreatorCardId] = useState<string | null>(null);
   const [heroButtonVisible, setHeroButtonVisible] = useState(false);
 
   const currentCard = openedPack?.[currentIndex] ?? null;
@@ -212,8 +214,11 @@ export function PackExperience() {
 
   useEffect(() => {
     if (stage !== 'revealing' || !currentCard) {
+      setVisibleCreatorCardId(null);
       return;
     }
+
+    setVisibleCreatorCardId(null);
 
     const requiresManualFlip = MANUAL_FLIP_REVEAL_RARITIES.includes(currentCard.rarity);
 
@@ -870,6 +875,13 @@ export function PackExperience() {
           key={layerKey}
           className={className}
           onPointerDownCapture={(event) => {
+            if (
+              event.target instanceof Element &&
+              event.target.closest('[data-card-creator-link]')
+            ) {
+              return;
+            }
+
             if (card.instanceId !== activeCardInstanceId) {
               return;
             }
@@ -887,28 +899,46 @@ export function PackExperience() {
           }}
         >
           <div className="pack-reveal__card-shell pack-reveal__card-shell--active">
-            <div className="pack-reveal__viewer">
-              <CardViewerCanvas
-                cameraZ={10.6}
-                card={card}
-                effectsPreset="full"
-                forcedSide={forcedSide}
-                initialSide="back"
-                interactive={interactive}
-                introKey={introKeyOverride ?? card.instanceId}
-                skipIntroAnimation={skipIntroAnimation}
-                renderStackOnly={renderStackOnly}
-                enterFromStackAnimation={enterFromStackAnimation}
-                launchExitProgress={launchExitProgress}
-                stackBackCount={stackBackCount}
-                activeLiftProgress={0}
-                shakeMode={shakeMode}
-                revealImpactRarity={revealImpactRarity}
-                revealImpactDurationMs={revealImpactDurationMs}
-                onUserFlip={onUserFlip}
-                scaleMultiplier={0.7}
-                transparentBackground
-              />
+            <div className="pack-reveal__viewer-stage">
+              <div className="pack-reveal__viewer">
+                <CardViewerCanvas
+                  cameraZ={10.6}
+                  card={card}
+                  effectsPreset="full"
+                  forcedSide={forcedSide}
+                  initialSide="back"
+                  interactive={interactive}
+                  introKey={introKeyOverride ?? card.instanceId}
+                  skipIntroAnimation={skipIntroAnimation}
+                  renderStackOnly={renderStackOnly}
+                  enterFromStackAnimation={enterFromStackAnimation}
+                  launchExitProgress={launchExitProgress}
+                  stackBackCount={stackBackCount}
+                  activeLiftProgress={0}
+                  shakeMode={shakeMode}
+                  revealImpactRarity={revealImpactRarity}
+                  revealImpactDurationMs={revealImpactDurationMs}
+                  onUserFlip={onUserFlip}
+                  onIntroComplete={() => {
+                    if (renderStackOnly) {
+                      return;
+                    }
+
+                    setVisibleCreatorCardId(card.instanceId);
+                  }}
+                  scaleMultiplier={0.7}
+                  transparentBackground
+                />
+              </div>
+              {renderStackOnly ? null : (
+                <CardCreatorLink
+                  card={card}
+                  cameraZ={10.6}
+                  scaleMultiplier={0.7}
+                  visible={visibleCreatorCardId === card.instanceId}
+                  className="card-creator-link-anchor--pack"
+                />
+              )}
             </div>
           </div>
         </div>

@@ -63,6 +63,7 @@ interface CardRow {
   humor: number;
   default_finish: CardFinish | null;
   creator_name: string | null;
+  creator_share_slug: string | null;
   visual_frame_style: CardVisuals['frameStyle'] | null;
   visual_accent_color: string | null;
   visual_pattern_json: string | null;
@@ -836,6 +837,7 @@ function toCardDefinition(row: CardRow): CardDefinition {
     },
     defaultFinish: row.default_finish ?? undefined,
     creatorName: row.creator_name ?? null,
+    creatorShareSlug: row.creator_share_slug ?? null,
     effectLayers: normalizeEffectLayers(parseJsonArray<CardEffectLayer>(row.effect_layers_json, [])),
     visuals,
   };
@@ -1430,6 +1432,14 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.humor,
       card_definitions.default_finish,
       card_definitions.creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
       card_definitions.visual_pattern_json,
@@ -1476,6 +1486,14 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.humor,
       card_definitions.default_finish,
       card_definitions.creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
       card_definitions.visual_pattern_json,
@@ -1521,6 +1539,14 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.humor,
       card_definitions.default_finish,
       card_definitions.creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
       card_definitions.visual_pattern_json,
@@ -1549,7 +1575,16 @@ export function createGameStore(config: ServerConfig) {
   const selectActiveCatalog = db.prepare(`
     select
       id, title, url_image, rarity, description, power, cringe, fame, rarity_score, humor,
-      default_finish, creator_name, visual_frame_style, visual_accent_color,
+      default_finish, creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
+      visual_frame_style, visual_accent_color,
       visual_pattern_json, effect_layers_json
     from card_definitions
     where is_active = 1
@@ -1595,6 +1630,14 @@ export function createGameStore(config: ServerConfig) {
       card_definitions.humor,
       card_definitions.default_finish,
       card_definitions.creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
       card_definitions.visual_frame_style,
       card_definitions.visual_accent_color,
       card_definitions.visual_pattern_json,
