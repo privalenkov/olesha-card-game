@@ -2216,10 +2216,15 @@ function CardRig({
                 <primitive attach="geometry" object={faceGeometry} />
                 <meshPhysicalMaterial
                   map={textures.back}
-                  metalness={0.06}
-                  roughness={0.94}
-                  clearcoat={0}
-                  reflectivity={0.06}
+                  metalness={0.08}
+                  roughness={0.84}
+                  clearcoat={0.1}
+                  clearcoatRoughness={0.28}
+                  reflectivity={0.07}
+                  normalMap={textures.surfaceNormalMap}
+                  normalScale={surfaceNormalScale}
+                  clearcoatNormalMap={textures.surfaceNormalMap}
+                  clearcoatNormalScale={surfaceClearcoatScale}
                 />
               </mesh>
 

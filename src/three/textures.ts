@@ -5,6 +5,7 @@ import {
   SRGBColorSpace,
   type Texture,
 } from 'three';
+import cardBackTextureUrl from '../assets/cards/card-back.png';
 import {
   CARD_PREVIEW_HEIGHT,
   CARD_PREVIEW_WIDTH,
@@ -43,6 +44,7 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
   }
 
   return [
+    cardBackTextureUrl,
     card.urlImage,
     card.visuals?.decorativePattern.svgUrl ?? '',
     ...getCardEffectLayers(card).map((layer) => layer.maskUrl),
@@ -1771,6 +1773,23 @@ function drawCardBack(card: OwnedCard) {
   return canvas;
 }
 
+function drawCardBackTexture(backImage: HTMLImageElement | null) {
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return canvas;
+  }
+
+  if (backImage) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(backImage, 0, 0, canvas.width, canvas.height);
+  }
+
+  return canvas;
+}
+
 function drawFoilLayer(card: OwnedCard) {
   const canvas = createCardTextureLayoutCanvas();
   const ctx = canvas.getContext('2d');
@@ -2077,11 +2096,20 @@ function drawStackCardBack() {
 }
 
 export function useStackCardBackTexture() {
-  return useMemo(() => setupTexture(finalizeCardTextureCanvas(drawStackCardBack())), []);
+  const backImage = useRemoteImage(cardBackTextureUrl);
+
+  return useMemo(
+    () =>
+      setupTexture(
+        finalizeCardTextureCanvas(backImage ? drawCardBackTexture(backImage) : drawStackCardBack()),
+      ),
+    [backImage],
+  );
 }
 
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const backImage = useRemoteImage(cardBackTextureUrl);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
@@ -2107,7 +2135,9 @@ export function useCardTextures(card: OwnedCard | null) {
           }),
         ),
       ),
-      back: setupTexture(finalizeCardTextureCanvas(drawCardBack(card))),
+      back: setupTexture(
+        finalizeCardTextureCanvas(backImage ? drawCardBackTexture(backImage) : drawCardBack(card)),
+      ),
       foil: setupTexture(finalizeCardTextureCanvas(drawFoilLayer(card)), true),
       foilZone: setupDataTexture(
         finalizeCardTextureCanvas(drawHoloZoneMask(card, effectMaskImages)),
@@ -2138,7 +2168,7 @@ export function useCardTextures(card: OwnedCard | null) {
         finalizeCardTextureCanvas(drawCrackedHoloMaskMap(card, effectMaskImages)),
       ),
     };
-  }, [artImage, card, decorativePatternImage, effectMaskImages]);
+  }, [artImage, backImage, card, decorativePatternImage, effectMaskImages]);
 }
 
 export function useCardPreviewImage(card: OwnedCard | null) {
