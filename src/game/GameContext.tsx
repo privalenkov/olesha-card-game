@@ -23,7 +23,7 @@ import type { AppNotification, AuthUser, RemoteGameState, SessionState, OwnedCar
 
 interface NotifyPayload {
   kind: AppNotification['kind'];
-  title: string;
+  title?: string | null;
   message: string;
   proposalId?: string | null;
 }
@@ -58,6 +58,9 @@ const emptySessionState: SessionState = {
   game: null,
 };
 
+const NOTIFICATION_AUTO_DISMISS_MS = 5000;
+const NOTIFICATION_EXIT_MS = 280;
+
 export function GameProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<'loading' | 'ready'>('loading');
   const [session, setSession] = useState<SessionState>(emptySessionState);
@@ -67,6 +70,7 @@ export function GameProvider({ children }: PropsWithChildren) {
   const activeNotificationIdsRef = useRef(new Set<string>());
   const remoteNotificationIdsRef = useRef(new Set<string>());
   const notificationTimersRef = useRef(new Map<string, number>());
+  const notificationRemovalTimersRef = useRef(new Map<string, number>());
 
   const applySession = useCallback((nextSession: SessionState) => {
     setSession(nextSession);
@@ -121,9 +125,19 @@ export function GameProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
-  const dismissNotification = useCallback(
+  const clearNotificationRemovalTimer = useCallback((notificationId: string) => {
+    const timer = notificationRemovalTimersRef.current.get(notificationId);
+
+    if (timer) {
+      window.clearTimeout(timer);
+      notificationRemovalTimersRef.current.delete(notificationId);
+    }
+  }, []);
+
+  const finalizeNotificationDismiss = useCallback(
     async (notificationId: string) => {
       clearNotificationTimer(notificationId);
+      clearNotificationRemovalTimer(notificationId);
       activeNotificationIdsRef.current.delete(notificationId);
       const isRemoteNotification = remoteNotificationIdsRef.current.has(notificationId);
       remoteNotificationIdsRef.current.delete(notificationId);
@@ -141,12 +155,55 @@ export function GameProvider({ children }: PropsWithChildren) {
         }
       }
     },
-    [clearNotificationTimer, refresh],
+    [clearNotificationRemovalTimer, clearNotificationTimer, refresh],
+  );
+
+  const dismissNotification = useCallback(
+    async (notificationId: string) => {
+      clearNotificationTimer(notificationId);
+      let shouldScheduleRemoval = false;
+
+      setNotifications((current) =>
+        current.map((item) => {
+          if (item.id !== notificationId) {
+            return item;
+          }
+
+          if (item.state === 'leaving') {
+            return item;
+          }
+
+          shouldScheduleRemoval = true;
+          return {
+            ...item,
+            state: 'leaving',
+          };
+        }),
+      );
+
+      if (!shouldScheduleRemoval) {
+        return;
+      }
+
+      clearNotificationRemovalTimer(notificationId);
+      const timer = window.setTimeout(() => {
+        void finalizeNotificationDismiss(notificationId);
+      }, NOTIFICATION_EXIT_MS);
+      notificationRemovalTimersRef.current.set(notificationId, timer);
+    },
+    [clearNotificationRemovalTimer, clearNotificationTimer, finalizeNotificationDismiss],
   );
 
   const enqueueNotifications = useCallback(
     (incoming: AppNotification[], source: 'local' | 'remote') => {
-      const nextItems = incoming.filter((item) => !activeNotificationIdsRef.current.has(item.id));
+      const nextItems = incoming
+        .filter((item) => !activeNotificationIdsRef.current.has(item.id))
+        .map((item) => ({
+          ...item,
+          title: item.title?.trim() ? item.title.trim() : null,
+          message: item.message.trim(),
+          state: 'active' as const,
+        }));
 
       if (nextItems.length === 0) {
         return;
@@ -157,12 +214,11 @@ export function GameProvider({ children }: PropsWithChildren) {
 
         if (source === 'remote') {
           remoteNotificationIdsRef.current.add(item.id);
-          continue;
         }
 
         const timer = window.setTimeout(() => {
           void dismissNotification(item.id);
-        }, 7000);
+        }, NOTIFICATION_AUTO_DISMISS_MS);
         notificationTimersRef.current.set(item.id, timer);
       }
 
@@ -185,7 +241,7 @@ export function GameProvider({ children }: PropsWithChildren) {
           {
             id,
             kind: payload.kind,
-            title: payload.title,
+            title: payload.title?.trim() ? payload.title.trim() : null,
             message: payload.message,
             proposalId: payload.proposalId ?? null,
             cardInstanceId: null,
@@ -201,6 +257,8 @@ export function GameProvider({ children }: PropsWithChildren) {
   const clearAllNotifications = useCallback(() => {
     notificationTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     notificationTimersRef.current.clear();
+    notificationRemovalTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    notificationRemovalTimersRef.current.clear();
     activeNotificationIdsRef.current.clear();
     remoteNotificationIdsRef.current.clear();
     setNotifications([]);
@@ -247,6 +305,8 @@ export function GameProvider({ children }: PropsWithChildren) {
     () => () => {
       notificationTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       notificationTimersRef.current.clear();
+      notificationRemovalTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      notificationRemovalTimersRef.current.clear();
     },
     [],
   );

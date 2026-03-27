@@ -25,7 +25,6 @@ function AppShell() {
   const {
     authConfigured,
     authenticated,
-    dismissNotification,
     isAdmin,
     login,
     logout,
@@ -94,49 +93,19 @@ function AppShell() {
 
       <div aria-atomic="false" aria-live="polite" className="app-notifications">
         {notifications.map((notification) => (
-          <article
+          <div
             key={notification.id}
-            className={`app-notification app-notification--${notification.kind}`}
+            className={`app-notification-shell${
+              notification.state === 'leaving' ? ' app-notification-shell--leaving' : ''
+            }`}
           >
-            <div className="app-notification__copy">
-              <strong>{notification.title}</strong>
-              <p>{notification.message}</p>
-            </div>
-            <div className="app-notification__actions">
-              {notification.cardInstanceId ? (
-                <button
-                  className="app-notification__button"
-                  onClick={() => {
-                    void dismissNotification(notification.id);
-                    navigate(`/collection?card=${notification.cardInstanceId}`);
-                  }}
-                  type="button"
-                >
-                  Открыть в витрине
-                </button>
-              ) : notification.proposalId ? (
-                <button
-                  className="app-notification__button"
-                  onClick={() => {
-                    void dismissNotification(notification.id);
-                    navigate(`/creator/${notification.proposalId}`);
-                  }}
-                  type="button"
-                >
-                  {notification.kind === 'error' ? 'Изменить' : 'Открыть'}
-                </button>
-              ) : null}
-              <button
-                className="app-notification__button"
-                onClick={() => {
-                  void dismissNotification(notification.id);
-                }}
-                type="button"
-              >
-                Закрыть
-              </button>
-            </div>
-          </article>
+            <article className={`app-notification app-notification--${notification.kind}`}>
+              <div className="app-notification__copy">
+                {notification.title ? <strong>{notification.title}</strong> : null}
+                {notification.message ? <p>{notification.message}</p> : null}
+              </div>
+            </article>
+          </div>
         ))}
       </div>
 
@@ -169,7 +138,7 @@ function AppShell() {
             }}
             type="button"
           >
-            {proposalBusy ? 'Открываем редактор' : 'Предложить свою карточку'}
+            Предложить свою карточку
           </button>
           {isAdmin ? (
             <NavLink

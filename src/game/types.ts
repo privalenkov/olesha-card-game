@@ -13,6 +13,7 @@ export type CardTreatmentEffect =
   | 'holo_cracked';
 export type ProposalStatus = 'draft' | 'pending' | 'approved' | 'deleted';
 export type AppNotificationKind = 'info' | 'success' | 'error';
+export type AppNotificationState = 'active' | 'leaving';
 
 export interface CardStats {
   power: number;
@@ -266,11 +267,12 @@ export interface SessionState {
 export interface AppNotification {
   id: string;
   kind: AppNotificationKind;
-  title: string;
+  title: string | null;
   message: string;
   proposalId: string | null;
   cardInstanceId: string | null;
   createdAt: string;
+  state?: AppNotificationState;
 }
 
 export interface OpenPackResult {

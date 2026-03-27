@@ -892,7 +892,7 @@ function toAppNotification(row: NotificationRow): AppNotification {
   return {
     id: row.id,
     kind: row.kind,
-    title: row.title,
+    title: row.title.trim() || null,
     message: row.message,
     proposalId: row.proposal_id,
     cardInstanceId: row.card_instance_id,
@@ -1982,7 +1982,7 @@ export function createGameStore(config: ServerConfig) {
   function createNotification(
     userId: string,
     kind: AppNotificationKind,
-    title: string,
+    title: string | null,
     message: string,
     proposalId: string | null,
     cardInstanceId: string | null,
@@ -1992,7 +1992,7 @@ export function createGameStore(config: ServerConfig) {
       randomUUID(),
       userId,
       kind,
-      title,
+      title?.trim() ?? '',
       message,
       proposalId,
       cardInstanceId,
