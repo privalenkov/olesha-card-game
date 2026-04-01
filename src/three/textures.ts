@@ -1021,6 +1021,52 @@ export function preloadCardTextureAssets(cards: OwnedCard[] | OwnedCard | null) 
   return Promise.allSettled(pending).then(() => undefined);
 }
 
+export function useCardTextureAssetsReady(card: OwnedCard | null) {
+  const [version, setVersion] = useState(0);
+  const assetUrls = useMemo(
+    () => Array.from(new Set(getCardRemoteAssetUrls(card))),
+    [card],
+  );
+
+  useEffect(() => {
+    if (assetUrls.length === 0) {
+      return;
+    }
+
+    const pending = assetUrls
+      .map((url) => ensureRemoteImage(url))
+      .filter((entry) => entry.status === 'loading' && entry.promise)
+      .map((entry) => entry.promise as Promise<void>);
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.allSettled(pending).then(() => {
+      if (!cancelled) {
+        setVersion((current) => current + 1);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetUrls]);
+
+  return useMemo(() => {
+    if (assetUrls.length === 0) {
+      return true;
+    }
+
+    return assetUrls.every((url) => {
+      const entry = remoteImageCache.get(url);
+      return entry?.status === 'loaded' || entry?.status === 'error';
+    });
+  }, [assetUrls, version]);
+}
+
 function addNoise(
   ctx: CanvasRenderingContext2D,
   width: number,

@@ -40,7 +40,7 @@ import {
   type OwnedCard,
   type Rarity,
 } from '../game/types';
-import { useCardTextures, useStackCardBackTexture } from '../three/textures';
+import { useCardTextureAssetsReady, useCardTextures, useStackCardBackTexture } from '../three/textures';
 import {
   VIEWER_BASE_TILT_X,
   SharedViewerLighting,
@@ -258,6 +258,22 @@ const cardSurfaceVertexShader = `
   }
 `;
 
+const cardSurfaceNormalSamplingShader = `
+  uniform sampler2D uSurfaceNormalMap;
+
+  vec3 sampleSurfaceNormal(vec2 uv) {
+    vec3 encodedNormal = texture2D(uSurfaceNormalMap, uv).xyz * 2.0 - 1.0;
+    vec2 scaledXY = encodedNormal.xy * 0.22;
+    float scaledZ = sqrt(max(1.0 - dot(scaledXY, scaledXY), 0.001));
+
+    return normalize(
+      vWorldTangent * scaledXY.x +
+      vWorldBitangent * scaledXY.y +
+      vWorldNormal * scaledZ
+    );
+  }
+`;
+
 const finishTreatmentFragmentShader = `
   uniform sampler2D uSugarMap;
   uniform sampler2D uSparkleMap;
@@ -277,6 +293,8 @@ const finishTreatmentFragmentShader = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldTangent;
   varying vec3 vWorldBitangent;
+
+  ${cardSurfaceNormalSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -469,7 +487,7 @@ const finishTreatmentFragmentShader = `
       discard;
     }
 
-    vec3 baseNormal = normalize(vWorldNormal);
+    vec3 baseNormal = sampleSurfaceNormal(vUv);
     vec3 normal = microNormalFromHeight(vUv, baseNormal);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float fresnel = pow(clamp(1.0 - max(dot(normal, viewDir), 0.0), 0.0, 1.0), 2.4);
@@ -578,6 +596,10 @@ const glossFragmentShader = `
   varying vec2 vUv;
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  ${cardSurfaceNormalSamplingShader}
 
   float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
     vec3 lightDir = normalize(lightPos - vWorldPosition);
@@ -593,7 +615,7 @@ const glossFragmentShader = `
       discard;
     }
 
-    vec3 normal = normalize(vWorldNormal);
+    vec3 normal = sampleSurfaceNormal(vUv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float fresnel = pow(
       clamp(1.0 - max(dot(normal, viewDir), 0.0), 0.0, 1.0),
@@ -664,6 +686,10 @@ const holoFragmentShader = `
   varying vec2 vUv;
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  ${cardSurfaceNormalSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -693,7 +719,7 @@ const holoFragmentShader = `
 
   void main() {
     vec2 uv = vUv;
-    vec3 normal = normalize(vWorldNormal);
+    vec3 normal = sampleSurfaceNormal(uv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), uFresnelPower);
 
@@ -762,6 +788,10 @@ const waveHoloFragmentShader = `
   varying vec2 vUv;
   varying vec3 vWorldNormal;
   varying vec3 vWorldPosition;
+  varying vec3 vWorldTangent;
+  varying vec3 vWorldBitangent;
+
+  ${cardSurfaceNormalSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -778,7 +808,7 @@ const waveHoloFragmentShader = `
 
   void main() {
     vec2 uv = vUv;
-    vec3 normal = normalize(vWorldNormal);
+    vec3 normal = sampleSurfaceNormal(uv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float dotNV = max(dot(normal, viewDir), 0.0);
     float fresnel = pow(1.0 - dotNV, uFresnelPower);
@@ -860,6 +890,8 @@ const crackedHoloFragmentShader = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldTangent;
   varying vec3 vWorldBitangent;
+
+  ${cardSurfaceNormalSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -998,7 +1030,7 @@ const crackedHoloFragmentShader = `
 
   void main() {
     vec2 uv = vUv;
-    vec3 normal = normalize(vWorldNormal);
+    vec3 normal = sampleSurfaceNormal(uv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float dotNV = max(dot(normal, viewDir), 0.0);
     float fresnel = pow(1.0 - dotNV, uFresnelPower);
@@ -1410,7 +1442,8 @@ function CardRig({
     progress: 1,
     duration: 1.2,
   });
-  const textures = useCardTextures(card);
+  const textureAssetsReady = useCardTextureAssetsReady(card);
+  const textures = useCardTextures(textureAssetsReady ? card : null);
   const stackBackTexture = useStackCardBackTexture();
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
@@ -1518,6 +1551,7 @@ function CardRig({
       shaderRef.current.uniforms.uZoneMap.value = textures.foilZone;
       shaderRef.current.uniforms.uTreatmentMap.value = textures.holoTreatmentMap;
       shaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
+      shaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
       shaderRef.current.uniforms.uAccent.value.set(meta.accent);
       shaderRef.current.uniforms.uHue.value.set(meta.hue);
       shaderRef.current.uniformsNeedUpdate = true;
@@ -1526,6 +1560,7 @@ function CardRig({
 
     if (glossShaderRef.current?.uniforms) {
       glossShaderRef.current.uniforms.uGlossMap.value = textures.glossMask;
+      glossShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
       glossShaderRef.current.uniforms.uGlareColor.value.copy(highlightPalette.glare);
       glossShaderRef.current.uniforms.uGlossiness.value = glossiness;
       glossShaderRef.current.uniformsNeedUpdate = true;
@@ -1538,6 +1573,7 @@ function CardRig({
         material.uniforms.uSugarMap.value = textures.sugarMask;
         material.uniforms.uSparkleMap.value = textures.sparkleMask;
         material.uniforms.uPrismMap.value = textures.prismMask;
+        material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
         material.uniforms.uAccent.value.set(meta.accent);
         material.uniforms.uHue.value.set(meta.hue);
         material.uniforms.uSugarIntensity.value = sugarIntensity;
@@ -1547,6 +1583,7 @@ function CardRig({
 
     if (waveHoloShaderRef.current?.uniforms) {
       waveHoloShaderRef.current.uniforms.uMaskMap.value = textures.waveHoloMask;
+      waveHoloShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
       waveHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
       waveHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
       waveHoloShaderRef.current.uniformsNeedUpdate = true;
@@ -1555,6 +1592,7 @@ function CardRig({
 
     if (crackedHoloShaderRef.current?.uniforms) {
       crackedHoloShaderRef.current.uniforms.uMaskMap.value = textures.crackedHoloMask;
+      crackedHoloShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
       crackedHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
       crackedHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
       crackedHoloShaderRef.current.uniforms.uAmbientLight.value.copy(crackedLightPalette.ambient);
@@ -1750,12 +1788,12 @@ function CardRig({
         textures.foil.offset.set(0, 0);
         textures.foil.rotation = 0;
       } else {
-      textures.foil.offset.x =
-        0.02 + Math.sin(state.clock.elapsedTime * (0.4 + finish.shimmerBoost * 0.22)) * 0.035;
-      textures.foil.offset.y =
-        0.02 + Math.cos(state.clock.elapsedTime * (0.26 + finish.shimmerBoost * 0.18)) * 0.035;
-      textures.foil.rotation =
-        state.clock.elapsedTime * (0.035 + finish.shimmerBoost * 0.025) + hoverPointerX * 0.06;
+        textures.foil.offset.x =
+          0.02 + Math.sin(state.clock.elapsedTime * (0.4 + finish.shimmerBoost * 0.22)) * 0.035;
+        textures.foil.offset.y =
+          0.02 + Math.cos(state.clock.elapsedTime * (0.26 + finish.shimmerBoost * 0.18)) * 0.035;
+        textures.foil.rotation =
+          state.clock.elapsedTime * (0.035 + finish.shimmerBoost * 0.025) + hoverPointerX * 0.06;
       }
     }
 
@@ -2140,6 +2178,7 @@ function CardRig({
                       toneMapped={false}
                       uniforms={{
                         uGlossMap: { value: textures.glossMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
@@ -2164,6 +2203,7 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: sugarLayerWeights },
                         uSurfaceReliefWeights: { value: sugarReliefWeights },
                         uAccent: { value: new Color(meta.accent) },
@@ -2191,6 +2231,7 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: sparkleLayerWeights },
                         uSurfaceReliefWeights: { value: sparkleReliefWeights },
                         uAccent: { value: new Color(meta.accent) },
@@ -2218,6 +2259,7 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: prismLayerWeights },
                         uSurfaceReliefWeights: { value: prismReliefWeights },
                         uAccent: { value: new Color(meta.accent) },
@@ -2266,6 +2308,7 @@ function CardRig({
                         uZoneMap: { value: textures.foilZone },
                         uTreatmentMap: { value: textures.holoTreatmentMap },
                         uPrismMap: { value: textures.prismMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
@@ -2293,6 +2336,7 @@ function CardRig({
                       uniforms={{
                         uTime: { value: 0 },
                         uMaskMap: { value: textures.waveHoloMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
@@ -2319,6 +2363,7 @@ function CardRig({
                       uniforms={{
                         uTime: { value: 0 },
                         uMaskMap: { value: textures.crackedHoloMask },
+                        uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
