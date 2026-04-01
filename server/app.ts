@@ -6,6 +6,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import {
+  buildApiErrorResponse,
+  type ApiErrorPresetKey,
+} from '../src/game/apiErrors.js';
+import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
   clampEffectShimmer,
@@ -32,12 +36,19 @@ import {
   PackLimitReachedError,
 } from './store.js';
 
-function apiError(error: string, message: string, extra?: Partial<ApiErrorResponse>) {
-  return {
-    error,
-    message,
-    ...extra,
-  } satisfies ApiErrorResponse;
+function apiError(
+  presetKey: ApiErrorPresetKey,
+  extra?: Partial<ApiErrorResponse>,
+  overrides?: {
+    error?: string;
+    message?: string;
+    title?: string;
+  },
+) {
+  return buildApiErrorResponse(presetKey, {
+    ...overrides,
+    extra,
+  });
 }
 
 interface RateLimitWindow {
@@ -152,6 +163,27 @@ function formatErrorDetails(error: unknown): string {
   }
 
   return details.join(' | ');
+}
+
+function getErrorCode(error: unknown) {
+  if (error instanceof Error && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+
+  return null;
+}
+
+function getErrorStatusCode(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+  ) {
+    return (error as { statusCode: number }).statusCode;
+  }
+
+  return null;
 }
 
 async function requestGoogleResponseText(
@@ -687,7 +719,7 @@ function assertAllowedOrigin(request: FastifyRequest, reply: FastifyReply) {
   reply.header('Vary', 'Origin');
 
   if (!origin) {
-    reply.code(403).send(apiError('FORBIDDEN_ORIGIN', 'Для этого запроса нужен корректный Origin.'));
+    reply.code(403).send(apiError('FORBIDDEN_ORIGIN_REQUIRED'));
     return;
   }
 
@@ -695,7 +727,7 @@ function assertAllowedOrigin(request: FastifyRequest, reply: FastifyReply) {
     return;
   }
 
-  reply.code(403).send(apiError('FORBIDDEN_ORIGIN', 'Недопустимый origin для мутации данных.'));
+  reply.code(403).send(apiError('FORBIDDEN_ORIGIN_MUTATION'));
 }
 
 function applySecurityHeaders(request: FastifyRequest, reply: FastifyReply) {
@@ -770,7 +802,7 @@ function createRateLimiter() {
       );
       reply
         .code(429)
-        .send(apiError('RATE_LIMITED', 'Слишком много запросов. Подожди немного и попробуй снова.'));
+        .send(apiError('RATE_LIMITED'));
       return false;
     }
 
@@ -979,7 +1011,15 @@ export async function buildApp() {
       return;
     }
 
-    reply.code(500).send(apiError('INTERNAL_ERROR', 'Внутренняя ошибка сервера.'));
+    const errorCode = getErrorCode(error);
+    const statusCode = getErrorStatusCode(error);
+
+    if (errorCode === 'FST_ERR_CTP_BODY_TOO_LARGE' || statusCode === 413) {
+      reply.code(413).send(apiError('PAYLOAD_TOO_LARGE'));
+      return;
+    }
+
+    reply.code(500).send(apiError('INTERNAL_ERROR'));
   });
 
   app.get('/api/health', async () => ({
@@ -1005,7 +1045,7 @@ export async function buildApp() {
     });
 
     if (!showcase) {
-      reply.code(404).send(apiError('COLLECTION_NOT_FOUND', 'Витрина игрока не найдена.'));
+      reply.code(404).send(apiError('COLLECTION_NOT_FOUND'));
       return;
     }
 
@@ -1017,7 +1057,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1041,7 +1081,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1049,7 +1089,7 @@ export async function buildApp() {
     const marked = store.markNotificationReadById(user.id, notificationId);
 
     if (!marked) {
-      reply.code(404).send(apiError('NOTIFICATION_NOT_FOUND', 'Уведомление не найдено.'));
+      reply.code(404).send(apiError('NOTIFICATION_NOT_FOUND'));
       return;
     }
 
@@ -1067,9 +1107,7 @@ export async function buildApp() {
     }
 
     if (!serverConfig.googleAuthConfigured) {
-      reply
-        .code(503)
-        .send(apiError('AUTH_NOT_CONFIGURED', 'Google OAuth пока не настроен на сервере.'));
+      reply.code(503).send(apiError('AUTH_NOT_CONFIGURED'));
       return;
     }
 
@@ -1098,7 +1136,7 @@ export async function buildApp() {
 
     if (typeof code !== 'string' || typeof state !== 'string' || state !== expectedState) {
       reply.clearCookie(serverConfig.googleStateCookieName, sessionCookieOptions());
-      reply.code(400).send(apiError('INVALID_OAUTH_STATE', 'Некорректный OAuth state.'));
+      reply.code(400).send(apiError('INVALID_OAUTH_STATE'));
       return;
     }
 
@@ -1119,12 +1157,7 @@ export async function buildApp() {
       request.log.error(`Google OAuth token exchange failed details: ${errorDetails}`);
       reply
         .code(502)
-        .send(
-          apiError(
-            'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер не смог завершить вход через Google. Попробуй ещё раз позже.',
-          ),
-        );
+        .send(apiError('GOOGLE_AUTH_UNAVAILABLE_TOKEN_EXCHANGE'));
       return;
     }
 
@@ -1138,12 +1171,7 @@ export async function buildApp() {
       );
       reply
         .code(502)
-        .send(
-          apiError(
-            'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер получил неполный ответ от Google. Попробуй ещё раз позже.',
-          ),
-        );
+        .send(apiError('GOOGLE_AUTH_UNAVAILABLE_TOKEN_RESPONSE'));
       return;
     }
 
@@ -1157,12 +1185,7 @@ export async function buildApp() {
       );
       reply
         .code(502)
-        .send(
-          apiError(
-            'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер получил неполный ответ от Google. Попробуй ещё раз позже.',
-          ),
-        );
+        .send(apiError('GOOGLE_AUTH_UNAVAILABLE_TOKEN_RESPONSE'));
       return;
     }
 
@@ -1182,12 +1205,7 @@ export async function buildApp() {
       request.log.error(`Google OAuth userinfo request failed details: ${errorDetails}`);
       reply
         .code(502)
-        .send(
-          apiError(
-            'GOOGLE_AUTH_UNAVAILABLE',
-            'Сервер не смог получить профиль Google. Попробуй ещё раз позже.',
-          ),
-        );
+        .send(apiError('GOOGLE_AUTH_UNAVAILABLE_USERINFO'));
       return;
     }
 
@@ -1195,7 +1213,7 @@ export async function buildApp() {
       payload.email_verified === true || payload.email_verified === 'true';
 
     if (!payload?.sub || !payload.email || !emailVerified) {
-      reply.code(403).send(apiError('INVALID_GOOGLE_PROFILE', 'Google-профиль не прошёл валидацию.'));
+      reply.code(403).send(apiError('INVALID_GOOGLE_PROFILE'));
       return;
     }
 
@@ -1248,7 +1266,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(token);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1259,14 +1277,7 @@ export async function buildApp() {
     const nickname = normalizeNickname(payload?.name);
 
     if (!nickname) {
-      reply
-        .code(400)
-        .send(
-          apiError(
-            'INVALID_NICKNAME',
-            'Ник должен быть длиной от 2 до 32 символов и содержать только английские буквы, цифры, дефис или нижнее подчеркивание.',
-          ),
-        );
+      reply.code(400).send(apiError('INVALID_NICKNAME'));
       return;
     }
 
@@ -1277,7 +1288,7 @@ export async function buildApp() {
       });
     } catch (error) {
       if (error instanceof NicknameTakenError) {
-        reply.code(409).send(apiError('NICKNAME_TAKEN', error.message));
+        reply.code(409).send(apiError('NICKNAME_TAKEN', undefined, { message: error.message }));
         return;
       }
 
@@ -1299,7 +1310,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1310,9 +1321,7 @@ export async function buildApp() {
     const parsed = parseImageDataUrl(payload?.dataUrl);
 
     if (!parsed) {
-      reply
-        .code(400)
-        .send(apiError('INVALID_IMAGE', 'Нужен PNG, JPEG, WEBP или SVG размером до 5 МБ.'));
+      reply.code(400).send(apiError('INVALID_IMAGE'));
       return;
     }
 
@@ -1320,14 +1329,7 @@ export async function buildApp() {
       parsed.mimeType === 'image/svg+xml' ? sanitizeSvgUpload(parsed.buffer) : parsed.buffer;
 
     if (!normalizedBuffer) {
-      reply
-        .code(400)
-        .send(
-          apiError(
-            'UNSAFE_SVG',
-            'SVG содержит небезопасные конструкции. Удали скрипты, внешние ссылки и обработчики событий.',
-          ),
-        );
+      reply.code(400).send(apiError('UNSAFE_SVG'));
       return;
     }
 
@@ -1373,7 +1375,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1388,7 +1390,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1397,12 +1399,12 @@ export async function buildApp() {
     );
 
     if (!proposal) {
-      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_DRAFT'));
       return;
     }
 
     if (proposal.creatorUserId !== user.id && !isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Нет доступа к этому черновику.'));
+      reply.code(403).send(apiError('PROPOSAL_ACCESS_FORBIDDEN'));
       return;
     }
 
@@ -1427,7 +1429,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1435,12 +1437,12 @@ export async function buildApp() {
     const proposal = store.getProposalById(proposalId);
 
     if (!proposal) {
-      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_DRAFT'));
       return;
     }
 
     if (proposal.creatorUserId !== user.id) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Нельзя редактировать чужую карточку.'));
+      reply.code(403).send(apiError('PROPOSAL_EDIT_FORBIDDEN'));
       return;
     }
 
@@ -1450,21 +1452,14 @@ export async function buildApp() {
     });
 
     if (!payload) {
-      reply
-        .code(400)
-        .send(
-          apiError(
-            'INVALID_PROPOSAL',
-            'Заполни заголовок, описание, базовый стиль и используй только выданные сервером эффекты.',
-          ),
-        );
+      reply.code(400).send(apiError('INVALID_PROPOSAL'));
       return;
     }
 
     const updated = store.updateProposalDraftById(proposalId, payload);
 
     if (!updated) {
-      reply.code(409).send(apiError('PROPOSAL_LOCKED', 'Эту карточку уже отправили на модерацию.'));
+      reply.code(409).send(apiError('PROPOSAL_LOCKED_SAVE'));
       return;
     }
 
@@ -1487,7 +1482,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1495,31 +1490,29 @@ export async function buildApp() {
     const proposal = store.getProposalById(proposalId);
 
     if (!proposal) {
-      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_DRAFT'));
       return;
     }
 
     if (proposal.creatorUserId !== user.id) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Нельзя отправить чужую карточку.'));
+      reply.code(403).send(apiError('PROPOSAL_SUBMIT_FORBIDDEN'));
       return;
     }
 
     if (!proposal.urlImage) {
-      reply.code(400).send(apiError('IMAGE_REQUIRED', 'Сначала добавь изображение на карточку.'));
+      reply.code(400).send(apiError('IMAGE_REQUIRED'));
       return;
     }
 
     if (proposal.effectLayers.some((layer) => !layer.maskUrl)) {
-      reply
-        .code(400)
-        .send(apiError('MASK_REQUIRED', 'У каждого добавленного treatment-слоя должна быть нарисована маска.'));
+      reply.code(400).send(apiError('MASK_REQUIRED'));
       return;
     }
 
     const submitted = store.submitProposalById(proposalId);
 
     if (!submitted) {
-      reply.code(409).send(apiError('PROPOSAL_LOCKED', 'Карточка уже отправлена или обработана.'));
+      reply.code(409).send(apiError('PROPOSAL_LOCKED_SUBMIT'));
       return;
     }
 
@@ -1531,7 +1524,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
@@ -1545,7 +1538,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
@@ -1557,7 +1550,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
@@ -1581,7 +1574,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
@@ -1590,7 +1583,7 @@ export async function buildApp() {
     );
 
     if (!adminUser) {
-      reply.code(404).send(apiError('USER_NOT_FOUND', 'Пользователь не найден.'));
+      reply.code(404).send(apiError('USER_NOT_FOUND'));
       return;
     }
 
@@ -1612,7 +1605,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
@@ -1621,9 +1614,7 @@ export async function buildApp() {
     );
 
     if (!proposal) {
-      reply
-        .code(404)
-        .send(apiError('PROPOSAL_NOT_FOUND', 'Предложение не найдено или уже обработано.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_ADMIN_APPROVE'));
       return;
     }
 
@@ -1646,16 +1637,14 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
     const payload = normalizeAdminProposalOverridePayload(request.body);
 
     if (!payload) {
-      reply
-        .code(400)
-        .send(apiError('INVALID_OVERRIDE', 'Укажи корректную редкость и допустимый набор effects.'));
+      reply.code(400).send(apiError('INVALID_OVERRIDE'));
       return;
     }
 
@@ -1666,9 +1655,7 @@ export async function buildApp() {
     );
 
     if (!proposal) {
-      reply
-        .code(404)
-        .send(apiError('PROPOSAL_NOT_FOUND', 'Черновик не найден или уже заблокирован.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_ADMIN_OVERRIDE'));
       return;
     }
 
@@ -1691,16 +1678,14 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 
     if (!isAdminUser(user)) {
-      reply.code(403).send(apiError('FORBIDDEN', 'Доступ только для администратора.'));
+      reply.code(403).send(apiError('ADMIN_ONLY'));
       return;
     }
 
     const reason = normalizeProposalRejectionReason(request.body);
 
     if (!reason) {
-      reply
-        .code(400)
-        .send(apiError('INVALID_REJECTION_REASON', 'Укажи причину отказа длиной от 6 до 280 символов.'));
+      reply.code(400).send(apiError('INVALID_REJECTION_REASON'));
       return;
     }
 
@@ -1710,9 +1695,7 @@ export async function buildApp() {
     );
 
     if (!proposal) {
-      reply
-        .code(404)
-        .send(apiError('PROPOSAL_NOT_FOUND', 'Предложение не найдено или уже обработано.'));
+      reply.code(404).send(apiError('PROPOSAL_NOT_FOUND_ADMIN_DELETE'));
       return;
     }
 
@@ -1736,7 +1719,7 @@ export async function buildApp() {
     const user = store.getUserFromSessionToken(token);
 
     if (!user) {
-      reply.code(401).send(apiError('UNAUTHORIZED', 'Сначала войди через Google.'));
+      reply.code(401).send(apiError('UNAUTHORIZED'));
       return;
     }
 
@@ -1746,15 +1729,19 @@ export async function buildApp() {
     } catch (error) {
       if (error instanceof PackLimitReachedError) {
         reply.code(409).send(
-          apiError('PACK_LIMIT_REACHED', error.message, {
-            nextPackResetAt: error.nextPackResetAt,
-          }),
+          apiError(
+            'PACK_LIMIT_REACHED',
+            {
+              nextPackResetAt: error.nextPackResetAt,
+            },
+            { message: error.message },
+          ),
         );
         return;
       }
 
       if (error instanceof NoApprovedCardsError) {
-        reply.code(409).send(apiError('NO_APPROVED_CARDS', error.message));
+        reply.code(409).send(apiError('NO_APPROVED_CARDS', undefined, { message: error.message }));
         return;
       }
 
@@ -1764,7 +1751,7 @@ export async function buildApp() {
 
   app.setNotFoundHandler(async (request, reply) => {
     if (request.url.startsWith('/api')) {
-      reply.code(404).send(apiError('NOT_FOUND', 'Маршрут не найден.'));
+      reply.code(404).send(apiError('NOT_FOUND_ROUTE'));
       return;
     }
 

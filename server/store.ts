@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { CARDS_PER_PACK, rarityWeights } from '../src/game/config.js';
+import { API_ERROR_PRESETS } from '../src/game/apiErrors.js';
 import {
   buildRarityBalanceSnapshot,
   countItemsByRarity,
@@ -1029,21 +1030,21 @@ function rollPackFromCatalog(catalog: CardDefinition[], packNumber: number, time
 
 export class PackLimitReachedError extends Error {
   constructor(readonly nextPackResetAt: string) {
-    super('Сегодняшний пак уже открыт.');
+    super(API_ERROR_PRESETS.PACK_LIMIT_REACHED.message);
     this.name = 'PackLimitReachedError';
   }
 }
 
 export class NicknameTakenError extends Error {
   constructor() {
-    super('Этот ник уже занят.');
+    super(API_ERROR_PRESETS.NICKNAME_TAKEN.message);
     this.name = 'NicknameTakenError';
   }
 }
 
 export class NoApprovedCardsError extends Error {
   constructor() {
-    super('Пока нет одобренных карточек для паков.');
+    super(API_ERROR_PRESETS.NO_APPROVED_CARDS.message);
     this.name = 'NoApprovedCardsError';
   }
 }

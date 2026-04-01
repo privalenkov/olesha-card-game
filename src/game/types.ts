@@ -475,6 +475,7 @@ export interface AdminUserListResult {
 
 export interface ApiErrorResponse {
   error: string;
+  title?: string;
   message: string;
   nextPackResetAt?: string;
 }

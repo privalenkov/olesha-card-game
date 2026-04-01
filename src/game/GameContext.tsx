@@ -9,6 +9,7 @@ import {
   type PropsWithChildren,
 } from 'react';
 import {
+  API_ERROR_EVENT,
   ApiError,
   EMPTY_REMOTE_GAME_STATE,
   fetchNotifications,
@@ -18,7 +19,9 @@ import {
   requestNicknameUpdate,
   requestLogout,
   requestPackOpen,
+  type ApiErrorEventDetail,
 } from './api';
+import { API_ERROR_PRESETS } from './apiErrors';
 import type { AppNotification, AuthUser, RemoteGameState, SessionState, OwnedCard } from './types';
 
 interface NotifyPayload {
@@ -150,7 +153,10 @@ export function GameProvider({ children }: PropsWithChildren) {
       try {
         await markNotificationRead(notificationId);
       } catch (requestError) {
-        if (requestError instanceof ApiError && requestError.error === 'UNAUTHORIZED') {
+        if (
+          requestError instanceof ApiError &&
+          requestError.error === API_ERROR_PRESETS.UNAUTHORIZED.code
+        ) {
           await refresh();
         }
       }
@@ -280,7 +286,10 @@ export function GameProvider({ children }: PropsWithChildren) {
         await refresh();
       }
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.error === 'UNAUTHORIZED') {
+      if (
+        requestError instanceof ApiError &&
+        requestError.error === API_ERROR_PRESETS.UNAUTHORIZED.code
+      ) {
         await refresh();
       }
     }
@@ -310,6 +319,32 @@ export function GameProvider({ children }: PropsWithChildren) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    function handleApiError(event: Event) {
+      const detail = (event as CustomEvent<ApiErrorEventDetail>).detail;
+
+      if (!detail?.message) {
+        return;
+      }
+
+      notify({
+        kind: 'error',
+        title: detail.title,
+        message: detail.message,
+      });
+    }
+
+    window.addEventListener(API_ERROR_EVENT, handleApiError);
+
+    return () => {
+      window.removeEventListener(API_ERROR_EVENT, handleApiError);
+    };
+  }, [notify]);
 
   const login = useCallback(() => {
     window.location.assign('/api/auth/google/start');
@@ -353,7 +388,7 @@ export function GameProvider({ children }: PropsWithChildren) {
         if (requestError instanceof ApiError) {
           setError(requestError.message);
 
-          if (requestError.error === 'UNAUTHORIZED') {
+          if (requestError.error === API_ERROR_PRESETS.UNAUTHORIZED.code) {
             await refresh();
           }
 
@@ -390,12 +425,12 @@ export function GameProvider({ children }: PropsWithChildren) {
       if (requestError instanceof ApiError) {
         setError(requestError.message);
 
-        if (requestError.error === 'UNAUTHORIZED') {
+        if (requestError.error === API_ERROR_PRESETS.UNAUTHORIZED.code) {
           await refresh();
           return null;
         }
 
-        if (requestError.error === 'PACK_LIMIT_REACHED') {
+        if (requestError.error === API_ERROR_PRESETS.PACK_LIMIT_REACHED.code) {
           setSession((current) => {
             if (!current.game) {
               return current;

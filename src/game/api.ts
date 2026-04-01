@@ -18,6 +18,7 @@ import type {
   UpdateProposalResult,
   UploadCardArtResult,
 } from './types';
+import { API_ERROR_PRESETS, getApiErrorTitle } from './apiErrors';
 
 export const EMPTY_REMOTE_GAME_STATE: RemoteGameState = {
   collection: [],
@@ -34,26 +35,75 @@ export class ApiError extends Error {
     readonly error: string,
     message: string,
     readonly nextPackResetAt?: string,
+    readonly statusCode?: number,
+    readonly alreadyNotified = false,
+    readonly title?: string,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
+export interface ApiErrorEventDetail {
+  error: string;
+  message: string;
+  title: string;
+  statusCode?: number;
+}
+
+export const API_ERROR_EVENT = 'app:api-error';
+
 async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function apiRequest<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
-    credentials: 'include',
-    headers: {
-      Accept: 'application/json',
-      ...(init?.method && init.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-    ...init,
-  });
+function emitApiError(detail: ApiErrorEventDetail) {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent<ApiErrorEventDetail>(API_ERROR_EVENT, { detail }));
+}
+
+async function apiRequest<T>(
+  input: RequestInfo,
+  init?: RequestInit,
+  options?: { notifyOnError?: boolean },
+): Promise<T> {
+  const notifyOnError = options?.notifyOnError ?? true;
+  let response: Response;
+
+  try {
+    response = await fetch(input, {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        ...(init?.method && init.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+      ...init,
+    });
+  } catch {
+    const message = API_ERROR_PRESETS.NETWORK_ERROR.message;
+    const title = API_ERROR_PRESETS.NETWORK_ERROR.title;
+
+    if (notifyOnError) {
+      emitApiError({
+        error: API_ERROR_PRESETS.NETWORK_ERROR.code,
+        message,
+        title,
+      });
+    }
+
+    throw new ApiError(
+      API_ERROR_PRESETS.NETWORK_ERROR.code,
+      message,
+      undefined,
+      undefined,
+      notifyOnError,
+      title,
+    );
+  }
 
   if (!response.ok) {
     let payload: ApiErrorResponse | null = null;
@@ -64,10 +114,30 @@ async function apiRequest<T>(input: RequestInfo, init?: RequestInit): Promise<T>
       payload = null;
     }
 
+    const errorCode = payload?.error ?? API_ERROR_PRESETS.REQUEST_FAILED.code;
+    const message = payload?.message ?? API_ERROR_PRESETS.REQUEST_FAILED.message;
+    const title = getApiErrorTitle({
+      error: errorCode,
+      title: payload?.title,
+      statusCode: response.status,
+    });
+
+    if (notifyOnError) {
+      emitApiError({
+        error: errorCode,
+        message,
+        title,
+        statusCode: response.status,
+      });
+    }
+
     throw new ApiError(
-      payload?.error ?? 'REQUEST_FAILED',
-      payload?.message ?? 'Не удалось выполнить запрос к серверу.',
+      errorCode,
+      message,
       payload?.nextPackResetAt,
+      response.status,
+      notifyOnError,
+      title,
     );
   }
 
@@ -107,13 +177,17 @@ export function fetchPublicShowcase(
 }
 
 export function fetchNotifications() {
-  return apiRequest<NotificationListResult>('/api/notifications');
+  return apiRequest<NotificationListResult>('/api/notifications', undefined, {
+    notifyOnError: false,
+  });
 }
 
 export function markNotificationRead(notificationId: string) {
   return apiRequest<{ ok: true }>(`/api/notifications/${notificationId}/read`, {
     method: 'POST',
     body: JSON.stringify({}),
+  }, {
+    notifyOnError: false,
   });
 }
 

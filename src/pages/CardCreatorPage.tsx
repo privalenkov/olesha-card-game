@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { CardEffectMaskEditor } from '../components/CardEffectMaskEditor';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import {
+  ApiError,
   fetchProposal,
   overrideProposalAsAdmin,
   saveProposal,
@@ -120,6 +121,8 @@ function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
 function isDataUrl(value: string) {
   return value.startsWith('data:image/');
 }
+
+const MAX_UPLOAD_FILE_BYTES = 5 * 1024 * 1024;
 
 function componentToHex(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
@@ -238,7 +241,7 @@ export function CardCreatorPage() {
         setStatusMessage(null);
       } catch (error) {
         if (!cancelled) {
-          setStatusMessage(error instanceof Error ? error.message : 'Не удалось открыть редактор.');
+          showCreatorError(getRequestErrorMessage(error, 'Не удалось открыть редактор.'), 'Ошибка загрузки');
         }
       } finally {
         if (!cancelled) {
@@ -347,6 +350,44 @@ export function CardCreatorPage() {
 
   const isLocked = proposal?.status !== 'draft';
 
+  function showCreatorError(message: string, title = 'Ошибка', notifyUser = true) {
+    setStatusMessage(message);
+
+    if (!notifyUser) {
+      return;
+    }
+
+    notify({
+      kind: 'error',
+      title,
+      message,
+    });
+  }
+
+  function getRequestErrorMessage(error: unknown, fallback: string) {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  function showCreatorRequestError(error: unknown, fallback: string, title = 'Ошибка') {
+    showCreatorError(
+      getRequestErrorMessage(error, fallback),
+      error instanceof ApiError && error.title ? error.title : title,
+      !(error instanceof ApiError && error.alreadyNotified),
+    );
+  }
+
+  function validateUploadFileSize(file: File, label: string) {
+    if (file.size <= MAX_UPLOAD_FILE_BYTES) {
+      return true;
+    }
+
+    showCreatorError(
+      `${label} слишком большой. Загрузи файл размером до 5 МБ.`,
+      'Слишком большой файл',
+    );
+    return false;
+  }
+
   function updateVisualFill(fillKey: 'layerOneFill' | 'layerTwoFill', value: string) {
     updateDraft((current) => ({
       ...current,
@@ -359,7 +400,13 @@ export function CardCreatorPage() {
 
   async function materializeDraftAssets(currentDraft: ProposalEditorPayload) {
     const uploadedLayers = [...currentDraft.effectLayers];
+    let imageUrl = currentDraft.urlImage;
     let decorativePatternSvgUrl = currentDraft.visuals.decorativePattern.svgUrl;
+
+    if (isDataUrl(imageUrl)) {
+      const uploaded = await uploadCardArt(imageUrl);
+      imageUrl = uploaded.url;
+    }
 
     if (isDataUrl(decorativePatternSvgUrl)) {
       const uploaded = await uploadCardArt(decorativePatternSvgUrl);
@@ -381,6 +428,7 @@ export function CardCreatorPage() {
 
     return {
       ...currentDraft,
+      urlImage: imageUrl,
       visuals: {
         ...currentDraft.visuals,
         decorativePattern: {
@@ -408,7 +456,7 @@ export function CardCreatorPage() {
       setStatusMessage('Черновик сохранен.');
       return response.proposal;
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Не удалось сохранить черновик.');
+      showCreatorRequestError(error, 'Не удалось сохранить черновик.', 'Ошибка сохранения');
       return null;
     } finally {
       setSaving(false);
@@ -435,7 +483,7 @@ export function CardCreatorPage() {
         message: 'Карточка ушла на модерацию. Решение придет отдельным уведомлением.',
       });
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Не удалось отправить карточку.');
+      showCreatorRequestError(error, 'Не удалось отправить карточку.', 'Ошибка отправки');
     } finally {
       setSaving(false);
     }
@@ -443,6 +491,10 @@ export function CardCreatorPage() {
 
   async function handleImageChange(file: File | null) {
     if (!file || !draft) {
+      return;
+    }
+
+    if (!validateUploadFileSize(file, 'Файл изображения')) {
       return;
     }
 
@@ -455,7 +507,7 @@ export function CardCreatorPage() {
       setDraft((current) => (current ? { ...current, urlImage: uploaded.url } : current));
       setStatusMessage('Изображение загружено.');
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить изображение.');
+      showCreatorRequestError(error, 'Не удалось загрузить изображение.', 'Ошибка загрузки');
     } finally {
       setSaving(false);
     }
@@ -467,7 +519,11 @@ export function CardCreatorPage() {
     }
 
     if (file.type !== 'image/svg+xml' && !file.name.toLowerCase().endsWith('.svg')) {
-      setStatusMessage('Для декоративного паттерна нужен SVG.');
+      showCreatorError('Для декоративного паттерна нужен SVG.', 'Неверный формат');
+      return;
+    }
+
+    if (!validateUploadFileSize(file, 'SVG паттерн')) {
       return;
     }
 
@@ -506,7 +562,7 @@ export function CardCreatorPage() {
       );
       setStatusMessage('SVG паттерн загружен.');
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить SVG паттерн.');
+      showCreatorRequestError(error, 'Не удалось загрузить SVG паттерн.', 'Ошибка загрузки');
     } finally {
       setSaving(false);
     }
@@ -521,7 +577,11 @@ export function CardCreatorPage() {
       !/^image\/(?:png|jpeg|webp|svg\+xml)$/u.test(file.type) &&
       !/\.(?:png|jpe?g|webp|svg)$/iu.test(file.name)
     ) {
-      setStatusMessage('Для маски нужен PNG, JPEG, WEBP или SVG.');
+      showCreatorError('Для маски нужен PNG, JPEG, WEBP или SVG.', 'Неверный формат');
+      return;
+    }
+
+    if (!validateUploadFileSize(file, 'Файл маски')) {
       return;
     }
 
@@ -536,7 +596,7 @@ export function CardCreatorPage() {
       }));
       setStatusMessage('Маска загружена в слой.');
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Не удалось загрузить маску.');
+      showCreatorRequestError(error, 'Не удалось загрузить маску.', 'Ошибка загрузки');
     }
   }
 
@@ -597,9 +657,7 @@ export function CardCreatorPage() {
       setDraft(draftFromProposal(response.proposal));
       setStatusMessage('Админский override применен.');
     } catch (error) {
-      setStatusMessage(
-        error instanceof Error ? error.message : 'Не удалось применить админский override.',
-      );
+      showCreatorRequestError(error, 'Не удалось применить админский override.', 'Ошибка override');
     } finally {
       setSaving(false);
     }

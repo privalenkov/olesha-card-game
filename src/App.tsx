@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal';
+import { ApiError } from './game/api';
 import { requestProposalStart } from './game/api';
 import { GameProvider } from './game/GameContext';
 import { useGame } from './game/GameContext';
@@ -74,6 +75,10 @@ function AppShell() {
       const response = await requestProposalStart();
       navigate(`/creator/${response.proposal.id}`);
     } catch (error) {
+      if (error instanceof ApiError && error.alreadyNotified) {
+        return;
+      }
+
       notify({
         kind: 'error',
         title: 'Не удалось открыть редактор',
