@@ -6,6 +6,7 @@ import {
   type Texture,
 } from 'three';
 import cardBackTextureUrl from '../assets/cards/card-back.png';
+import defaultPatternUrl from '../assets/cards/default-pattern.png';
 import cardLayerOneFrontUrl from '../assets/cards/card-layer-one-front.png';
 import cardLayerTwoFrontUrl from '../assets/cards/card-layer-two-front.png';
 import emptyStarUrl from '../assets/cards/empty-star.svg';
@@ -49,6 +50,7 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
 
   return [
     cardBackTextureUrl,
+    defaultPatternUrl,
     cardLayerOneFrontUrl,
     cardLayerTwoFrontUrl,
     emptyStarUrl,
@@ -83,6 +85,8 @@ interface CardFrontLayout {
 
 const CARD_FRONT_SURFACE_COLOR = '#f5f0dc';
 const CARD_FRONT_TEXT_COLOR = '#080910';
+const CARD_FRONT_ART_PLACEHOLDER_COLOR = '#D2D0C6';
+const CARD_FRONT_DEFAULT_PATTERN_COLOR = '#9B998F';
 const CARD_FRONT_LAYOUT: CardFrontLayout = {
   titleBox: {
     x: 64,
@@ -420,6 +424,73 @@ function fillRectWithVisualFill(
 ) {
   ctx.fillStyle = createCanvasFillStyle(ctx, fillValue, x, y, width, height, fallbackValue);
   ctx.fillRect(x, y, width, height);
+}
+
+function drawTintedPatternImage(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement | null,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+  options: {
+    opacity?: number;
+    highlightOpacity?: number;
+  } = {},
+) {
+  if (!image) {
+    return;
+  }
+
+  const opacity = options.opacity ?? 1;
+  const highlightOpacity = options.highlightOpacity ?? 0;
+  const patternCanvas = createCanvas(width, height);
+  const patternContext = patternCanvas.getContext('2d');
+
+  if (!patternContext) {
+    return;
+  }
+
+  patternContext.fillStyle = color;
+  patternContext.fillRect(0, 0, width, height);
+  patternContext.globalCompositeOperation = 'destination-in';
+  patternContext.imageSmoothingEnabled = true;
+  patternContext.imageSmoothingQuality = 'high';
+  drawImageCover(patternContext, image, 0, 0, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.drawImage(patternCanvas, x, y, width, height);
+  ctx.restore();
+
+  if (highlightOpacity <= 0) {
+    return;
+  }
+
+  const highlightCanvas = createCanvas(width, height);
+  const highlightContext = highlightCanvas.getContext('2d');
+
+  if (!highlightContext) {
+    return;
+  }
+
+  const highlight = highlightContext.createLinearGradient(0, 0, width, height);
+  highlight.addColorStop(0, 'rgba(255,255,255,0.84)');
+  highlight.addColorStop(0.35, 'rgba(255,255,255,0.18)');
+  highlight.addColorStop(1, 'rgba(255,255,255,0)');
+  highlightContext.fillStyle = highlight;
+  highlightContext.fillRect(0, 0, width, height);
+  highlightContext.globalCompositeOperation = 'destination-in';
+  highlightContext.imageSmoothingEnabled = true;
+  highlightContext.imageSmoothingQuality = 'high';
+  drawImageCover(highlightContext, image, 0, 0, width, height);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = highlightOpacity;
+  ctx.drawImage(highlightCanvas, x, y, width, height);
+  ctx.restore();
 }
 
 function formatCardSerial(card: OwnedCard) {
@@ -2082,6 +2153,7 @@ function drawCardFront(
   artImage: HTMLImageElement | null,
   effectMaskImages: Array<HTMLImageElement | null>,
   decorativePatternImage: HTMLImageElement | null,
+  defaultPatternImage: HTMLImageElement | null,
   layerOneImage: HTMLImageElement | null,
   layerTwoImage: HTMLImageElement | null,
   fillStarImage: HTMLImageElement | null,
@@ -2099,7 +2171,7 @@ function drawCardFront(
   const meta = rarityMeta[card.rarity];
   const visuals = getCardVisuals(card);
   const accent = visuals.accentColor;
-  const detailBorderColor = mixHexColors(accent, '#111111', 0.34);
+  const detailBorderColor = accent;
 
   drawTintedTemplateLayer(ctx, layerOneImage, visuals.layerOneFill, {
     detailAlpha: 0.72,
@@ -2132,7 +2204,7 @@ function drawCardFront(
 
   ctx.save();
   ctx.clip(artClip);
-  ctx.fillStyle = CARD_FRONT_SURFACE_COLOR;
+  ctx.fillStyle = CARD_FRONT_ART_PLACEHOLDER_COLOR;
   ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
 
   if (artImage) {
@@ -2160,21 +2232,19 @@ function drawCardFront(
     ctx.fillStyle = artShade;
     ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
   } else {
-    const fallbackGradient = ctx.createLinearGradient(
+    drawTintedPatternImage(
+      ctx,
+      defaultPatternImage,
       layout.artBox.x,
       layout.artBox.y,
-      layout.artBox.x + layout.artBox.width,
-      layout.artBox.y + layout.artBox.height,
+      layout.artBox.width,
+      layout.artBox.height,
+      CARD_FRONT_DEFAULT_PATTERN_COLOR,
+      {
+        opacity: 0.92,
+        highlightOpacity: 0.22,
+      },
     );
-    fallbackGradient.addColorStop(0, mixHexColors(meta.hue, '#ffffff', 0.42));
-    fallbackGradient.addColorStop(1, mixHexColors(meta.accent, '#111111', 0.24));
-    ctx.fillStyle = fallbackGradient;
-    ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
-
-    ctx.save();
-    ctx.translate(layout.artBox.x, layout.artBox.y);
-    drawRarityMotif(ctx, card.rarity, layout.artBox.width, layout.artBox.height, meta.hue, meta.accent);
-    ctx.restore();
   }
   ctx.restore();
 
@@ -2701,6 +2771,7 @@ export function useStackCardBackTexture() {
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
   const backImage = useRemoteImage(cardBackTextureUrl);
+  const defaultPatternImage = useRemoteImage(defaultPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
   const emptyStarImage = useRemoteImage(emptyStarUrl);
@@ -2730,6 +2801,7 @@ export function useCardTextures(card: OwnedCard | null) {
             artImage,
             effectMaskImages,
             decorativePatternImage,
+            defaultPatternImage,
             layerOneImage,
             layerTwoImage,
             fillStarImage,
@@ -2777,6 +2849,7 @@ export function useCardTextures(card: OwnedCard | null) {
     artImage,
     backImage,
     card,
+    defaultPatternImage,
     decorativePatternImage,
     effectMaskImages,
     emptyStarImage,
@@ -2788,6 +2861,7 @@ export function useCardTextures(card: OwnedCard | null) {
 
 export function useCardPreviewImage(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const defaultPatternImage = useRemoteImage(defaultPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
   const emptyStarImage = useRemoteImage(emptyStarUrl);
@@ -2810,6 +2884,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
         artImage,
         effectMaskImages,
         decorativePatternImage,
+        defaultPatternImage,
         layerOneImage,
         layerTwoImage,
         fillStarImage,
@@ -2837,6 +2912,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
   }, [
     artImage,
     card,
+    defaultPatternImage,
     decorativePatternImage,
     effectMaskImages,
     emptyStarImage,

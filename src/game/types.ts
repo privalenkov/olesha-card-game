@@ -144,18 +144,16 @@ export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = {
 };
 
 export const CARD_ACCENT_SWATCHES = [
+  '#9B998F',
   '#8de5ff',
   '#ffb36a',
   '#7bffca',
   '#ff8ca8',
   '#bca8ff',
-  '#fff17f',
 ] as const;
 
-export const DEFAULT_CARD_LAYER_ONE_FILL =
-  'linear-gradient(145deg, rgba(16,39,61,1) 0%, rgba(27,69,97,1) 100%)';
-export const DEFAULT_CARD_LAYER_TWO_FILL =
-  'linear-gradient(180deg, rgba(248,244,230,1) 0%, rgba(234,228,208,1) 100%)';
+export const DEFAULT_CARD_LAYER_ONE_FILL = '#D2D0C6';
+export const DEFAULT_CARD_LAYER_TWO_FILL = '#F1EFE3';
 
 export const CARD_LAYER_ONE_FILL_PRESETS = [
   DEFAULT_CARD_LAYER_ONE_FILL,
