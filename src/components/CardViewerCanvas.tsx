@@ -1414,6 +1414,7 @@ function CardRig({
   const stackBackTexture = useStackCardBackTexture();
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
+  const hasArtImage = Boolean(card.urlImage?.trim());
   const tuning = holoTuning[card.rarity];
   const viewerLighting = useMemo(
     () => createViewerLightingPalette(card.rarity, meta.hue, meta.accent),
@@ -1493,9 +1494,15 @@ function CardRig({
       textures.prismMask.needsUpdate = true;
       textures.holoTreatmentMap.needsUpdate = true;
       textures.foil.center.set(0.5, 0.5);
-      textures.foil.repeat.set(1.04, 1.04);
+      if (hasArtImage) {
+        textures.foil.repeat.set(1.04, 1.04);
+      } else {
+        textures.foil.repeat.set(1, 1);
+        textures.foil.offset.set(0, 0);
+        textures.foil.rotation = 0;
+      }
     }
-  }, [introKey, textures]);
+  }, [hasArtImage, introKey, textures]);
 
   useEffect(() => {
     stackEntryRef.current = enterFromStackAnimation ? 1 : 0;
@@ -1739,12 +1746,17 @@ function CardRig({
     }
 
     if (textures && showFrontTreatments) {
+      if (!hasArtImage) {
+        textures.foil.offset.set(0, 0);
+        textures.foil.rotation = 0;
+      } else {
       textures.foil.offset.x =
         0.02 + Math.sin(state.clock.elapsedTime * (0.4 + finish.shimmerBoost * 0.22)) * 0.035;
       textures.foil.offset.y =
         0.02 + Math.cos(state.clock.elapsedTime * (0.26 + finish.shimmerBoost * 0.18)) * 0.035;
       textures.foil.rotation =
         state.clock.elapsedTime * (0.035 + finish.shimmerBoost * 0.025) + hoverPointerX * 0.06;
+      }
     }
 
     if (showDecorativeEffects && haloRef.current) {

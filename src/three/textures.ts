@@ -7,6 +7,7 @@ import {
 } from 'three';
 import cardBackTextureUrl from '../assets/cards/card-back.png';
 import defaultPatternUrl from '../assets/cards/default-pattern.png';
+import defaultReflectPatternUrl from '../assets/cards/default-reflect-pattern.png';
 import cardLayerOneFrontUrl from '../assets/cards/card-layer-one-front.png';
 import cardLayerTwoFrontUrl from '../assets/cards/card-layer-two-front.png';
 import emptyStarUrl from '../assets/cards/empty-star.svg';
@@ -42,6 +43,10 @@ type RemoteImageCacheEntry = {
 };
 
 const remoteImageCache = new Map<string, RemoteImageCacheEntry>();
+const opaqueImageBoundsCache = new WeakMap<
+  HTMLImageElement | HTMLCanvasElement,
+  { x: number; y: number; width: number; height: number } | null
+>();
 
 function getCardRemoteAssetUrls(card: OwnedCard | null) {
   if (!card) {
@@ -51,6 +56,7 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
   return [
     cardBackTextureUrl,
     defaultPatternUrl,
+    defaultReflectPatternUrl,
     cardLayerOneFrontUrl,
     cardLayerTwoFrontUrl,
     emptyStarUrl,
@@ -202,6 +208,68 @@ function drawImageCover(
   }
 
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+}
+
+function getOpaqueImageBounds(image: HTMLImageElement | HTMLCanvasElement) {
+  if (opaqueImageBoundsCache.has(image)) {
+    return opaqueImageBoundsCache.get(image) ?? null;
+  }
+
+  try {
+    const probeCanvas = createCanvas(image.width, image.height);
+    const probeContext = probeCanvas.getContext('2d');
+
+    if (!probeContext) {
+      opaqueImageBoundsCache.set(image, null);
+      return null;
+    }
+
+    probeContext.clearRect(0, 0, probeCanvas.width, probeCanvas.height);
+    probeContext.drawImage(image, 0, 0, probeCanvas.width, probeCanvas.height);
+
+    const { data, width, height } = probeContext.getImageData(
+      0,
+      0,
+      probeCanvas.width,
+      probeCanvas.height,
+    );
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const alpha = data[(y * width + x) * 4 + 3];
+
+        if (alpha < 8) {
+          continue;
+        }
+
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+
+    if (maxX < minX || maxY < minY) {
+      opaqueImageBoundsCache.set(image, null);
+      return null;
+    }
+
+    const bounds = {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+    opaqueImageBoundsCache.set(image, bounds);
+    return bounds;
+  } catch {
+    opaqueImageBoundsCache.set(image, null);
+    return null;
+  }
 }
 
 function parseHexColor(color: string) {
@@ -437,6 +505,8 @@ function drawTintedPatternImage(
   options: {
     opacity?: number;
     highlightOpacity?: number;
+    clipRadius?: CardCornerRadius;
+    cropToOpaqueBounds?: boolean;
   } = {},
 ) {
   if (!image) {
@@ -452,14 +522,54 @@ function drawTintedPatternImage(
     return;
   }
 
+  const opaqueBounds = options.cropToOpaqueBounds ? getOpaqueImageBounds(image) : null;
+
+  const drawPattern = (target: CanvasRenderingContext2D) => {
+    if (opaqueBounds) {
+      const sourceAspect = opaqueBounds.width / opaqueBounds.height;
+      const targetAspect = width / height;
+      let drawWidth = width;
+      let drawHeight = height;
+      let drawX = 0;
+      let drawY = 0;
+
+      if (sourceAspect > targetAspect) {
+        drawWidth = height * sourceAspect;
+        drawX = -(drawWidth - width) / 2;
+      } else {
+        drawHeight = width / sourceAspect;
+        drawY = -(drawHeight - height) / 2;
+      }
+
+      target.drawImage(
+        image,
+        opaqueBounds.x,
+        opaqueBounds.y,
+        opaqueBounds.width,
+        opaqueBounds.height,
+        drawX,
+        drawY,
+        drawWidth,
+        drawHeight,
+      );
+      return;
+    }
+
+    drawImageCover(target, image, 0, 0, width, height);
+  };
+
   patternContext.fillStyle = color;
   patternContext.fillRect(0, 0, width, height);
   patternContext.globalCompositeOperation = 'destination-in';
   patternContext.imageSmoothingEnabled = true;
   patternContext.imageSmoothingQuality = 'high';
-  drawImageCover(patternContext, image, 0, 0, width, height);
+  drawPattern(patternContext);
 
   ctx.save();
+  if (options.clipRadius) {
+    drawRoundedPanel(ctx, x, y, width, height, options.clipRadius);
+    ctx.clip();
+  }
   ctx.globalAlpha = opacity;
   ctx.drawImage(patternCanvas, x, y, width, height);
   ctx.restore();
@@ -484,9 +594,13 @@ function drawTintedPatternImage(
   highlightContext.globalCompositeOperation = 'destination-in';
   highlightContext.imageSmoothingEnabled = true;
   highlightContext.imageSmoothingQuality = 'high';
-  drawImageCover(highlightContext, image, 0, 0, width, height);
+  drawPattern(highlightContext);
 
   ctx.save();
+  if (options.clipRadius) {
+    drawRoundedPanel(ctx, x, y, width, height, options.clipRadius);
+    ctx.clip();
+  }
   ctx.globalCompositeOperation = 'screen';
   ctx.globalAlpha = highlightOpacity;
   ctx.drawImage(highlightCanvas, x, y, width, height);
@@ -2417,22 +2531,13 @@ function drawFoilLayer(
     return canvas;
   }
 
-  const layout = CARD_FRONT_LAYOUT;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'rgba(0,0,0,0)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (!hasArtImage) {
     ctx.fillStyle = 'rgba(255,255,255,0.94)';
-    drawRoundedPanel(
-      ctx,
-      layout.artBox.x,
-      layout.artBox.y,
-      layout.artBox.width,
-      layout.artBox.height,
-      layout.artBox.radius ?? 0,
-    );
-    ctx.fill();
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   return canvas;
@@ -2441,6 +2546,7 @@ function drawFoilLayer(
 function drawHoloZoneMask(
   card: OwnedCard,
   effectMaskImages: Array<HTMLImageElement | null>,
+  defaultPatternImage: HTMLImageElement | null,
   hasArtImage: boolean,
 ) {
   const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
@@ -2463,24 +2569,20 @@ function drawHoloZoneMask(
   ctx.stroke();
 
   if (!hasArtImage) {
-    const artGradient = ctx.createLinearGradient(
-      0,
-      layout.artBox.y,
-      0,
-      layout.artBox.y + layout.artBox.height,
-    );
-    artGradient.addColorStop(0, zone(0.72 + finish.opacity * 0.1));
-    artGradient.addColorStop(1, zone(0.46 + finish.opacity * 0.12));
-    drawRoundedPanel(
+    drawTintedPatternImage(
       ctx,
+      defaultPatternImage,
       layout.artBox.x,
       layout.artBox.y,
       layout.artBox.width,
       layout.artBox.height,
-      layout.artBox.radius ?? 0,
+      '#ffffff',
+      {
+        opacity: 0.94,
+        clipRadius: layout.artBox.radius ?? 0,
+        cropToOpaqueBounds: true,
+      },
     );
-    ctx.fillStyle = artGradient;
-    ctx.fill();
   }
 
   drawRoundedPanel(
@@ -2672,6 +2774,7 @@ export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
   const backImage = useRemoteImage(cardBackTextureUrl);
   const defaultPatternImage = useRemoteImage(defaultPatternUrl);
+  const defaultReflectPatternImage = useRemoteImage(defaultReflectPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
   const emptyStarImage = useRemoteImage(emptyStarUrl);
@@ -2687,6 +2790,8 @@ export function useCardTextures(card: OwnedCard | null) {
     if (!card) {
       return null;
     }
+
+    const hasArtSource = Boolean(card.urlImage?.trim());
 
     const embossHeightMap = finalizeCardTextureCanvas(drawEmbossHeightMap(card, effectMaskImages));
     const surfaceHeightMap = finalizeCardTextureCanvas(
@@ -2717,7 +2822,7 @@ export function useCardTextures(card: OwnedCard | null) {
       ),
       foil: setupTexture(
         finalizeCardTextureCanvas(
-          drawFoilLayer(card, Boolean(artImage)),
+          drawFoilLayer(card, hasArtSource),
         ),
         true,
       ),
@@ -2726,7 +2831,8 @@ export function useCardTextures(card: OwnedCard | null) {
           drawHoloZoneMask(
             card,
             effectMaskImages,
-            Boolean(artImage),
+            defaultReflectPatternImage,
+            hasArtSource,
           ),
         ),
       ),
@@ -2761,6 +2867,7 @@ export function useCardTextures(card: OwnedCard | null) {
     backImage,
     card,
     defaultPatternImage,
+    defaultReflectPatternImage,
     decorativePatternImage,
     effectMaskImages,
     emptyStarImage,
