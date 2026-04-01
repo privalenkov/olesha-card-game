@@ -36,6 +36,8 @@ export interface CardVisuals {
   frameStyle: CardFrameStyle;
   accentColor: string;
   decorativePattern: CardDecorativePattern;
+  layerOneFill: string;
+  layerTwoFill: string;
 }
 
 export interface CardEffectLayer {
@@ -150,6 +152,61 @@ export const CARD_ACCENT_SWATCHES = [
   '#fff17f',
 ] as const;
 
+export const DEFAULT_CARD_LAYER_ONE_FILL =
+  'linear-gradient(145deg, rgba(16,39,61,1) 0%, rgba(27,69,97,1) 100%)';
+export const DEFAULT_CARD_LAYER_TWO_FILL =
+  'linear-gradient(180deg, rgba(248,244,230,1) 0%, rgba(234,228,208,1) 100%)';
+
+export const CARD_LAYER_ONE_FILL_PRESETS = [
+  DEFAULT_CARD_LAYER_ONE_FILL,
+  'linear-gradient(145deg, rgba(49,21,13,1) 0%, rgba(106,37,24,1) 100%)',
+  'linear-gradient(145deg, rgba(15,41,34,1) 0%, rgba(30,90,74,1) 100%)',
+  'linear-gradient(145deg, rgba(17,18,22,1) 0%, rgba(49,51,61,1) 100%)',
+  'linear-gradient(145deg, rgba(28,21,54,1) 0%, rgba(39,77,111,1) 100%)',
+  'linear-gradient(145deg, rgba(73,18,84,1) 0%, rgba(109,26,118,1) 100%)',
+] as const;
+
+export const CARD_LAYER_TWO_FILL_PRESETS = [
+  DEFAULT_CARD_LAYER_TWO_FILL,
+  'linear-gradient(180deg, rgba(255,248,238,1) 0%, rgba(244,222,208,1) 100%)',
+  'linear-gradient(180deg, rgba(240,251,245,1) 0%, rgba(211,240,225,1) 100%)',
+  'linear-gradient(180deg, rgba(242,247,255,1) 0%, rgba(214,226,245,1) 100%)',
+  'linear-gradient(180deg, rgba(250,240,255,1) 0%, rgba(228,214,241,1) 100%)',
+  'linear-gradient(180deg, rgba(250,250,250,1) 0%, rgba(228,228,228,1) 100%)',
+] as const;
+
+const CARD_LAYER_FILL_ALLOWED_PATTERN = /^[#(),.%\sa-zA-Z0-9-]+$/u;
+const CARD_LAYER_FILL_COLOR_PATTERNS = [
+  /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/iu,
+  /^rgba?\([^)]+\)$/iu,
+  /^hsla?\([^)]+\)$/iu,
+];
+
+export function normalizeCardLayerFill(
+  value: string | null | undefined,
+  fallback: string,
+) {
+  const normalized = value?.trim() ?? '';
+
+  if (
+    normalized.length === 0 ||
+    normalized.length > 320 ||
+    !CARD_LAYER_FILL_ALLOWED_PATTERN.test(normalized)
+  ) {
+    return fallback;
+  }
+
+  if (CARD_LAYER_FILL_COLOR_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return normalized;
+  }
+
+  if (/^linear-gradient\(.+\)$/iu.test(normalized)) {
+    return normalized;
+  }
+
+  return fallback;
+}
+
 export function getDefaultDecorativePattern(): CardDecorativePattern {
   return {
     svgUrl: '',
@@ -166,6 +223,8 @@ export function getDefaultCardVisuals(): CardVisuals {
     frameStyle: 'aurora',
     accentColor: CARD_ACCENT_SWATCHES[0],
     decorativePattern: getDefaultDecorativePattern(),
+    layerOneFill: DEFAULT_CARD_LAYER_ONE_FILL,
+    layerTwoFill: DEFAULT_CARD_LAYER_TWO_FILL,
   };
 }
 

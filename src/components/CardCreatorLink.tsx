@@ -12,12 +12,17 @@ export function CardCreatorLink({
   scaleMultiplier = 1,
   visible = false,
   className = '',
+  action,
 }: {
   card: Pick<CardDefinition, 'creatorName' | 'creatorShareSlug'>;
   cameraZ: number;
   scaleMultiplier?: number;
   visible?: boolean;
   className?: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 }) {
   const creatorShareSlug = card.creatorShareSlug?.trim();
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -84,17 +89,33 @@ export function CardCreatorLink({
       role="presentation"
     >
       <div
-        className={`card-creator-link ${visible ? 'is-visible' : ''}`}
+        className={`card-creator-link ${visible ? 'is-visible' : ''} ${
+          action ? 'card-creator-link--with-action' : ''
+        }`.trim()}
         style={topOffset !== null ? { top: `${Math.round(topOffset)}px` } : undefined}
       >
-        <span className="card-creator-link__label">Автор</span>
-        <Link
-          className="card-creator-link__name"
-          onClick={(event) => event.stopPropagation()}
-          to={`/collection/${encodeURIComponent(creatorShareSlug)}`}
-        >
-          @{creatorShareSlug}
-        </Link>
+        <div className="card-creator-link__meta">
+          <span className="card-creator-link__label">Автор</span>
+          <Link
+            className="card-creator-link__name"
+            onClick={(event) => event.stopPropagation()}
+            to={`/collection/${encodeURIComponent(creatorShareSlug)}`}
+          >
+            @{creatorShareSlug}
+          </Link>
+        </div>
+        {action ? (
+          <button
+            className="card-creator-link__action"
+            onClick={(event) => {
+              event.stopPropagation();
+              action.onClick();
+            }}
+            type="button"
+          >
+            {action.label}
+          </button>
+        ) : null}
       </div>
     </div>
   );

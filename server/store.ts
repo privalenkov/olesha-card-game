@@ -37,6 +37,7 @@ import type {
 import {
   clampEffectShimmer,
   getDefaultCardVisuals,
+  normalizeCardLayerFill,
   normalizeCardTreatmentEffect,
   normalizeCardTreatmentEffects,
 } from '../src/game/types.js';
@@ -394,13 +395,49 @@ function normalizeDecorativePattern(pattern?: Partial<CardDecorativePattern> | n
   };
 }
 
-function normalizeVisuals(visuals?: CardVisuals | null): CardVisuals {
+interface StoredVisualPatternPayload {
+  decorativePattern?: Partial<CardDecorativePattern>;
+  layerOneFill?: string;
+  layerTwoFill?: string;
+}
+
+type PartialCardVisualsInput = Omit<Partial<CardVisuals>, 'decorativePattern'> & {
+  decorativePattern?: Partial<CardDecorativePattern> | null;
+};
+
+function parseStoredVisualPatternPayload(
+  value: string | null | undefined,
+): StoredVisualPatternPayload {
+  const parsed = parseJsonObject<Record<string, unknown>>(value, {});
+  const decorativePattern =
+    typeof parsed.decorativePattern === 'object' && parsed.decorativePattern !== null
+      ? (parsed.decorativePattern as Partial<CardDecorativePattern>)
+      : (parsed as Partial<CardDecorativePattern>);
+
+  return {
+    decorativePattern,
+    layerOneFill: typeof parsed.layerOneFill === 'string' ? parsed.layerOneFill : undefined,
+    layerTwoFill: typeof parsed.layerTwoFill === 'string' ? parsed.layerTwoFill : undefined,
+  };
+}
+
+function serializeStoredVisualPatternPayload(visuals: CardVisuals) {
+  return JSON.stringify({
+    decorativePattern: visuals.decorativePattern,
+    layerOneFill: visuals.layerOneFill,
+    layerTwoFill: visuals.layerTwoFill,
+  } satisfies StoredVisualPatternPayload);
+}
+
+function normalizeVisuals(visuals?: PartialCardVisualsInput | null): CardVisuals {
   const defaults = getDefaultCardVisuals();
 
   return {
     frameStyle: visuals?.frameStyle ?? defaults.frameStyle,
     accentColor: visuals?.accentColor ?? defaults.accentColor,
     decorativePattern: normalizeDecorativePattern(visuals?.decorativePattern),
+    layerOneFill: normalizeCardLayerFill(visuals?.layerOneFill, defaults.layerOneFill),
+    layerTwoFill: normalizeCardLayerFill(visuals?.layerTwoFill, defaults.layerTwoFill),
   };
 }
 
@@ -480,11 +517,8 @@ function collectStoredAssetUrlsFromRow(
 ) {
   addStoredAssetUrl(target, row.url_image);
 
-  const decorativePattern = parseJsonObject<Partial<CardDecorativePattern>>(
-    row.visual_pattern_json,
-    {},
-  );
-  addStoredAssetUrl(target, decorativePattern.svgUrl);
+  const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
+  addStoredAssetUrl(target, storedVisuals.decorativePattern?.svgUrl);
 
   const effectLayers = parseJsonArray<Partial<CardEffectLayer>>(row.effect_layers_json, []);
 
@@ -810,15 +844,15 @@ function getFinish(rarity: Rarity): CardFinish {
 }
 
 function toCardDefinition(row: CardRow): CardDefinition {
+  const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
   const visuals =
     row.visual_frame_style && row.visual_accent_color
       ? normalizeVisuals({
           frameStyle: row.visual_frame_style,
           accentColor: row.visual_accent_color,
-          decorativePattern: parseJsonObject<CardDecorativePattern>(
-            row.visual_pattern_json,
-            getDefaultCardVisuals().decorativePattern,
-          ),
+          decorativePattern: storedVisuals.decorativePattern,
+          layerOneFill: storedVisuals.layerOneFill,
+          layerTwoFill: storedVisuals.layerTwoFill,
         })
       : undefined;
 
@@ -855,6 +889,7 @@ function toOwnedCard(row: OwnedCardRow): OwnedCard {
 }
 
 function toCardProposal(row: ProposalRow): CardProposal {
+  const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
   return {
     id: row.id,
     creatorUserId: row.creator_user_id,
@@ -868,10 +903,9 @@ function toCardProposal(row: ProposalRow): CardProposal {
     visuals: normalizeVisuals({
       frameStyle: row.visual_frame_style,
       accentColor: row.visual_accent_color,
-      decorativePattern: parseJsonObject<CardDecorativePattern>(
-        row.visual_pattern_json,
-        getDefaultCardVisuals().decorativePattern,
-      ),
+      decorativePattern: storedVisuals.decorativePattern,
+      layerOneFill: storedVisuals.layerOneFill,
+      layerTwoFill: storedVisuals.layerTwoFill,
     }),
     allowedEffects: normalizeCardTreatmentEffects(
       parseJsonArray<string>(row.allowed_effects_json, []),
@@ -2047,7 +2081,7 @@ export function createGameStore(config: ServerConfig) {
       visuals.accentColor,
       LEGACY_VISUAL_EFFECT_PATTERN,
       LEGACY_VISUAL_EFFECT_PLACEMENT,
-      JSON.stringify(visuals.decorativePattern),
+      serializeStoredVisualPatternPayload(visuals),
       JSON.stringify(grant.allowedEffects),
       grant.maxEffectLayers,
       JSON.stringify([]),
@@ -2081,7 +2115,7 @@ export function createGameStore(config: ServerConfig) {
       default_finish: payload.defaultFinish,
       visual_frame_style: visuals.frameStyle,
       visual_accent_color: visuals.accentColor,
-      visual_pattern_json: JSON.stringify(visuals.decorativePattern),
+      visual_pattern_json: serializeStoredVisualPatternPayload(visuals),
       effect_layers_json: JSON.stringify(effectLayers),
       updated_at: new Date().toISOString(),
     }) as ProposalRow | undefined;

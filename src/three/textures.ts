@@ -6,6 +6,10 @@ import {
   type Texture,
 } from 'three';
 import cardBackTextureUrl from '../assets/cards/card-back.png';
+import cardLayerOneFrontUrl from '../assets/cards/card-layer-one-front.png';
+import cardLayerTwoFrontUrl from '../assets/cards/card-layer-two-front.png';
+import emptyStarUrl from '../assets/cards/empty-star.svg';
+import fillStarUrl from '../assets/cards/fill-star.svg';
 import {
   CARD_PREVIEW_HEIGHT,
   CARD_PREVIEW_WIDTH,
@@ -18,8 +22,8 @@ import { finishMeta, rarityMeta } from '../game/config';
 import {
   type CardEffectLayer,
   getDefaultCardVisuals,
+  normalizeCardLayerFill,
   normalizeCardTreatmentEffect,
-  type CardFrameStyle,
   type CardTreatmentEffect,
   type CardVisuals,
   type OwnedCard,
@@ -45,44 +49,80 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
 
   return [
     cardBackTextureUrl,
+    cardLayerOneFrontUrl,
+    cardLayerTwoFrontUrl,
+    emptyStarUrl,
+    fillStarUrl,
     card.urlImage,
     card.visuals?.decorativePattern.svgUrl ?? '',
     ...getCardEffectLayers(card).map((layer) => layer.maskUrl),
   ].filter(Boolean);
 }
 
-const frameStylePalette: Record<
-  CardFrameStyle,
-  {
-    start: string;
-    end: string;
-    shadow: string;
-  }
-> = {
-  aurora: {
-    start: '#10273d',
-    end: '#1b4561',
-    shadow: '#09121a',
+type CardCornerRadius = number | [number, number, number, number];
+
+interface CardFrontBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius?: CardCornerRadius;
+}
+
+interface CardFrontLayout {
+  titleBox: CardFrontBox & { paddingX: number };
+  numberBox: CardFrontBox;
+  artBox: CardFrontBox;
+  rarityBox: CardFrontBox & { paddingX: number };
+  descriptionBox: CardFrontBox;
+  stars: {
+    size: number;
+    gap: number;
+  };
+}
+
+const CARD_FRONT_SURFACE_COLOR = '#f5f0dc';
+const CARD_FRONT_TEXT_COLOR = '#080910';
+const CARD_FRONT_LAYOUT: CardFrontLayout = {
+  titleBox: {
+    x: 64,
+    y: 50,
+    width: 582,
+    height: 76,
+    paddingX: 30,
+    radius: 38,
   },
-  ember: {
-    start: '#31150d',
-    end: '#6a2518',
-    shadow: '#170907',
+  numberBox: {
+    x: 718,
+    y: 50,
+    width: 264,
+    height: 76,
+    radius: 38,
   },
-  mint: {
-    start: '#0f2922',
-    end: '#1e5a4a',
-    shadow: '#06110f',
+  artBox: {
+    x: 62,
+    y: 205,
+    width: 908,
+    height: 612,
+    radius: [74, 74, 38, 38],
   },
-  onyx: {
-    start: '#111216',
-    end: '#31333d',
-    shadow: '#050609',
+  rarityBox: {
+    x: 62,
+    y: 863,
+    width: 908,
+    height: 106,
+    paddingX: 40,
+    radius: 38,
   },
-  plasma: {
-    start: '#1c1536',
-    end: '#274d6f',
-    shadow: '#090711',
+  descriptionBox: {
+    x: 96,
+    y: 1035,
+    width: 840,
+    height: 262,
+  },
+  stars: {
+    size: 44,
+    gap: 22,
   },
 };
 
@@ -117,7 +157,7 @@ function drawRoundedPanel(
   y: number,
   width: number,
   height: number,
-  radius: number,
+  radius: CardCornerRadius,
 ) {
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, radius);
@@ -158,6 +198,497 @@ function drawImageCover(
   }
 
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+}
+
+function parseHexColor(color: string) {
+  const normalized = color.trim();
+  const shortMatch = normalized.match(/^#([0-9a-f]{3})$/i);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].split('');
+    return {
+      r: Number.parseInt(r + r, 16),
+      g: Number.parseInt(g + g, 16),
+      b: Number.parseInt(b + b, 16),
+    };
+  }
+
+  const longMatch = normalized.match(/^#([0-9a-f]{6})$/i);
+  if (!longMatch) {
+    return { r: 255, g: 255, b: 255 };
+  }
+
+  const value = longMatch[1];
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16),
+    g: Number.parseInt(value.slice(2, 4), 16),
+    b: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function mixHexColors(colorA: string, colorB: string, amount: number) {
+  const t = Math.max(0, Math.min(amount, 1));
+  const a = parseHexColor(colorA);
+  const b = parseHexColor(colorB);
+  const r = Math.round(a.r + (b.r - a.r) * t);
+  const g = Math.round(a.g + (b.g - a.g) * t);
+  const bChannel = Math.round(a.b + (b.b - a.b) * t);
+
+  return `rgb(${r}, ${g}, ${bChannel})`;
+}
+
+interface ParsedGradientStop {
+  color: string;
+  position: number | null;
+}
+
+function splitGradientArguments(value: string) {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+
+  for (const character of value) {
+    if (character === ',' && depth === 0) {
+      if (current.trim()) {
+        parts.push(current.trim());
+      }
+      current = '';
+      continue;
+    }
+
+    if (character === '(') {
+      depth += 1;
+    } else if (character === ')') {
+      depth = Math.max(0, depth - 1);
+    }
+
+    current += character;
+  }
+
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+
+  return parts;
+}
+
+function isSupportedCanvasColor(value: string) {
+  return (
+    /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/iu.test(value) ||
+    /^rgba?\([^)]+\)$/iu.test(value) ||
+    /^hsla?\([^)]+\)$/iu.test(value)
+  );
+}
+
+function parseGradientStop(value: string): ParsedGradientStop | null {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const positionedMatch = normalized.match(/^(.*)\s(-?\d+(?:\.\d+)?)%\s*$/u);
+  if (positionedMatch) {
+    return {
+      color: positionedMatch[1].trim(),
+      position: Math.max(0, Math.min(Number(positionedMatch[2]) / 100, 1)),
+    };
+  }
+
+  return {
+    color: normalized,
+    position: null,
+  };
+}
+
+function resolveGradientStops(
+  stops: ParsedGradientStop[],
+): Array<{ color: string; position: number }> {
+  if (stops.length === 0) {
+    return [];
+  }
+
+  const total = Math.max(stops.length - 1, 1);
+  const resolved = stops.map((stop, index) => ({
+    color: stop.color,
+    position: stop.position ?? index / total,
+  }));
+
+  if (resolved.length === 1) {
+    resolved.push({
+      color: resolved[0].color,
+      position: 1,
+    });
+  }
+
+  return resolved.sort((left, right) => left.position - right.position);
+}
+
+function createLinearGradientFillStyle(
+  ctx: CanvasRenderingContext2D,
+  fillValue: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const gradientMatch = fillValue.match(/^linear-gradient\((.*)\)$/iu);
+  if (!gradientMatch) {
+    return null;
+  }
+
+  const parts = splitGradientArguments(gradientMatch[1]);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  let angle = 180;
+  let stopParts = parts;
+  const angleMatch = parts[0].match(/^(-?\d+(?:\.\d+)?)deg$/iu);
+
+  if (angleMatch) {
+    angle = Number(angleMatch[1]);
+    stopParts = parts.slice(1);
+  }
+
+  const stops = resolveGradientStops(
+    stopParts
+      .map(parseGradientStop)
+      .filter((stop): stop is ParsedGradientStop => Boolean(stop && stop.color.length > 0)),
+  );
+
+  if (stops.length < 2) {
+    return null;
+  }
+
+  const radians = ((angle - 90) * Math.PI) / 180;
+  const dx = Math.cos(radians);
+  const dy = Math.sin(radians);
+  const halfSpan = Math.abs(dx) * (width / 2) + Math.abs(dy) * (height / 2);
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const gradient = ctx.createLinearGradient(
+    centerX - dx * halfSpan,
+    centerY - dy * halfSpan,
+    centerX + dx * halfSpan,
+    centerY + dy * halfSpan,
+  );
+
+  stops.forEach((stop) => {
+    gradient.addColorStop(stop.position, stop.color);
+  });
+
+  return gradient;
+}
+
+function createCanvasFillStyle(
+  ctx: CanvasRenderingContext2D,
+  fillValue: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fallbackValue: string,
+): string | CanvasGradient {
+  const candidates = [
+    normalizeCardLayerFill(fillValue, fallbackValue),
+    normalizeCardLayerFill(fallbackValue, CARD_FRONT_SURFACE_COLOR),
+    CARD_FRONT_SURFACE_COLOR,
+  ];
+
+  for (const candidate of candidates) {
+    if (isSupportedCanvasColor(candidate)) {
+      return candidate;
+    }
+
+    const gradient = createLinearGradientFillStyle(ctx, candidate, x, y, width, height);
+    if (gradient) {
+      return gradient;
+    }
+  }
+
+  return CARD_FRONT_SURFACE_COLOR;
+}
+
+function fillRectWithVisualFill(
+  ctx: CanvasRenderingContext2D,
+  fillValue: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fallbackValue: string,
+) {
+  ctx.fillStyle = createCanvasFillStyle(ctx, fillValue, x, y, width, height, fallbackValue);
+  ctx.fillRect(x, y, width, height);
+}
+
+function formatCardSerial(card: OwnedCard) {
+  const source = card.instanceId || card.id || card.title;
+  let hash = 0;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) % 90000;
+  }
+
+  return String(hash + 10000).padStart(5, '0');
+}
+
+function getRarityStarCount(rarity: OwnedCard['rarity']) {
+  switch (rarity) {
+    case 'common':
+      return 1;
+    case 'uncommon':
+      return 2;
+    case 'rare':
+      return 3;
+    case 'epic':
+      return 4;
+    case 'veryrare':
+      return 5;
+  }
+}
+
+function createWrappedTextLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return [''];
+  }
+
+  const lines: string[] = [];
+  let line = '';
+
+  words.forEach((word) => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth || !line) {
+      line = candidate;
+      return;
+    }
+
+    lines.push(line);
+    line = word;
+  });
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function drawTintedTemplateLayer(
+  ctx: CanvasRenderingContext2D,
+  layerImage: HTMLImageElement | null,
+  fillValue: string,
+  options: {
+    detailAlpha?: number;
+    fallbackRadius?: number;
+    fallbackValue?: string;
+  } = {},
+) {
+  const detailAlpha = options.detailAlpha ?? 0.72;
+  const fallbackRadius = options.fallbackRadius ?? 56;
+  const fallbackValue = options.fallbackValue ?? CARD_FRONT_SURFACE_COLOR;
+
+  if (layerImage) {
+    const baseCanvas = createCanvas(ctx.canvas.width, ctx.canvas.height);
+    const baseContext = baseCanvas.getContext('2d');
+
+    if (baseContext) {
+      fillRectWithVisualFill(
+        baseContext,
+        fillValue,
+        0,
+        0,
+        baseCanvas.width,
+        baseCanvas.height,
+        fallbackValue,
+      );
+      baseContext.globalCompositeOperation = 'destination-in';
+      baseContext.drawImage(layerImage, 0, 0, baseCanvas.width, baseCanvas.height);
+      ctx.drawImage(baseCanvas, 0, 0);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = detailAlpha;
+      ctx.drawImage(layerImage, 0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.restore();
+      return;
+    }
+  }
+
+  ctx.fillStyle = createCanvasFillStyle(
+    ctx,
+    fillValue,
+    0,
+    0,
+    ctx.canvas.width,
+    ctx.canvas.height,
+    fallbackValue,
+  );
+  drawRoundedPanel(ctx, 0, 0, ctx.canvas.width, ctx.canvas.height, fallbackRadius);
+  ctx.fill();
+}
+
+function drawDecorativePatternAcrossCanvas(
+  ctx: CanvasRenderingContext2D,
+  decorativePatternImage: HTMLImageElement | null,
+  pattern: CardVisuals['decorativePattern'],
+) {
+  if (!decorativePatternImage || !pattern.svgUrl || pattern.opacity <= 0.001) {
+    return;
+  }
+
+  const naturalWidth = Math.max(decorativePatternImage.width, 1);
+  const naturalHeight = Math.max(decorativePatternImage.height, 1);
+  const longestSide = Math.max(naturalWidth, naturalHeight, 1);
+  const drawWidth = Math.max(10, (naturalWidth / longestSide) * pattern.size);
+  const drawHeight = Math.max(10, (naturalHeight / longestSide) * pattern.size);
+  const stepX = Math.max(drawWidth + pattern.gap, 1);
+  const stepY = Math.max(drawHeight + pattern.gap, 1);
+  const startX = -drawWidth + positiveModulo(pattern.offsetX, stepX);
+  const startY = -drawHeight + positiveModulo(pattern.offsetY, stepY);
+
+  ctx.save();
+  ctx.globalAlpha = pattern.opacity;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  for (let y = startY; y < ctx.canvas.height + stepY; y += stepY) {
+    for (let x = startX; x < ctx.canvas.width + stepX; x += stepX) {
+      ctx.drawImage(decorativePatternImage, x, y, drawWidth, drawHeight);
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawSingleLineTextInBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  box: CardFrontBox,
+  options: {
+    maxFontSize: number;
+    minFontSize: number;
+    fontWeight?: string;
+    fontFamily?: string;
+    color?: string;
+    align?: CanvasTextAlign;
+    paddingX?: number;
+  },
+) {
+  const fontFamily = options.fontFamily ?? 'Space Grotesk, sans-serif';
+  const fontWeight = options.fontWeight ?? '700';
+  const paddingX = options.paddingX ?? 0;
+  let fontSize = options.maxFontSize;
+
+  while (fontSize > options.minFontSize) {
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    if (ctx.measureText(text).width <= box.width - paddingX * 2) {
+      break;
+    }
+
+    fontSize -= 1;
+  }
+
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = options.color ?? CARD_FRONT_TEXT_COLOR;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = options.align ?? 'left';
+
+  const centerY = box.y + box.height / 2;
+  if ((options.align ?? 'left') === 'center') {
+    ctx.fillText(text, box.x + box.width / 2, centerY);
+    return;
+  }
+
+  if ((options.align ?? 'left') === 'right') {
+    ctx.fillText(text, box.x + box.width - paddingX, centerY);
+    return;
+  }
+
+  ctx.fillText(text, box.x + paddingX, centerY);
+}
+
+function drawParagraphTextInBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  box: CardFrontBox,
+  options: {
+    maxFontSize: number;
+    minFontSize: number;
+    lineHeightMultiplier?: number;
+    fontWeight?: string;
+    fontFamily?: string;
+    color?: string;
+  },
+) {
+  const fontFamily = options.fontFamily ?? 'Sora, sans-serif';
+  const fontWeight = options.fontWeight ?? '500';
+  const lineHeightMultiplier = options.lineHeightMultiplier ?? 1.26;
+  let fontSize = options.maxFontSize;
+  let lines = [text];
+  let lineHeight = fontSize * lineHeightMultiplier;
+
+  while (fontSize > options.minFontSize) {
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    lines = createWrappedTextLines(ctx, text, box.width);
+    lineHeight = fontSize * lineHeightMultiplier;
+
+    if (lines.length * lineHeight <= box.height) {
+      break;
+    }
+
+    fontSize -= 1;
+  }
+
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = options.color ?? CARD_FRONT_TEXT_COLOR;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  lines.forEach((line, index) => {
+    ctx.fillText(line, box.x, box.y + index * lineHeight);
+  });
+}
+
+function drawRarityStars(
+  ctx: CanvasRenderingContext2D,
+  card: OwnedCard,
+  box: CardFrontLayout['rarityBox'],
+  fillStarImage: HTMLImageElement | null,
+  emptyStarImage: HTMLImageElement | null,
+  starConfig: CardFrontLayout['stars'],
+) {
+  const totalStars = 5;
+  const filledStars = getRarityStarCount(card.rarity);
+  const totalWidth = totalStars * starConfig.size + (totalStars - 1) * starConfig.gap;
+  const startX = box.x + box.width - box.paddingX - totalWidth;
+  const startY = box.y + (box.height - starConfig.size) / 2;
+
+  for (let index = 0; index < totalStars; index += 1) {
+    const x = startX + index * (starConfig.size + starConfig.gap);
+    const starImage = index < filledStars ? fillStarImage : emptyStarImage;
+
+    if (starImage) {
+      ctx.drawImage(starImage, x, startY, starConfig.size, starConfig.size);
+      continue;
+    }
+
+    ctx.fillStyle = index < filledStars ? '#EC0B43' : '#080910';
+    ctx.beginPath();
+    ctx.arc(
+      x + starConfig.size / 2,
+      startY + starConfig.size / 2,
+      starConfig.size / 2.8,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
 }
 
 function ensureRemoteImage(url: string) {
@@ -400,8 +931,10 @@ function drawDecorativePattern(
 function drawDecorativePatternMask(
   card: OwnedCard,
   decorativePatternImage: HTMLImageElement | null,
+  layerOneImage: HTMLImageElement | null,
+  layerTwoImage: HTMLImageElement | null,
 ) {
-  const canvas = createCardTextureLayoutCanvas();
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -409,20 +942,19 @@ function drawDecorativePatternMask(
   }
 
   const visuals = getCardVisuals(card);
-  const heroX = 78;
-  const heroY = 78;
-  const heroWidth = canvas.width - 156;
-  const heroHeight = 344;
+  drawDecorativePatternAcrossCanvas(ctx, decorativePatternImage, visuals.decorativePattern);
 
-  drawDecorativePattern(
-    ctx,
-    decorativePatternImage,
-    visuals.decorativePattern,
-    heroX,
-    heroY,
-    heroWidth,
-    heroHeight,
-  );
+  if (layerOneImage) {
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(layerOneImage, 0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  if (layerTwoImage) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(layerTwoImage, 0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 
   return canvas;
 }
@@ -1550,170 +2082,184 @@ function drawCardFront(
   artImage: HTMLImageElement | null,
   effectMaskImages: Array<HTMLImageElement | null>,
   decorativePatternImage: HTMLImageElement | null,
+  layerOneImage: HTMLImageElement | null,
+  layerTwoImage: HTMLImageElement | null,
+  fillStarImage: HTMLImageElement | null,
+  emptyStarImage: HTMLImageElement | null,
   options: CardFrontTextureOptions = {},
 ) {
-  const canvas = createCardTextureLayoutCanvas();
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
     return canvas;
   }
 
+  const layout = CARD_FRONT_LAYOUT;
   const meta = rarityMeta[card.rarity];
-  const finish = finishMeta[card.finish];
   const visuals = getCardVisuals(card);
-  const palette = frameStylePalette[visuals.frameStyle];
   const accent = visuals.accentColor;
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, palette.start);
-  gradient.addColorStop(0.45, palette.shadow);
-  gradient.addColorStop(1, palette.end);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const detailBorderColor = mixHexColors(accent, '#111111', 0.34);
 
-  const bloom = ctx.createRadialGradient(
-    canvas.width * 0.28,
-    canvas.height * 0.16,
-    40,
-    canvas.width * 0.34,
-    canvas.height * 0.24,
-    640,
-  );
-  bloom.addColorStop(0, `${accent}b8`);
-  bloom.addColorStop(0.3, `${meta.hue}2f`);
-  bloom.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = bloom;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawTintedTemplateLayer(ctx, layerOneImage, visuals.layerOneFill, {
+    detailAlpha: 0.72,
+    fallbackRadius: 56,
+    fallbackValue: getDefaultCardVisuals().layerOneFill,
+  });
 
-  const outerGradient = ctx.createLinearGradient(48, 48, canvas.width - 48, canvas.height - 48);
-  outerGradient.addColorStop(0, `${accent}88`);
-  outerGradient.addColorStop(0.45, 'rgba(255,255,255,0.16)');
-  outerGradient.addColorStop(1, `${meta.hue}88`);
-  drawRoundedPanel(ctx, 42, 42, canvas.width - 84, canvas.height - 84, 70);
-  ctx.strokeStyle = outerGradient;
-  ctx.lineWidth = 7;
-  ctx.stroke();
-
-  const heroX = 78;
-  const heroY = 78;
-  const heroWidth = canvas.width - 156;
-  const heroHeight = 344;
-
-  drawRoundedPanel(ctx, heroX, heroY, heroWidth, heroHeight, 42);
-  const heroGradient = ctx.createLinearGradient(72, 72, canvas.width - 72, 440);
-  heroGradient.addColorStop(0, `${meta.hue}5e`);
-  heroGradient.addColorStop(0.4, 'rgba(255,255,255,0.07)');
-  heroGradient.addColorStop(1, `${accent}88`);
-  ctx.fillStyle = heroGradient;
-  ctx.fill();
-
-  const heroClip = new Path2D();
-  heroClip.roundRect(heroX, heroY, heroWidth, heroHeight, 42);
-  ctx.save();
-  ctx.clip(heroClip);
-  if (artImage) {
-    ctx.save();
-    ctx.filter = 'saturate(1.08) contrast(1.04)';
-    drawImageCover(ctx, artImage, heroX, heroY, heroWidth, heroHeight);
-    ctx.restore();
-
-    const artShade = ctx.createLinearGradient(heroX, heroY, heroX, heroY + heroHeight);
-    artShade.addColorStop(0, 'rgba(5, 7, 11, 0.12)');
-    artShade.addColorStop(0.52, 'rgba(5, 7, 11, 0)');
-    artShade.addColorStop(1, 'rgba(5, 7, 11, 0.2)');
-    ctx.fillStyle = artShade;
-    ctx.fillRect(heroX, heroY, heroWidth, heroHeight);
-  } else {
-    drawRarityMotif(ctx, card.rarity, canvas.width, 344, meta.hue, meta.accent);
-  }
-
-  const sheen = ctx.createLinearGradient(0, 0, canvas.width, 420);
-  sheen.addColorStop(0, 'rgba(255,255,255,0.28)');
-  sheen.addColorStop(0.18, 'rgba(255,255,255,0)');
-  sheen.addColorStop(0.75, `${accent}18`);
-  sheen.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = sheen;
-  ctx.fillRect(0, 0, canvas.width, 460);
-  ctx.restore();
-
-  drawDecorativePattern(
+  drawDecorativePatternAcrossCanvas(
     ctx,
     decorativePatternImage,
     visuals.decorativePattern,
-    heroX,
-    heroY,
-    heroWidth,
-    heroHeight,
   );
 
-  ctx.fillStyle = accent;
-  ctx.font = '700 32px Space Grotesk, sans-serif';
-  ctx.fillText(meta.label.toUpperCase(), 112, 128);
-  ctx.textAlign = 'right';
-  ctx.fillText(finish.label.toUpperCase(), canvas.width - 112, 128);
+  if (layerTwoImage) {
+    drawTintedTemplateLayer(ctx, layerTwoImage, visuals.layerTwoFill, {
+      detailAlpha: 0.66,
+      fallbackRadius: 56,
+      fallbackValue: CARD_FRONT_SURFACE_COLOR,
+    });
+  }
 
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  ctx.font = '700 44px Space Grotesk, sans-serif';
-  ctx.fillText('CREATOR EDITION', canvas.width / 2, 382);
+  const artClip = new Path2D();
+  artClip.roundRect(
+    layout.artBox.x,
+    layout.artBox.y,
+    layout.artBox.width,
+    layout.artBox.height,
+    layout.artBox.radius ?? 0,
+  );
 
-  ctx.textAlign = 'left';
-  ctx.font = '700 80px Space Grotesk, sans-serif';
-  wrapText(ctx, card.title, 112, 542, 800, 84);
-  ctx.font = '500 34px Sora, sans-serif';
-  ctx.fillStyle = '#eff6ff';
-  wrapText(ctx, card.description, 112, 746, 800, 52);
+  ctx.save();
+  ctx.clip(artClip);
+  ctx.fillStyle = CARD_FRONT_SURFACE_COLOR;
+  ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
 
-  ctx.font = '600 26px Sora, sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.78)';
-  ctx.fillText(`PACK ${String(card.packNumber).padStart(2, '0')}`, 112, 1402);
-  ctx.textAlign = 'right';
-  ctx.fillText(`#${card.instanceId.slice(0, 8).toUpperCase()}`, canvas.width - 112, 1402);
+  if (artImage) {
+    ctx.save();
+    ctx.filter = 'saturate(1.04) contrast(1.03)';
+    drawImageCover(
+      ctx,
+      artImage,
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.width,
+      layout.artBox.height,
+    );
+    ctx.restore();
 
-  const entries = [
-    ['Power', card.stats.power],
-    ['Cringe', card.stats.cringe],
-    ['Fame', card.stats.fame],
-    ['Rarity', card.stats.rarityScore],
-    ['Humor', card.stats.humor],
-  ] as const;
+    const artShade = ctx.createLinearGradient(
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.x,
+      layout.artBox.y + layout.artBox.height,
+    );
+    artShade.addColorStop(0, 'rgba(5, 7, 11, 0.08)');
+    artShade.addColorStop(0.56, 'rgba(5, 7, 11, 0)');
+    artShade.addColorStop(1, 'rgba(5, 7, 11, 0.12)');
+    ctx.fillStyle = artShade;
+    ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
+  } else {
+    const fallbackGradient = ctx.createLinearGradient(
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.x + layout.artBox.width,
+      layout.artBox.y + layout.artBox.height,
+    );
+    fallbackGradient.addColorStop(0, mixHexColors(meta.hue, '#ffffff', 0.42));
+    fallbackGradient.addColorStop(1, mixHexColors(meta.accent, '#111111', 0.24));
+    ctx.fillStyle = fallbackGradient;
+    ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
 
-  entries.forEach(([label, value], index) => {
-    const y = 988 + index * 84;
-    ctx.fillStyle = 'rgba(255,255,255,0.72)';
-    ctx.font = '600 24px Sora, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(label, 112, y);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(String(value), canvas.width - 112, y);
+    ctx.save();
+    ctx.translate(layout.artBox.x, layout.artBox.y);
+    drawRarityMotif(ctx, card.rarity, layout.artBox.width, layout.artBox.height, meta.hue, meta.accent);
+    ctx.restore();
+  }
+  ctx.restore();
 
-    const barGradient = ctx.createLinearGradient(112, y + 26, canvas.width - 112, y + 26);
-    barGradient.addColorStop(0, meta.hue);
-    barGradient.addColorStop(1, meta.accent);
+  drawRoundedPanel(
+    ctx,
+    layout.artBox.x,
+    layout.artBox.y,
+    layout.artBox.width,
+    layout.artBox.height,
+    layout.artBox.radius ?? 0,
+  );
+  ctx.strokeStyle = detailBorderColor;
+  ctx.lineWidth = 5;
+  ctx.stroke();
 
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    drawRoundedPanel(ctx, 112, y + 18, canvas.width - 224, 18, 999);
-    ctx.fill();
+  drawSingleLineTextInBox(
+    ctx,
+    card.title.toLocaleUpperCase(),
+    layout.titleBox,
+    {
+      maxFontSize: 30,
+      minFontSize: 24,
+      paddingX: layout.titleBox.paddingX,
+    },
+  );
 
-    ctx.fillStyle = barGradient;
-    drawRoundedPanel(ctx, 112, y + 18, ((canvas.width - 224) * value) / 100, 18, 999);
-    ctx.fill();
-  });
+  drawSingleLineTextInBox(
+    ctx,
+    `NO. ${formatCardSerial(card)}`,
+    layout.numberBox,
+    {
+      maxFontSize: 30,
+      minFontSize: 22,
+      align: 'center',
+    },
+  );
 
-  const foilStampGradient = ctx.createLinearGradient(0, 0, 180, 180);
-  foilStampGradient.addColorStop(0, `${accent}b0`);
-  foilStampGradient.addColorStop(0.5, '#ffffff');
-  foilStampGradient.addColorStop(1, `${meta.hue}aa`);
-  ctx.fillStyle = foilStampGradient;
-  drawRoundedPanel(ctx, 742, 1188, 168, 168, 28);
-  ctx.fill();
-  ctx.fillStyle = '#0d1116';
-  ctx.textAlign = 'center';
-  ctx.font = '700 28px Space Grotesk, sans-serif';
-  ctx.fillText('OG', 826, 1264);
-  ctx.font = '600 18px Sora, sans-serif';
-  ctx.fillText('FOIL', 826, 1300);
+  drawRoundedPanel(
+    ctx,
+    layout.rarityBox.x,
+    layout.rarityBox.y,
+    layout.rarityBox.width,
+    layout.rarityBox.height,
+    layout.rarityBox.radius ?? 0,
+  );
+  ctx.strokeStyle = detailBorderColor;
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  drawSingleLineTextInBox(
+    ctx,
+    'РЕДКОСТЬ',
+    {
+      x: layout.rarityBox.x + layout.rarityBox.paddingX,
+      y: layout.rarityBox.y,
+      width: 250,
+      height: layout.rarityBox.height,
+    },
+    {
+      maxFontSize: 30,
+      minFontSize: 24,
+      fontWeight: '700',
+    },
+  );
+
+  drawRarityStars(
+    ctx,
+    card,
+    layout.rarityBox,
+    fillStarImage,
+    emptyStarImage,
+    layout.stars,
+  );
+
+  drawParagraphTextInBox(
+    ctx,
+    card.description,
+    layout.descriptionBox,
+    {
+      maxFontSize: 37,
+      minFontSize: 377,
+      lineHeightMultiplier: 1.24,
+      color: CARD_FRONT_TEXT_COLOR,
+    },
+  );
 
   if (options.includeTreatmentLayers ?? true) {
     drawTreatmentLayers(
@@ -1791,13 +2337,14 @@ function drawCardBackTexture(backImage: HTMLImageElement | null) {
 }
 
 function drawFoilLayer(card: OwnedCard) {
-  const canvas = createCardTextureLayoutCanvas();
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
     return canvas;
   }
 
+  const layout = CARD_FRONT_LAYOUT;
   const finish = finishMeta[card.finish];
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'rgba(0,0,0,0)';
@@ -1913,7 +2460,14 @@ function drawFoilLayer(card: OwnedCard) {
 
   if (finish.label !== 'Standard') {
     ctx.fillStyle = card.finish === 'prismatic' ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.36)';
-    drawRoundedPanel(ctx, 78, 78, canvas.width - 156, 344, 42);
+    drawRoundedPanel(
+      ctx,
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.width,
+      layout.artBox.height,
+      layout.artBox.radius ?? 0,
+    );
     ctx.fill();
   }
 
@@ -1921,64 +2475,101 @@ function drawFoilLayer(card: OwnedCard) {
 }
 
 function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElement | null>) {
-  const canvas = createCardTextureLayoutCanvas();
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
     return canvas;
   }
 
+  const layout = CARD_FRONT_LAYOUT;
   const finish = finishMeta[card.finish];
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const zone = (alpha: number) => `rgba(255,255,255,${alpha})`;
 
-  drawRoundedPanel(ctx, 56, 56, canvas.width - 112, canvas.height - 112, 66);
-  ctx.strokeStyle = zone(0.24 + finish.opacity * 0.18);
-  ctx.lineWidth = 20;
+  drawRoundedPanel(ctx, 18, 18, canvas.width - 36, canvas.height - 36, 52);
+  ctx.strokeStyle = zone(0.18 + finish.opacity * 0.16);
+  ctx.lineWidth = 16;
   ctx.stroke();
 
-  drawRoundedPanel(ctx, 78, 78, canvas.width - 156, 344, 42);
-  const heroGradient = ctx.createLinearGradient(0, 78, 0, 422);
-  heroGradient.addColorStop(0, zone(0.74 + finish.opacity * 0.12));
-  heroGradient.addColorStop(1, zone(0.42 + finish.opacity * 0.14));
-  ctx.fillStyle = heroGradient;
+  const artGradient = ctx.createLinearGradient(
+    0,
+    layout.artBox.y,
+    0,
+    layout.artBox.y + layout.artBox.height,
+  );
+  artGradient.addColorStop(0, zone(0.72 + finish.opacity * 0.1));
+  artGradient.addColorStop(1, zone(0.46 + finish.opacity * 0.12));
+  drawRoundedPanel(
+    ctx,
+    layout.artBox.x,
+    layout.artBox.y,
+    layout.artBox.width,
+    layout.artBox.height,
+    layout.artBox.radius ?? 0,
+  );
+  ctx.fillStyle = artGradient;
   ctx.fill();
 
-  drawRoundedPanel(ctx, 88, 98, 236, 54, 999);
-  ctx.fillStyle = zone(0.36);
+  drawRoundedPanel(
+    ctx,
+    layout.titleBox.x,
+    layout.titleBox.y,
+    layout.titleBox.width,
+    layout.titleBox.height,
+    layout.titleBox.radius ?? 0,
+  );
+  ctx.fillStyle = zone(0.22 + finish.opacity * 0.08);
   ctx.fill();
 
-  drawRoundedPanel(ctx, canvas.width - 324, 98, 236, 54, 999);
-  ctx.fillStyle = zone(0.3);
-  ctx.fill();
-
+  drawRoundedPanel(
+    ctx,
+    layout.numberBox.x,
+    layout.numberBox.y,
+    layout.numberBox.width,
+    layout.numberBox.height,
+    layout.numberBox.radius ?? 0,
+  );
   ctx.fillStyle = zone(0.18 + finish.opacity * 0.08);
-  drawRoundedPanel(ctx, 106, 500, canvas.width - 212, 180, 28);
   ctx.fill();
 
-  ctx.fillStyle = zone(0.12 + finish.opacity * 0.08);
-  drawRoundedPanel(ctx, 106, 712, canvas.width - 212, 116, 26);
+  drawRoundedPanel(
+    ctx,
+    layout.rarityBox.x,
+    layout.rarityBox.y,
+    layout.rarityBox.width,
+    layout.rarityBox.height,
+    layout.rarityBox.radius ?? 0,
+  );
+  ctx.fillStyle = zone(0.22 + finish.opacity * 0.1);
   ctx.fill();
 
-  if (card.rarity === 'rare' || card.rarity === 'epic' || card.rarity === 'veryrare') {
-    ctx.fillStyle = zone(card.rarity === 'rare' ? 0.18 : 0.24);
-    for (let index = 0; index < 5; index += 1) {
-      drawRoundedPanel(ctx, 112, 998 + index * 84, canvas.width - 224, 28, 999);
-      ctx.fill();
-    }
-  }
-
-  ctx.fillStyle = zone(card.finish === 'prismatic' ? 0.98 : 0.76);
-  drawRoundedPanel(ctx, 742, 1188, 168, 168, 28);
+  const descriptionGradient = ctx.createLinearGradient(
+    0,
+    layout.descriptionBox.y,
+    0,
+    layout.descriptionBox.y + layout.descriptionBox.height,
+  );
+  descriptionGradient.addColorStop(0, zone(0.08 + finish.opacity * 0.05));
+  descriptionGradient.addColorStop(1, zone(0.16 + finish.opacity * 0.07));
+  drawRoundedPanel(
+    ctx,
+    layout.descriptionBox.x - 14,
+    layout.descriptionBox.y - 8,
+    layout.descriptionBox.width + 28,
+    layout.descriptionBox.height + 24,
+    32,
+  );
+  ctx.fillStyle = descriptionGradient;
   ctx.fill();
 
   if (card.rarity === 'epic' || card.rarity === 'veryrare') {
     ctx.fillStyle = zone(card.rarity === 'veryrare' ? 0.44 : 0.28);
-    drawRoundedPanel(ctx, 72, 72, canvas.width - 144, canvas.height - 144, 60);
+    drawRoundedPanel(ctx, 28, 28, canvas.width - 56, canvas.height - 56, 48);
     ctx.strokeStyle = zone(card.rarity === 'veryrare' ? 0.34 : 0.22);
-    ctx.lineWidth = card.rarity === 'veryrare' ? 18 : 12;
+    ctx.lineWidth = card.rarity === 'veryrare' ? 14 : 10;
     ctx.stroke();
   }
 
@@ -2110,6 +2701,10 @@ export function useStackCardBackTexture() {
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
   const backImage = useRemoteImage(cardBackTextureUrl);
+  const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
+  const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
+  const emptyStarImage = useRemoteImage(emptyStarUrl);
+  const fillStarImage = useRemoteImage(fillStarUrl);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
@@ -2130,9 +2725,19 @@ export function useCardTextures(card: OwnedCard | null) {
     return {
       front: setupTexture(
         finalizeCardTextureCanvas(
-          drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
-            includeTreatmentLayers: false,
-          }),
+          drawCardFront(
+            card,
+            artImage,
+            effectMaskImages,
+            decorativePatternImage,
+            layerOneImage,
+            layerTwoImage,
+            fillStarImage,
+            emptyStarImage,
+            {
+              includeTreatmentLayers: false,
+            },
+          ),
         ),
       ),
       back: setupTexture(
@@ -2168,11 +2773,25 @@ export function useCardTextures(card: OwnedCard | null) {
         finalizeCardTextureCanvas(drawCrackedHoloMaskMap(card, effectMaskImages)),
       ),
     };
-  }, [artImage, backImage, card, decorativePatternImage, effectMaskImages]);
+  }, [
+    artImage,
+    backImage,
+    card,
+    decorativePatternImage,
+    effectMaskImages,
+    emptyStarImage,
+    fillStarImage,
+    layerOneImage,
+    layerTwoImage,
+  ]);
 }
 
 export function useCardPreviewImage(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
+  const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
+  const emptyStarImage = useRemoteImage(emptyStarUrl);
+  const fillStarImage = useRemoteImage(fillStarUrl);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
@@ -2186,9 +2805,19 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     }
 
     const sourceCanvas = finalizeCardTextureCanvas(
-      drawCardFront(card, artImage, effectMaskImages, decorativePatternImage, {
-        treatmentPaintStrength: 0.8,
-      }),
+      drawCardFront(
+        card,
+        artImage,
+        effectMaskImages,
+        decorativePatternImage,
+        layerOneImage,
+        layerTwoImage,
+        fillStarImage,
+        emptyStarImage,
+        {
+          treatmentPaintStrength: 0.8,
+        },
+      ),
     );
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = CARD_PREVIEW_WIDTH;
@@ -2205,11 +2834,22 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     } catch {
       return card.urlImage;
     }
-  }, [artImage, card, decorativePatternImage, effectMaskImages]);
+  }, [
+    artImage,
+    card,
+    decorativePatternImage,
+    effectMaskImages,
+    emptyStarImage,
+    fillStarImage,
+    layerOneImage,
+    layerTwoImage,
+  ]);
 }
 
 export function useDecorativePatternMaskImage(card: OwnedCard | null) {
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
+  const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
+  const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
 
   return useMemo(() => {
     if (!card) {
@@ -2217,7 +2857,7 @@ export function useDecorativePatternMaskImage(card: OwnedCard | null) {
     }
 
     const sourceCanvas = finalizeCardTextureCanvas(
-      drawDecorativePatternMask(card, decorativePatternImage),
+      drawDecorativePatternMask(card, decorativePatternImage, layerOneImage, layerTwoImage),
     );
 
     try {
@@ -2225,5 +2865,5 @@ export function useDecorativePatternMaskImage(card: OwnedCard | null) {
     } catch {
       return '';
     }
-  }, [card, decorativePatternImage]);
+  }, [card, decorativePatternImage, layerOneImage, layerTwoImage]);
 }

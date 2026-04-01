@@ -152,9 +152,19 @@
   gap: 8px;
 }
 
+.creator-field--picker {
+  gap: 12px;
+}
+
 .creator-field span {
   color: var(--copy-faint);
   font-size: 13px;
+}
+
+.creator-field__hint {
+  color: var(--copy-faint);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .creator-field input,
@@ -168,6 +178,21 @@
   color: #ffffff;
   font: inherit;
   resize: vertical;
+}
+
+.creator-gradient-picker {
+  width: fit-content;
+  max-width: 100%;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.creator-gradient-picker--disabled {
+  opacity: 0.56;
+  pointer-events: none;
 }
 
 .creator-swatches {

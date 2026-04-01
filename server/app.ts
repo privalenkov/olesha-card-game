@@ -10,6 +10,7 @@ import {
   CARD_FRAME_STYLE_OPTIONS,
   clampEffectShimmer,
   getDefaultCardVisuals,
+  normalizeCardLayerFill,
   normalizeCardTreatmentEffect,
   type CardDecorativePattern,
   type AdminProposalOverridePayload,
@@ -402,6 +403,14 @@ function normalizeProposalPayload(
     /^#[0-9a-fA-F]{6}$/u.test(visuals.accentColor.trim())
       ? visuals.accentColor.trim()
       : defaults.accentColor;
+  const layerOneFill = normalizeCardLayerFill(
+    typeof visuals?.layerOneFill === 'string' ? visuals.layerOneFill : null,
+    defaults.layerOneFill,
+  );
+  const layerTwoFill = normalizeCardLayerFill(
+    typeof visuals?.layerTwoFill === 'string' ? visuals.layerTwoFill : null,
+    defaults.layerTwoFill,
+  );
   const decorativePattern =
     typeof visuals?.decorativePattern === 'object' && visuals.decorativePattern !== null
       ? (visuals.decorativePattern as Record<string, unknown>)
@@ -508,6 +517,8 @@ function normalizeProposalPayload(
     visuals: {
       frameStyle,
       accentColor,
+      layerOneFill,
+      layerTwoFill,
       decorativePattern: {
         svgUrl: decorativePatternSvgUrl,
         size: Math.max(20, Math.min(decorativePatternSize, 320)),

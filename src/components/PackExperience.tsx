@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { buildCollectionCardShareUrl } from '../game/collectionPaths';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard, Rarity } from '../game/types';
 import { CardCreatorLink } from './CardCreatorLink';
@@ -120,8 +121,32 @@ function getShortestCarouselDelta(targetIndex: number, activeIndex: number, tota
   return Math.abs(backward) < Math.abs(forward) ? backward : forward;
 }
 
+async function copyTextToClipboard(text: string) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error('COPY_FAILED');
+  }
+}
+
 export function PackExperience() {
-  const { authenticated, error, openPack, state, timeUntilReset } = useGame();
+  const { authenticated, error, notify, openPack, state, timeUntilReset, user } = useGame();
   const [stage, setStage] = useState<ExperienceStage>('hero');
   const [heroRotationOffset, setHeroRotationOffset] = useState(0);
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -187,6 +212,34 @@ export function PackExperience() {
       currentVisibleCardId === completedIntroKey ? currentVisibleCardId : completedIntroKey,
     );
   }, []);
+  const handleShareCurrentCard = useCallback(async () => {
+    const playerSlug = user?.shareSlug?.trim();
+
+    if (!currentCard || !playerSlug) {
+      return;
+    }
+
+    const shareUrl = buildCollectionCardShareUrl(
+      window.location.origin,
+      playerSlug,
+      currentCard.instanceId,
+    );
+
+    try {
+      await copyTextToClipboard(shareUrl);
+      notify({
+        kind: 'success',
+        title: 'Ссылка скопирована',
+        message: 'Открой её, чтобы показать эту карточку другим пользователям.',
+      });
+    } catch {
+      notify({
+        kind: 'error',
+        title: 'Не удалось скопировать ссылку',
+        message: 'Браузер не дал доступ к буферу обмена.',
+      });
+    }
+  }, [currentCard, notify, user?.shareSlug]);
 
   useEffect(() => {
     return () => {
@@ -940,6 +993,16 @@ export function PackExperience() {
                   scaleMultiplier={0.7}
                   visible={visibleCreatorCardId === card.instanceId}
                   className="card-creator-link-anchor--pack"
+                  action={
+                    user?.shareSlug?.trim() && currentCard?.instanceId === card.instanceId
+                      ? {
+                          label: 'Поделиться',
+                          onClick: () => {
+                            void handleShareCurrentCard();
+                          },
+                        }
+                      : undefined
+                  }
                 />
               )}
             </div>

@@ -9,14 +9,14 @@
   position: absolute;
   left: 50%;
   display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  flex-direction: column;
+  align-items: center;
   font-family: 'Inter', sans-serif;
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
   opacity: 0;
-  pointer-events: auto;
+  pointer-events: none;
   transform: translateX(-50%) translateY(8px);
   transition:
     opacity 260ms ease,
@@ -25,7 +25,18 @@
 
 .card-creator-link.is-visible {
   opacity: 1;
+  pointer-events: auto;
   transform: translateX(-50%) translateY(0);
+}
+
+.card-creator-link__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.card-creator-link--with-action .card-creator-link__meta {
+  margin-bottom: 20px;
 }
 
 .card-creator-link__label {
@@ -41,6 +52,28 @@
 
 .card-creator-link__name:hover {
   color: #ec0b43;
+}
+
+.card-creator-link__action {
+  min-width: 132px;
+  padding: 10px 16px;
+  border: 1px solid #574ae2;
+  border-radius: 8px;
+  background: transparent;
+  color: #574ae2;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 180ms ease;
+}
+
+.card-creator-link__action:hover {
+  opacity: 0.8;
+}
+
+.card-creator-link__action:focus-visible {
+  outline: 2px solid rgba(87, 74, 226, 0.28);
+  outline-offset: 2px;
 }
 
 .card-creator-link-anchor--overlay,

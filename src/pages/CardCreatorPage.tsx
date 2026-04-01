@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import ColorPicker from 'react-best-gradient-color-picker';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CardEffectMaskEditor } from '../components/CardEffectMaskEditor';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
@@ -21,8 +22,8 @@ import { rarityMeta } from '../game/config';
 import { rarityOrder } from '../game/rarityBalance';
 import {
   CARD_ACCENT_SWATCHES,
-  CARD_FINISH_OPTIONS,
-  CARD_FRAME_STYLE_OPTIONS,
+  CARD_LAYER_ONE_FILL_PRESETS,
+  CARD_LAYER_TWO_FILL_PRESETS,
   CARD_TREATMENT_EFFECT_OPTIONS,
   CARD_TREATMENT_EFFECT_DESCRIPTIONS,
   CARD_TREATMENT_EFFECT_LABELS,
@@ -119,6 +120,51 @@ function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
 function isDataUrl(value: string) {
   return value.startsWith('data:image/');
 }
+
+function componentToHex(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value)))
+    .toString(16)
+    .padStart(2, '0');
+}
+
+function rgbStringToHex(value: string, fallback: string) {
+  const match = value.match(
+    /^rgba?\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*[\d.]+\s*)?\)$/iu,
+  );
+
+  if (!match) {
+    return fallback;
+  }
+
+  return `#${componentToHex(Number(match[1]))}${componentToHex(Number(match[2]))}${componentToHex(Number(match[3]))}`;
+}
+
+function normalizeAccentColorValue(value: string, fallback: string) {
+  const normalized = value.trim();
+  const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/iu);
+
+  if (hexMatch) {
+    const hexValue = hexMatch[1];
+    if (hexValue.length === 3) {
+      return `#${hexValue
+        .split('')
+        .map((char) => char + char)
+        .join('')
+        .toLowerCase()}`;
+    }
+
+    return `#${hexValue.toLowerCase()}`;
+  }
+
+  return rgbStringToHex(normalized, fallback);
+}
+
+const GRADIENT_PICKER_LOCALES = {
+  CONTROLS: {
+    SOLID: 'Цвет',
+    GRADIENT: 'Градиент',
+  },
+};
 
 function inferAssetExtension(url: string, fallback: string) {
   if (url.startsWith('data:image/svg+xml')) {
@@ -269,8 +315,9 @@ export function CardCreatorPage() {
       previewCard.instanceId,
       previewCard.urlImage.slice(-48),
       previewCard.defaultFinish,
-      visuals.frameStyle,
       visuals.accentColor,
+      visuals.layerOneFill,
+      visuals.layerTwoFill,
       visuals.decorativePattern.svgUrl.length,
       visuals.decorativePattern.svgUrl.slice(-48),
       visuals.decorativePattern.size,
@@ -299,6 +346,16 @@ export function CardCreatorPage() {
   }, [draft, proposal]);
 
   const isLocked = proposal?.status !== 'draft';
+
+  function updateVisualFill(fillKey: 'layerOneFill' | 'layerTwoFill', value: string) {
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        [fillKey]: value,
+      },
+    }));
+  }
 
   async function materializeDraftAssets(currentDraft: ProposalEditorPayload) {
     const uploadedLayers = [...currentDraft.effectLayers];
@@ -706,50 +763,63 @@ export function CardCreatorPage() {
               <span>Это общий вид карточки. Спецэффекты ниже работают отдельными слоями.</span>
             </div>
 
-            <div className="creator-row">
-              <label className="creator-field">
-                <span>Голография базы</span>
-                <select
-                  disabled={isLocked}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      defaultFinish: event.target.value as ProposalEditorPayload['defaultFinish'],
-                    }))
+            <label className="creator-field creator-field--picker">
+              <span>Нижний слой `card-layer-one-front`</span>
+              <strong className="creator-field__hint">
+                Выбор цвета или линейного градиента для самого нижнего текстурного слоя.
+              </strong>
+              <ColorPicker
+                className={`creator-gradient-picker ${
+                  isLocked ? 'creator-gradient-picker--disabled' : ''
+                }`}
+                disableLightMode
+                height={196}
+                hideAdvancedSliders
+                hideColorGuide
+                hideEyeDrop
+                hideGradientType
+                hideInputType
+                idSuffix="layer-one-fill"
+                locales={GRADIENT_PICKER_LOCALES}
+                onChange={(value) => {
+                  if (!isLocked) {
+                    updateVisualFill('layerOneFill', value);
                   }
-                  value={draft.defaultFinish}
-                >
-                  {CARD_FINISH_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                }}
+                presets={[...CARD_LAYER_ONE_FILL_PRESETS]}
+                value={draft.visuals.layerOneFill}
+                width={270}
+              />
+            </label>
 
-              <label className="creator-field">
-                <span>Рамка</span>
-                <select
-                  disabled={isLocked}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        frameStyle: event.target.value as ProposalEditorPayload['visuals']['frameStyle'],
-                      },
-                    }))
+            <label className="creator-field creator-field--picker">
+              <span>Верхний слой `card-layer-two-front`</span>
+              <strong className="creator-field__hint">
+                Цвет или линейный градиент для структуры карточки поверх нижнего слоя.
+              </strong>
+              <ColorPicker
+                className={`creator-gradient-picker ${
+                  isLocked ? 'creator-gradient-picker--disabled' : ''
+                }`}
+                disableLightMode
+                height={196}
+                hideAdvancedSliders
+                hideColorGuide
+                hideEyeDrop
+                hideGradientType
+                hideInputType
+                idSuffix="layer-two-fill"
+                locales={GRADIENT_PICKER_LOCALES}
+                onChange={(value) => {
+                  if (!isLocked) {
+                    updateVisualFill('layerTwoFill', value);
                   }
-                  value={draft.visuals.frameStyle}
-                >
-                  {CARD_FRAME_STYLE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+                }}
+                presets={[...CARD_LAYER_TWO_FILL_PRESETS]}
+                value={draft.visuals.layerTwoFill}
+                width={270}
+              />
+            </label>
 
             <div className="creator-row">
               <label className="creator-field">
@@ -936,31 +1006,43 @@ export function CardCreatorPage() {
               />
             </div>
 
-            <div className="creator-field">
+            <label className="creator-field creator-field--picker">
               <span>Акцентный цвет</span>
-              <div className="creator-swatches">
-                {CARD_ACCENT_SWATCHES.map((swatch) => (
-                  <button
-                    key={swatch}
-                    className={`creator-swatch ${
-                      draft.visuals.accentColor === swatch ? 'creator-swatch--active' : ''
-                    }`}
-                    disabled={isLocked}
-                    onClick={() =>
-                      updateDraft((current) => ({
-                        ...current,
-                        visuals: {
-                          ...current.visuals,
-                          accentColor: swatch,
-                        },
-                      }))
-                    }
-                    style={{ backgroundColor: swatch }}
-                    type="button"
-                  />
-                ))}
-              </div>
-            </div>
+              <strong className="creator-field__hint">
+                Цвет бордеров и световых акцентов карточки.
+              </strong>
+              <ColorPicker
+                className={`creator-gradient-picker ${
+                  isLocked ? 'creator-gradient-picker--disabled' : ''
+                }`}
+                disableLightMode
+                height={196}
+                hideAdvancedSliders
+                hideColorGuide
+                hideColorTypeBtns
+                hideEyeDrop
+                hideGradientControls
+                hideInputType
+                idSuffix="accent-color"
+                onChange={(value) => {
+                  if (!isLocked) {
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        accentColor: normalizeAccentColorValue(
+                          value,
+                          current.visuals.accentColor,
+                        ),
+                      },
+                    }));
+                  }
+                }}
+                presets={[...CARD_ACCENT_SWATCHES]}
+                value={draft.visuals.accentColor}
+                width={270}
+              />
+            </label>
           </div>
 
           <div className="creator-section">

@@ -4,17 +4,13 @@ import { CardCreatorLink } from '../components/CardCreatorLink';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { CollectionCardTile } from '../components/CollectionCardTile';
 import { ApiError, fetchPublicShowcase, requestProposalStart } from '../game/api';
+import { buildCollectionPath } from '../game/collectionPaths';
 import { useGame } from '../game/GameContext';
 import type { CollectionFilter, OwnedCard, PublicPlayerProfile } from '../game/types';
 
 type CollectionTab = CollectionFilter;
 
 const COLLECTION_PAGE_SIZE = 16;
-
-function buildCollectionPath(playerSlug: string, searchParams?: URLSearchParams) {
-  const query = searchParams?.toString();
-  return `/collection/${encodeURIComponent(playerSlug)}${query ? `?${query}` : ''}`;
-}
 
 export function CollectionPage() {
   const navigate = useNavigate();
