@@ -2406,7 +2406,10 @@ function drawCardBackTexture(backImage: HTMLImageElement | null) {
   return canvas;
 }
 
-function drawFoilLayer(card: OwnedCard) {
+function drawFoilLayer(
+  card: OwnedCard,
+  hasArtImage: boolean,
+) {
   const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
@@ -2415,121 +2418,12 @@ function drawFoilLayer(card: OwnedCard) {
   }
 
   const layout = CARD_FRONT_LAYOUT;
-  const finish = finishMeta[card.finish];
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'rgba(0,0,0,0)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (card.rarity === 'common') {
-    for (let line = 0; line < 36; line += 1) {
-      const x = 82 + line * 24;
-      ctx.fillStyle = line % 2 === 0 ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.48)';
-      ctx.fillRect(x, 76, 3, 1300);
-    }
-  }
-
-  if (card.rarity === 'uncommon') {
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-    ctx.lineWidth = 3;
-    for (let row = 0; row < 14; row += 1) {
-      for (let col = 0; col < 8; col += 1) {
-        const x = 146 + col * 98 + (row % 2 === 0 ? 0 : 48);
-        const y = 188 + row * 80;
-        ctx.beginPath();
-        ctx.moveTo(x, y - 30);
-        ctx.lineTo(x + 26, y - 15);
-        ctx.lineTo(x + 26, y + 15);
-        ctx.lineTo(x, y + 30);
-        ctx.lineTo(x - 26, y + 15);
-        ctx.lineTo(x - 26, y - 15);
-        ctx.closePath();
-        ctx.stroke();
-      }
-    }
-  }
-
-  if (card.rarity === 'rare') {
-    for (let index = 0; index < 14; index += 1) {
-      ctx.save();
-      ctx.translate(canvas.width / 2, 260);
-      ctx.rotate((Math.PI / 14) * index + card.holographicSeed * 0.5);
-      const beam = ctx.createLinearGradient(0, -560, 0, 560);
-      beam.addColorStop(0, 'rgba(255,255,255,0.04)');
-      beam.addColorStop(0.5, 'rgba(255,255,255,0.96)');
-      beam.addColorStop(1, 'rgba(255,255,255,0.04)');
-      ctx.fillStyle = beam;
-      ctx.fillRect(-10, -560, 20, 1120);
-      ctx.restore();
-    }
-  }
-
-  if (card.rarity === 'epic') {
-    const shards = [
-      [
-        [90, 146],
-        [382, 84],
-        [324, 392],
-      ],
-      [
-        [534, 92],
-        [892, 154],
-        [716, 434],
-      ],
-      [
-        [116, 728],
-        [424, 582],
-        [450, 1016],
-      ],
-      [
-        [612, 624],
-        [928, 736],
-        [750, 1092],
-      ],
-    ];
-
-    shards.forEach((shape, index) =>
-      drawPolygon(
-        ctx,
-        shape as Array<[number, number]>,
-        index % 2 === 0 ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.72)',
-        1,
-      ),
-    );
-  }
-
-  if (card.rarity === 'veryrare') {
-    for (let band = 0; band < 9; band += 1) {
-      ctx.beginPath();
-      for (let step = 0; step <= canvas.width; step += 10) {
-        const x = step;
-        const y = 164 + band * 128 + Math.sin(step * 0.018 + band * 0.8) * 44;
-        if (step === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      ctx.strokeStyle = band % 2 === 0 ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.72)';
-      ctx.lineWidth = 11 + band;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    }
-  }
-
-  for (let star = 0; star < 24; star += 1) {
-    const x = 90 + ((star * 37) % 840);
-    const y = 110 + ((star * 79) % 1260);
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate((Math.PI / 4) * (star % 4));
-    ctx.fillStyle = star % 2 === 0 ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.48)';
-    ctx.fillRect(-1.4, -18, 2.8, 36);
-    ctx.fillRect(-18, -1.4, 36, 2.8);
-    ctx.restore();
-  }
-
-  if (finish.label !== 'Standard') {
-    ctx.fillStyle = card.finish === 'prismatic' ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.36)';
+  if (!hasArtImage) {
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
     drawRoundedPanel(
       ctx,
       layout.artBox.x,
@@ -2544,7 +2438,11 @@ function drawFoilLayer(card: OwnedCard) {
   return canvas;
 }
 
-function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElement | null>) {
+function drawHoloZoneMask(
+  card: OwnedCard,
+  effectMaskImages: Array<HTMLImageElement | null>,
+  hasArtImage: boolean,
+) {
   const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
   const ctx = canvas.getContext('2d');
 
@@ -2564,24 +2462,26 @@ function drawHoloZoneMask(card: OwnedCard, effectMaskImages: Array<HTMLImageElem
   ctx.lineWidth = 16;
   ctx.stroke();
 
-  const artGradient = ctx.createLinearGradient(
-    0,
-    layout.artBox.y,
-    0,
-    layout.artBox.y + layout.artBox.height,
-  );
-  artGradient.addColorStop(0, zone(0.72 + finish.opacity * 0.1));
-  artGradient.addColorStop(1, zone(0.46 + finish.opacity * 0.12));
-  drawRoundedPanel(
-    ctx,
-    layout.artBox.x,
-    layout.artBox.y,
-    layout.artBox.width,
-    layout.artBox.height,
-    layout.artBox.radius ?? 0,
-  );
-  ctx.fillStyle = artGradient;
-  ctx.fill();
+  if (!hasArtImage) {
+    const artGradient = ctx.createLinearGradient(
+      0,
+      layout.artBox.y,
+      0,
+      layout.artBox.y + layout.artBox.height,
+    );
+    artGradient.addColorStop(0, zone(0.72 + finish.opacity * 0.1));
+    artGradient.addColorStop(1, zone(0.46 + finish.opacity * 0.12));
+    drawRoundedPanel(
+      ctx,
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.width,
+      layout.artBox.height,
+      layout.artBox.radius ?? 0,
+    );
+    ctx.fillStyle = artGradient;
+    ctx.fill();
+  }
 
   drawRoundedPanel(
     ctx,
@@ -2815,9 +2715,20 @@ export function useCardTextures(card: OwnedCard | null) {
       back: setupTexture(
         finalizeCardTextureCanvas(backImage ? drawCardBackTexture(backImage) : drawCardBack(card)),
       ),
-      foil: setupTexture(finalizeCardTextureCanvas(drawFoilLayer(card)), true),
+      foil: setupTexture(
+        finalizeCardTextureCanvas(
+          drawFoilLayer(card, Boolean(artImage)),
+        ),
+        true,
+      ),
       foilZone: setupDataTexture(
-        finalizeCardTextureCanvas(drawHoloZoneMask(card, effectMaskImages)),
+        finalizeCardTextureCanvas(
+          drawHoloZoneMask(
+            card,
+            effectMaskImages,
+            Boolean(artImage),
+          ),
+        ),
       ),
       glossMask: setupDataTexture(
         finalizeCardTextureCanvas(drawGlossMaskMap(card, effectMaskImages)),
