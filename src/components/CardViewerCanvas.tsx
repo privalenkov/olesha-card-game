@@ -618,6 +618,7 @@ const glossFragmentShader = `
   uniform vec3 uAccentLightPos;
   uniform vec3 uGlareColor;
   uniform float uGlossiness;
+  uniform float uHover;
   uniform vec2 uPointer;
 
   varying vec2 vUv;
@@ -638,13 +639,15 @@ const glossFragmentShader = `
   void main() {
     float mask = texture2D(uGlossMap, vUv).r * sampleLiftMask(vUv);
     float glossiness = clamp(uGlossiness, 0.0, 1.0);
+    float hover = clamp(uHover, 0.0, 1.0);
 
-    if (mask < 0.0002 || glossiness < 0.001) {
+    if (mask < 0.0002 || glossiness < 0.001 || hover < 0.001) {
       discard;
     }
 
     vec3 normal = sampleSurfaceNormal(vUv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float pointerMagnitude = clamp(length(uPointer), 0.0, 1.0);
     float fresnel = pow(
       clamp(1.0 - max(dot(normal, viewDir), 0.0), 0.0, 1.0),
       mix(3.2, 4.8, glossiness)
@@ -660,8 +663,8 @@ const glossFragmentShader = `
     float fillWide = specularFromLight(uFillLightPos, normal, viewDir, widePower * 0.92);
     float accentWide = specularFromLight(uAccentLightPos, normal, viewDir, widePower * 1.08);
 
-    vec2 sweepAxis = normalize(vec2(0.86, -0.5));
-    vec2 sweepCenter = vec2(0.5 + uPointer.x * 0.16, 0.5 - uPointer.y * 0.1);
+    vec2 sweepAxis = normalize(mix(vec2(0.86, -0.5), vec2(0.92, -0.38), pointerMagnitude * 0.28));
+    vec2 sweepCenter = vec2(0.5 + uPointer.x * 0.2, 0.5 - uPointer.y * 0.14);
     float sweepCoord = dot(vUv - sweepCenter, sweepAxis);
     float broadSweep = pow(
       max(1.0 - abs(sweepCoord) * mix(3.2, 2.2, glossiness), 0.0),
@@ -674,17 +677,26 @@ const glossFragmentShader = `
     float sweep =
       broadSweep * (0.36 + 0.46 * glossiness) +
       crispSweep * (0.18 + 0.38 * glossiness);
+    float hotspot = pow(
+      max(1.0 - distance(vUv, sweepCenter) * mix(4.4, 3.2, glossiness), 0.0),
+      mix(2.6, 4.2, glossiness)
+    );
 
-    float highlight =
+    float lightHighlight =
       keyTight * 1.18 +
       fillTight * 0.4 +
       accentTight * 1.34 +
       keyWide * 0.34 +
       fillWide * 0.2 +
       accentWide * 0.28 +
-      fresnel * (0.12 + glossiness * 0.22) +
-      sweep * (0.32 + keyWide * 0.58 + accentWide * 0.42 + fresnel * 0.34);
-    highlight *= glossiness;
+      fresnel * (0.12 + glossiness * 0.22);
+    float movingHighlight =
+      sweep * (0.56 + keyWide * 0.72 + accentWide * 0.56 + fresnel * 0.42) +
+      hotspot * (0.34 + glossiness * 0.54);
+    float highlight =
+      (lightHighlight * 0.34 + movingHighlight * (0.62 + pointerMagnitude * 0.42)) *
+      glossiness *
+      hover;
 
     float alpha = clamp(mask * highlight * mix(0.56, 0.94, glossiness), 0.0, 0.92);
     vec3 glareTint = mix(uGlareColor, vec3(1.0), 0.12 + glossiness * 0.08);
@@ -1204,7 +1216,8 @@ const edgeHighlightFragmentShader = `
   uniform vec3 uTint;
   uniform float uTime;
   uniform float uTilt;
-  uniform vec2 uTiltDirection;
+  uniform float uHover;
+  uniform vec2 uPointer;
 
   varying vec2 vUv;
   varying vec3 vWorldPosition;
@@ -1214,24 +1227,39 @@ const edgeHighlightFragmentShader = `
   void main() {
     vec3 N = normalize(vWorldNormal);
     vec3 V = normalize(cameraPosition - vWorldPosition);
+    float hover = clamp(uHover, 0.0, 1.0);
+    float pointerMagnitude = clamp(length(uPointer), 0.0, 1.0);
+
+    if (hover < 0.001 || pointerMagnitude < 0.08) {
+      discard;
+    }
 
     float fresnel = pow(clamp(1.0 - abs(dot(N, V)), 0.0, 1.0), 1.35);
-    vec2 tiltDirection = length(uTiltDirection) > 0.001
-      ? normalize(uTiltDirection)
-      : normalize(vec2(0.82, 0.26));
+    vec2 focusDirection = normalize(uPointer);
     vec2 edgeDirection = normalize(vLocalPosition.xy + vec2(0.0001));
-
-    float sweepPrimary = pow(max(dot(edgeDirection, tiltDirection), 0.0), 7.0);
-    float sweepSecondary = pow(max(dot(edgeDirection, -tiltDirection), 0.0), 12.0) * 0.18;
-    float edgePulse = 0.92 + 0.08 * sin(uTime * 1.4 + dot(edgeDirection, vec2(2.2, 3.4)));
     float perimeterBias = pow(max(abs(vUv.x - 0.5) * 2.0, abs(vUv.y - 0.5) * 2.0), 1.3);
+    float focusDot = max(dot(edgeDirection, focusDirection), 0.0);
+    float mirroredFocusDot = max(dot(edgeDirection, -focusDirection), 0.0);
+    float focusPresence = smoothstep(0.08, 0.34, pointerMagnitude);
+    float focusCore = pow(focusDot, mix(24.0, 12.0, pointerMagnitude));
+    float focusSoft = pow(focusDot, mix(8.0, 4.0, pointerMagnitude));
+    float mirroredFocusCore = pow(mirroredFocusDot, mix(24.0, 12.0, pointerMagnitude));
+    float mirroredFocusSoft = pow(mirroredFocusDot, mix(8.0, 4.0, pointerMagnitude));
+    float combinedFocusCore = focusCore + mirroredFocusCore;
+    float combinedFocusSoft = focusSoft + mirroredFocusSoft;
+    float activePerimeter = perimeterBias * focusPresence;
 
-    float baseGlow = perimeterBias * (0.012 + uTilt * 0.085);
-    float fresnelGlow = fresnel * perimeterBias * (0.025 + uTilt * 0.15);
+    float baseGlow = activePerimeter * combinedFocusSoft * (0.008 + uTilt * 0.04);
+    float fresnelGlow = fresnel * activePerimeter * combinedFocusSoft * (0.016 + uTilt * 0.08);
     float sweepGlow =
-      perimeterBias * (sweepPrimary + sweepSecondary) * (0.05 + uTilt * 0.26);
-    float alpha = clamp((baseGlow + fresnelGlow + sweepGlow) * edgePulse, 0.0, 0.34);
-    vec3 color = uTint * (baseGlow * 1.25 + fresnelGlow * 1.8 + sweepGlow * 2.6) * edgePulse;
+      activePerimeter *
+      (
+        combinedFocusCore * (0.14 + uTilt * 0.24) +
+        combinedFocusSoft * (0.04 + uTilt * 0.08)
+      );
+    float alpha = clamp((baseGlow + fresnelGlow + sweepGlow) * hover, 0.0, 0.34);
+    vec3 color =
+      uTint * (baseGlow * 1.1 + fresnelGlow * 1.6 + sweepGlow * 2.6) * hover;
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -1464,6 +1492,8 @@ function CardRig({
   const impactFlashRef = useRef<MeshBasicMaterial>(null);
   const impactGlowRef = useRef<MeshBasicMaterial>(null);
   const impactParticleRefs = useRef<(Group | null)[]>([]);
+  const hoverActiveRef = useRef(false);
+  const hoverStrengthRef = useRef(0);
   const introRef = useRef(0);
   const introCompleteNotifiedRef = useRef(false);
   const stackEntryRef = useRef(0);
@@ -1592,6 +1622,8 @@ function CardRig({
   useEffect(() => {
     introRef.current = skipIntroAnimation ? 1 : 0;
     introCompleteNotifiedRef.current = false;
+    hoverActiveRef.current = false;
+    hoverStrengthRef.current = 0;
   }, [introKey, skipIntroAnimation]);
 
   useEffect(() => {
@@ -1769,6 +1801,12 @@ function CardRig({
 
     pointer.x = MathUtils.damp(pointer.x, pointerTarget.x, 8, delta);
     pointer.y = MathUtils.damp(pointer.y, pointerTarget.y, 8, delta);
+    hoverStrengthRef.current = MathUtils.damp(
+      hoverStrengthRef.current,
+      hoverActiveRef.current ? 1 : 0,
+      9,
+      delta,
+    );
 
     introRef.current = Math.min(introRef.current + delta * 1.6, 1);
     stackEntryRef.current = Math.max(stackEntryRef.current - delta / 0.42, 0);
@@ -1889,15 +1927,12 @@ function CardRig({
 
     const totalYaw = activeHoverGroupRef.current.rotation.y + activeGroupRef.current.rotation.y;
     const yawTilt = Math.sin(totalYaw);
+    const hoverStrength = hoverStrengthRef.current;
     const edgeTilt = Math.min(
       1,
       Math.abs(outerGroupRef.current.rotation.x) * 2.6 +
         Math.abs(yawTilt) * 1.45 +
         Math.abs(hoverPointerX) * 0.35,
-    );
-    const edgeTiltDirection = new Vector2(
-      yawTilt + hoverPointerX * 0.35,
-      -outerGroupRef.current.rotation.x + pointer.y * 0.12,
     );
 
     if (showDecorativeEffects && ringRef.current) {
@@ -1947,6 +1982,7 @@ function CardRig({
     [glossShaderRef.current, liftedGlossShaderRef.current]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
+        material.uniforms.uHover.value = hoverStrength;
         material.uniforms.uPointer.value.copy(pointer);
       });
 
@@ -1982,8 +2018,9 @@ function CardRig({
 
     if (enableEdgeHighlight && edgeRef.current?.uniforms) {
       edgeRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-      edgeRef.current.uniforms.uTilt.value = edgeTilt;
-      edgeRef.current.uniforms.uTiltDirection.value.copy(edgeTiltDirection);
+      edgeRef.current.uniforms.uTilt.value = edgeTilt * hoverStrength;
+      edgeRef.current.uniforms.uHover.value = hoverStrength;
+      edgeRef.current.uniforms.uPointer.value.set(hoverPointerX, pointer.y);
       edgeRef.current.uniforms.uTint.value.copy(
         frontFacing ? highlightPalette.edgeFront : highlightPalette.edgeBack,
       );
@@ -2070,6 +2107,7 @@ function CardRig({
     }
 
     event.stopPropagation();
+    hoverActiveRef.current = true;
     const localPoint = activeGroupRef.current.worldToLocal(event.point.clone());
     pointerTarget.set(
       MathUtils.clamp(localPoint.x / (CARD_HOVER_PLANE_WIDTH * 0.5), -1, 1),
@@ -2079,6 +2117,7 @@ function CardRig({
 
   function resetHover(event?: ThreeEvent<PointerEvent>) {
     event?.stopPropagation();
+    hoverActiveRef.current = false;
     pointerTarget.set(0, 0);
   }
 
@@ -2204,7 +2243,8 @@ function CardRig({
                       uTint: { value: highlightPalette.edgeFront.clone() },
                       uTime: { value: 0 },
                       uTilt: { value: 0 },
-                      uTiltDirection: { value: new Vector2(0, 0) },
+                      uHover: { value: 0 },
+                      uPointer: { value: new Vector2(0, 0) },
                     }}
                     vertexShader={edgeHighlightVertexShader}
                     fragmentShader={edgeHighlightFragmentShader}
@@ -2321,6 +2361,7 @@ function CardRig({
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
                         uGlareColor: { value: highlightPalette.glare.clone() },
                         uGlossiness: { value: glossiness },
+                        uHover: { value: 0 },
                         uPointer: { value: new Vector2(0, 0) },
                       }}
                       vertexShader={cardSurfaceVertexShader}
@@ -2593,6 +2634,7 @@ function CardRig({
                       uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
                       uGlareColor: { value: highlightPalette.glare.clone() },
                       uGlossiness: { value: glossiness },
+                      uHover: { value: 0 },
                       uPointer: { value: new Vector2(0, 0) },
                     }}
                     vertexShader={cardSurfaceVertexShader}
