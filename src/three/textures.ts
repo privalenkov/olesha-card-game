@@ -2359,12 +2359,6 @@ function drawCardFront(
     fallbackValue: getDefaultCardVisuals().layerOneFill,
   });
 
-  drawDecorativePatternAcrossCanvas(
-    ctx,
-    decorativePatternImage,
-    visuals.decorativePattern,
-  );
-
   if (layerTwoImage) {
     drawTintedTemplateLayer(ctx, layerTwoImage, visuals.layerTwoFill, {
       detailAlpha: 0.66,
@@ -2509,6 +2503,16 @@ function drawCardFront(
       lineHeightMultiplier: 1.24,
       color: CARD_FRONT_TEXT_COLOR,
     },
+  );
+
+  drawDecorativePattern(
+    ctx,
+    decorativePatternImage,
+    visuals.decorativePattern,
+    layout.artBox.x,
+    layout.artBox.y,
+    layout.artBox.width,
+    layout.artBox.height,
   );
 
   if (options.includeTreatmentLayers ?? true) {
