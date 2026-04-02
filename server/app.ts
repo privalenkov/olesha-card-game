@@ -514,6 +514,10 @@ function normalizeProposalPayload(
       typeof layer.relief === 'number' && Number.isFinite(layer.relief)
         ? layer.relief
         : 0;
+    const offsetX =
+      typeof layer.offsetX === 'number' && Number.isFinite(layer.offsetX) ? layer.offsetX : 0;
+    const offsetY =
+      typeof layer.offsetY === 'number' && Number.isFinite(layer.offsetY) ? layer.offsetY : 0;
 
     if (
       id.length < 6 ||
@@ -524,7 +528,9 @@ function normalizeProposalPayload(
       (!isStoredAssetUrl(maskUrl) && maskUrl !== '') ||
       !Number.isFinite(opacity) ||
       !Number.isFinite(shimmer) ||
-      !Number.isFinite(relief)
+      !Number.isFinite(relief) ||
+      !Number.isFinite(offsetX) ||
+      !Number.isFinite(offsetY)
     ) {
       return null;
     }
@@ -538,6 +544,8 @@ function normalizeProposalPayload(
       opacity: Math.max(0.18, Math.min(opacity, 1)),
       shimmer: clampEffectShimmer(type, shimmer),
       relief: Math.max(-1, Math.min(relief, 1)),
+      offsetX: Math.max(-0.2, Math.min(offsetX, 0.2)),
+      offsetY: Math.max(-0.2, Math.min(offsetY, 0.2)),
     });
   }
 

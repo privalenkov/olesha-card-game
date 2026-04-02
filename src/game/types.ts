@@ -9,6 +9,7 @@ export type CardTreatmentEffect =
   | 'sparkle_foil'
   | 'emboss'
   | 'prismatic_edge'
+  | 'dimensional_lamination'
   | 'holo_wave'
   | 'holo_cracked';
 export type ProposalStatus = 'draft' | 'pending' | 'approved' | 'deleted';
@@ -47,6 +48,8 @@ export interface CardEffectLayer {
   opacity: number;
   shimmer: number;
   relief: number;
+  offsetX: number;
+  offsetY: number;
 }
 
 export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
@@ -66,6 +69,7 @@ export const CARD_TREATMENT_EFFECT_OPTIONS: CardTreatmentEffect[] = [
   'sparkle_foil',
   'emboss',
   'prismatic_edge',
+  'dimensional_lamination',
   'holo_wave',
   'holo_cracked',
 ];
@@ -77,6 +81,7 @@ export const CARD_TREATMENT_EFFECT_LABELS: Record<CardTreatmentEffect, string> =
   sparkle_foil: 'Искристая ламинация',
   emboss: 'Рельефная ламинация',
   prismatic_edge: 'Призматическая ламинация',
+  dimensional_lamination: 'Трехмерная ламинация',
   holo_wave: 'Волновая голография',
   holo_cracked: 'Битое стекло',
 };
@@ -88,6 +93,8 @@ export const CARD_TREATMENT_EFFECT_DESCRIPTIONS: Record<CardTreatmentEffect, str
   sparkle_foil: 'Ламинация с яркими искрами и плотными бликами.',
   emboss: 'Ламинация с выпуклым рельефом, который ловит свет.',
   prismatic_edge: 'Призматический перелив для кантов и контуров.',
+  dimensional_lamination:
+    'Выбранная маска переносится на поднятый слой поверх карточки с отдельным сдвигом.',
   holo_wave: 'Крупные органические ячейки с волновым радужным переливом.',
   holo_cracked: 'Осколочная текстура: мелкие грани переливаются каждая в своём цвете.',
 };
@@ -231,6 +238,10 @@ export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {
     return Math.max(0, Math.min(shimmer, 1));
   }
 
+  if (type === 'dimensional_lamination') {
+    return Math.max(0.2, Math.min(shimmer, 5));
+  }
+
   return Math.max(0.2, Math.min(shimmer, 1.4));
 }
 
@@ -245,6 +256,7 @@ export function getDefaultEffectLayer(
     sparkle_foil: 0.86,
     emboss: 0.74,
     prismatic_edge: 0.9,
+    dimensional_lamination: 0.92,
     holo_wave: 0.9,
     holo_cracked: 0.88,
   };
@@ -257,10 +269,14 @@ export function getDefaultEffectLayer(
     shimmer:
       type === 'spot_gloss'
         ? 0.6
-        : type === 'holo_wave' || type === 'holo_cracked'
+        : type === 'dimensional_lamination'
+          ? 0.72
+          : type === 'holo_wave' || type === 'holo_cracked'
           ? 1.1
           : 1,
     relief: 0,
+    offsetX: type === 'dimensional_lamination' ? 0.018 : 0,
+    offsetY: type === 'dimensional_lamination' ? -0.018 : 0,
   };
 }
 

@@ -1934,6 +1934,25 @@ function drawPrismaticMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElemen
   return canvas;
 }
 
+function drawDimensionalMaskMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
+  const { canvas, ctx } = createMaskCanvas(
+    CARD_TEXTURE_LAYOUT_WIDTH,
+    CARD_TEXTURE_LAYOUT_HEIGHT,
+  );
+  if (!ctx) {
+    return canvas;
+  }
+
+  composeEffectMaskPass(ctx, card, maskImages, ['dimensional_lamination'], {
+    blur: 1,
+    alphaMultiplier: 0.94,
+  });
+  composeEffectMaskPass(ctx, card, maskImages, ['dimensional_lamination'], {
+    alphaMultiplier: 1,
+  });
+  return canvas;
+}
+
 function drawReactiveHoloTreatmentMap(card: OwnedCard, maskImages: Array<HTMLImageElement | null>) {
   const { canvas, ctx } = createMaskCanvas(
     CARD_TEXTURE_LAYOUT_WIDTH,
@@ -2894,6 +2913,9 @@ export function useCardTextures(card: OwnedCard | null) {
       ),
       sparkleMask: setupDataTexture(
         finalizeCardTextureCanvas(drawSparkleMaskMap(card, effectMaskImages)),
+      ),
+      dimensionalMask: setupDataTexture(
+        finalizeCardTextureCanvas(drawDimensionalMaskMap(card, effectMaskImages)),
       ),
       prismMask: setupDataTexture(
         finalizeCardTextureCanvas(drawPrismaticMaskMap(card, effectMaskImages)),

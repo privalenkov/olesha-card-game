@@ -310,7 +310,7 @@ export function CardCreatorPage() {
     const effectKey = (previewCard.effectLayers ?? [])
       .map(
         (layer) =>
-          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.relief}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
+          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.relief}:${layer.offsetX}:${layer.offsetY}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
       )
       .join('|');
 
@@ -1236,7 +1236,8 @@ export function CardCreatorPage() {
             {selectedLayer ? (
               <div className="creator-layer-panel">
                 <div className="creator-row">
-                  {selectedLayer.type !== 'emboss' ? (
+                  {selectedLayer.type !== 'emboss' &&
+                  selectedLayer.type !== 'dimensional_lamination' ? (
                     <label className="creator-field">
                       <span>
                         Интенсивность: {Math.round(selectedLayer.opacity * 100)}%
@@ -1341,6 +1342,86 @@ export function CardCreatorPage() {
                         step={0.02}
                         type="range"
                         value={selectedLayer.relief}
+                      />
+                    </label>
+                  ) : null}
+
+                  {selectedLayer.type === 'dimensional_lamination' ? (
+                    <label className="creator-field">
+                      <span>
+                        Высота слоя: {Math.round(selectedLayer.shimmer * 100)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={5}
+                        min={0.2}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, shimmer: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.05}
+                        type="range"
+                        value={selectedLayer.shimmer}
+                      />
+                    </label>
+                  ) : null}
+
+                  {selectedLayer.type === 'dimensional_lamination' ? (
+                    <label className="creator-field">
+                      <span>
+                        Сдвиг по X: {selectedLayer.offsetX > 0 ? '+' : ''}
+                        {(selectedLayer.offsetX * 100).toFixed(1)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={0.12}
+                        min={-0.12}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, offsetX: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.002}
+                        type="range"
+                        value={selectedLayer.offsetX}
+                      />
+                    </label>
+                  ) : null}
+
+                  {selectedLayer.type === 'dimensional_lamination' ? (
+                    <label className="creator-field">
+                      <span>
+                        Сдвиг по Y: {selectedLayer.offsetY > 0 ? '+' : ''}
+                        {(selectedLayer.offsetY * 100).toFixed(1)}%
+                      </span>
+                      <input
+                        disabled={isLocked}
+                        max={0.12}
+                        min={-0.12}
+                        onChange={(event) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            effectLayers: current.effectLayers.map((layer) =>
+                              layer.id === selectedLayer.id
+                                ? { ...layer, offsetY: Number(event.target.value) }
+                                : layer,
+                            ),
+                          }))
+                        }
+                        step={0.002}
+                        type="range"
+                        value={selectedLayer.offsetY}
                       />
                     </label>
                   ) : null}

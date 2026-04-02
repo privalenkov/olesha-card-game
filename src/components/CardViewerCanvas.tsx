@@ -184,6 +184,10 @@ function getLayerValue(
   return layer[field];
 }
 
+function getEffectLayer(card: OwnedCard, type: CardTreatmentEffect) {
+  return card.effectLayers?.find((item) => normalizeCardTreatmentEffect(item.type) === type) ?? null;
+}
+
 const initialDrag: DragState = {
   active: false,
   startX: 0,
@@ -274,6 +278,19 @@ const cardSurfaceNormalSamplingShader = `
   }
 `;
 
+const cardLiftMaskSamplingShader = `
+  uniform sampler2D uLiftMaskMap;
+  uniform float uLiftMaskEnabled;
+
+  float sampleLiftMask(vec2 uv) {
+    if (uLiftMaskEnabled < 0.5) {
+      return 1.0;
+    }
+
+    return texture2D(uLiftMaskMap, uv).r;
+  }
+`;
+
 const finishTreatmentFragmentShader = `
   uniform sampler2D uSugarMap;
   uniform sampler2D uSparkleMap;
@@ -295,6 +312,7 @@ const finishTreatmentFragmentShader = `
   varying vec3 vWorldBitangent;
 
   ${cardSurfaceNormalSamplingShader}
+  ${cardLiftMaskSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -479,9 +497,10 @@ const finishTreatmentFragmentShader = `
   }
 
   void main() {
-    float sugarMask = texture2D(uSugarMap, vUv).r * uLayerWeights.x;
-    float sparkleMask = texture2D(uSparkleMap, vUv).r * uLayerWeights.y;
-    float prismMask = texture2D(uPrismMap, vUv).r * uLayerWeights.z;
+    float liftMask = sampleLiftMask(vUv);
+    float sugarMask = texture2D(uSugarMap, vUv).r * uLayerWeights.x * liftMask;
+    float sparkleMask = texture2D(uSparkleMap, vUv).r * uLayerWeights.y * liftMask;
+    float prismMask = texture2D(uPrismMap, vUv).r * uLayerWeights.z * liftMask;
 
     if (sugarMask < 0.0002 && sparkleMask < 0.0002 && prismMask < 0.0002) {
       discard;
@@ -600,6 +619,7 @@ const glossFragmentShader = `
   varying vec3 vWorldBitangent;
 
   ${cardSurfaceNormalSamplingShader}
+  ${cardLiftMaskSamplingShader}
 
   float specularFromLight(vec3 lightPos, vec3 normal, vec3 viewDir, float power) {
     vec3 lightDir = normalize(lightPos - vWorldPosition);
@@ -608,7 +628,7 @@ const glossFragmentShader = `
   }
 
   void main() {
-    float mask = texture2D(uGlossMap, vUv).r;
+    float mask = texture2D(uGlossMap, vUv).r * sampleLiftMask(vUv);
     float glossiness = clamp(uGlossiness, 0.0, 1.0);
 
     if (mask < 0.0002 || glossiness < 0.001) {
@@ -690,6 +710,7 @@ const holoFragmentShader = `
   varying vec3 vWorldBitangent;
 
   ${cardSurfaceNormalSamplingShader}
+  ${cardLiftMaskSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -722,12 +743,17 @@ const holoFragmentShader = `
     vec3 normal = sampleSurfaceNormal(uv);
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), uFresnelPower);
+    float liftMask = sampleLiftMask(uv);
+
+    if (liftMask < 0.0002) {
+      discard;
+    }
 
     vec2 flowUv = uv * (1.4 + uDensity * 0.4);
-    float mask = dot(texture2D(uMaskMap, flowUv).rgb, vec3(0.333333));
-    float zone = dot(texture2D(uZoneMap, uv).rgb, vec3(0.333333));
-    float treatment = texture2D(uTreatmentMap, uv).r;
-    float prism = texture2D(uPrismMap, uv).r;
+    float mask = dot(texture2D(uMaskMap, flowUv).rgb, vec3(0.333333)) * liftMask;
+    float zone = dot(texture2D(uZoneMap, uv).rgb, vec3(0.333333)) * liftMask;
+    float treatment = texture2D(uTreatmentMap, uv).r * liftMask;
+    float prism = texture2D(uPrismMap, uv).r * liftMask;
 
     float micro = noise(
       uv * vec2(160.0 + uDensity * 60.0, 220.0 + uDensity * 80.0) + uTime * 0.08
@@ -792,6 +818,7 @@ const waveHoloFragmentShader = `
   varying vec3 vWorldBitangent;
 
   ${cardSurfaceNormalSamplingShader}
+  ${cardLiftMaskSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -813,7 +840,7 @@ const waveHoloFragmentShader = `
     float dotNV = max(dot(normal, viewDir), 0.0);
     float fresnel = pow(1.0 - dotNV, uFresnelPower);
 
-    float mask = texture2D(uMaskMap, uv).r;
+    float mask = texture2D(uMaskMap, uv).r * sampleLiftMask(uv);
     if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
 
     // Large organic Voronoi cells — each cell has its own unique rainbow phase
@@ -892,6 +919,7 @@ const crackedHoloFragmentShader = `
   varying vec3 vWorldBitangent;
 
   ${cardSurfaceNormalSamplingShader}
+  ${cardLiftMaskSamplingShader}
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -1035,7 +1063,7 @@ const crackedHoloFragmentShader = `
     float dotNV = max(dot(normal, viewDir), 0.0);
     float fresnel = pow(1.0 - dotNV, uFresnelPower);
 
-    float mask = texture2D(uMaskMap, uv).r;
+    float mask = texture2D(uMaskMap, uv).r * sampleLiftMask(uv);
     if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
 
     vec2 uvA = warpUv(
@@ -1424,11 +1452,18 @@ function CardRig({
   const haloRef = useRef<Mesh>(null);
   const shaderRef = useRef<ShaderMaterial>(null);
   const glossShaderRef = useRef<ShaderMaterial>(null);
+  const liftedGlossShaderRef = useRef<ShaderMaterial>(null);
   const sugarFinishShaderRef = useRef<ShaderMaterial>(null);
+  const liftedSugarFinishShaderRef = useRef<ShaderMaterial>(null);
   const sparkleFinishShaderRef = useRef<ShaderMaterial>(null);
+  const liftedSparkleFinishShaderRef = useRef<ShaderMaterial>(null);
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
+  const liftedPrismFinishShaderRef = useRef<ShaderMaterial>(null);
   const waveHoloShaderRef = useRef<ShaderMaterial>(null);
+  const liftedWaveHoloShaderRef = useRef<ShaderMaterial>(null);
   const crackedHoloShaderRef = useRef<ShaderMaterial>(null);
+  const liftedCrackedHoloShaderRef = useRef<ShaderMaterial>(null);
+  const liftedHoloShaderRef = useRef<ShaderMaterial>(null);
   const edgeRef = useRef<ShaderMaterial>(null);
   const edgeMeshRef = useRef<Mesh>(null);
   const impactFlashRef = useRef<MeshBasicMaterial>(null);
@@ -1463,6 +1498,39 @@ function CardRig({
   );
   const glossiness = MathUtils.clamp(getLayerValue(card, 'spot_gloss', 'shimmer'), 0, 1);
   const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
+  const dimensionalLayer = useMemo(
+    () => getEffectLayer(card, 'dimensional_lamination'),
+    [card],
+  );
+  const dimensionalOffset = useMemo(
+    () =>
+      dimensionalLayer
+        ? new Vector3(
+            CARD_FACE.width * dimensionalLayer.offsetX,
+            -CARD_FACE.height * dimensionalLayer.offsetY,
+            0,
+          )
+        : new Vector3(0, 0, 0),
+    [dimensionalLayer],
+  );
+  const dimensionalLiftDepth = dimensionalLayer
+    ? 0.014 + Math.pow(Math.abs(dimensionalLayer.shimmer), 1.08) * 0.046
+    : 0;
+  const dimensionalShadowOffset = useMemo(
+    () =>
+      dimensionalLayer
+        ? new Vector3(
+            dimensionalOffset.x * 0.38 + dimensionalLiftDepth * 0.22,
+            dimensionalOffset.y * 0.38 - dimensionalLiftDepth * 0.16,
+            0,
+          )
+        : new Vector3(0, 0, 0),
+    [dimensionalLayer, dimensionalLiftDepth, dimensionalOffset],
+  );
+  const dimensionalLayerOpacity = dimensionalLayer ? 1 : 0;
+  const dimensionalShadowOpacity = dimensionalLayer
+    ? Math.min(0.62, 0.12 + dimensionalLiftDepth * 1.9)
+    : 0;
   const sugarLayerWeights = useMemo(() => new Vector3(1, 0, 0), []);
   const sparkleLayerWeights = useMemo(() => new Vector3(0, 1, 0), []);
   const prismLayerWeights = useMemo(() => new Vector3(0, 0, 1), []);
@@ -1524,6 +1592,7 @@ function CardRig({
       textures.surfaceNormalMap.needsUpdate = true;
       textures.sugarMask.needsUpdate = true;
       textures.sparkleMask.needsUpdate = true;
+      textures.dimensionalMask.needsUpdate = true;
       textures.prismMask.needsUpdate = true;
       textures.holoTreatmentMap.needsUpdate = true;
       textures.foil.center.set(0.5, 0.5);
@@ -1546,34 +1615,48 @@ function CardRig({
       return;
     }
 
-    if (shaderRef.current?.uniforms) {
-      shaderRef.current.uniforms.uMaskMap.value = textures.foil;
-      shaderRef.current.uniforms.uZoneMap.value = textures.foilZone;
-      shaderRef.current.uniforms.uTreatmentMap.value = textures.holoTreatmentMap;
-      shaderRef.current.uniforms.uPrismMap.value = textures.prismMask;
-      shaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
-      shaderRef.current.uniforms.uAccent.value.set(meta.accent);
-      shaderRef.current.uniforms.uHue.value.set(meta.hue);
-      shaderRef.current.uniformsNeedUpdate = true;
-      shaderRef.current.needsUpdate = true;
-    }
+    [shaderRef.current, liftedHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uMaskMap.value = textures.foil;
+        material.uniforms.uZoneMap.value = textures.foilZone;
+        material.uniforms.uTreatmentMap.value = textures.holoTreatmentMap;
+        material.uniforms.uPrismMap.value = textures.prismMask;
+        material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
+        material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
+        material.uniforms.uAccent.value.set(meta.accent);
+        material.uniforms.uHue.value.set(meta.hue);
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
 
-    if (glossShaderRef.current?.uniforms) {
-      glossShaderRef.current.uniforms.uGlossMap.value = textures.glossMask;
-      glossShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
-      glossShaderRef.current.uniforms.uGlareColor.value.copy(highlightPalette.glare);
-      glossShaderRef.current.uniforms.uGlossiness.value = glossiness;
-      glossShaderRef.current.uniformsNeedUpdate = true;
-      glossShaderRef.current.needsUpdate = true;
-    }
+    [glossShaderRef.current, liftedGlossShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uGlossMap.value = textures.glossMask;
+        material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
+        material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
+        material.uniforms.uGlareColor.value.copy(highlightPalette.glare);
+        material.uniforms.uGlossiness.value = glossiness;
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
 
-    [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
+    [
+      sugarFinishShaderRef.current,
+      sparkleFinishShaderRef.current,
+      prismFinishShaderRef.current,
+      liftedSugarFinishShaderRef.current,
+      liftedSparkleFinishShaderRef.current,
+      liftedPrismFinishShaderRef.current,
+    ]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
         material.uniforms.uSugarMap.value = textures.sugarMask;
         material.uniforms.uSparkleMap.value = textures.sparkleMask;
         material.uniforms.uPrismMap.value = textures.prismMask;
         material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
+        material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
         material.uniforms.uAccent.value.set(meta.accent);
         material.uniforms.uHue.value.set(meta.hue);
         material.uniforms.uSugarIntensity.value = sugarIntensity;
@@ -1581,30 +1664,36 @@ function CardRig({
         material.needsUpdate = true;
       });
 
-    if (waveHoloShaderRef.current?.uniforms) {
-      waveHoloShaderRef.current.uniforms.uMaskMap.value = textures.waveHoloMask;
-      waveHoloShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
-      waveHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
-      waveHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
-      waveHoloShaderRef.current.uniformsNeedUpdate = true;
-      waveHoloShaderRef.current.needsUpdate = true;
-    }
+    [waveHoloShaderRef.current, liftedWaveHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uMaskMap.value = textures.waveHoloMask;
+        material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
+        material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
+        material.uniforms.uAccent.value.set(meta.accent);
+        material.uniforms.uHue.value.set(meta.hue);
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
 
-    if (crackedHoloShaderRef.current?.uniforms) {
-      crackedHoloShaderRef.current.uniforms.uMaskMap.value = textures.crackedHoloMask;
-      crackedHoloShaderRef.current.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
-      crackedHoloShaderRef.current.uniforms.uAccent.value.set(meta.accent);
-      crackedHoloShaderRef.current.uniforms.uHue.value.set(meta.hue);
-      crackedHoloShaderRef.current.uniforms.uAmbientLight.value.copy(crackedLightPalette.ambient);
-      crackedHoloShaderRef.current.uniforms.uSkyLight.value.copy(crackedLightPalette.sky);
-      crackedHoloShaderRef.current.uniforms.uGroundLight.value.copy(crackedLightPalette.ground);
-      crackedHoloShaderRef.current.uniforms.uKeyLightColor.value.copy(crackedLightPalette.key);
-      crackedHoloShaderRef.current.uniforms.uFillLightColor.value.copy(crackedLightPalette.fill);
-      crackedHoloShaderRef.current.uniforms.uAccentLightColor.value.copy(crackedLightPalette.accent);
-      crackedHoloShaderRef.current.uniforms.uRimLightColor.value.copy(crackedLightPalette.rim);
-      crackedHoloShaderRef.current.uniformsNeedUpdate = true;
-      crackedHoloShaderRef.current.needsUpdate = true;
-    }
+    [crackedHoloShaderRef.current, liftedCrackedHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uMaskMap.value = textures.crackedHoloMask;
+        material.uniforms.uSurfaceNormalMap.value = textures.surfaceNormalMap;
+        material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
+        material.uniforms.uAccent.value.set(meta.accent);
+        material.uniforms.uHue.value.set(meta.hue);
+        material.uniforms.uAmbientLight.value.copy(crackedLightPalette.ambient);
+        material.uniforms.uSkyLight.value.copy(crackedLightPalette.sky);
+        material.uniforms.uGroundLight.value.copy(crackedLightPalette.ground);
+        material.uniforms.uKeyLightColor.value.copy(crackedLightPalette.key);
+        material.uniforms.uFillLightColor.value.copy(crackedLightPalette.fill);
+        material.uniforms.uAccentLightColor.value.copy(crackedLightPalette.accent);
+        material.uniforms.uRimLightColor.value.copy(crackedLightPalette.rim);
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
   }, [
     crackedLightPalette.accent,
     crackedLightPalette.ambient,
@@ -1808,27 +1897,43 @@ function CardRig({
       );
     }
 
-    if (shaderRef.current?.uniforms) {
-      shaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-      shaderRef.current.uniforms.uPointer.value.copy(pointer);
-      shaderRef.current.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
-      shaderRef.current.uniforms.uDensity.value = tuning.density;
-      shaderRef.current.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
-      shaderRef.current.uniforms.uFresnelPower.value = tuning.fresnelPower;
-    }
+    [shaderRef.current, liftedHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uTime.value = state.clock.elapsedTime;
+        material.uniforms.uPointer.value.copy(pointer);
+        material.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
+        material.uniforms.uDensity.value = tuning.density;
+        material.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
+        material.uniforms.uFresnelPower.value = tuning.fresnelPower;
+      });
 
-    if (glossShaderRef.current?.uniforms) {
-      glossShaderRef.current.uniforms.uPointer.value.copy(pointer);
-    }
+    [glossShaderRef.current, liftedGlossShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uPointer.value.copy(pointer);
+      });
 
-    [sugarFinishShaderRef.current, sparkleFinishShaderRef.current, prismFinishShaderRef.current]
+    [
+      sugarFinishShaderRef.current,
+      sparkleFinishShaderRef.current,
+      prismFinishShaderRef.current,
+      liftedSugarFinishShaderRef.current,
+      liftedSparkleFinishShaderRef.current,
+      liftedPrismFinishShaderRef.current,
+    ]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
         material.uniforms.uSugarIntensity.value = sugarIntensity;
       });
 
-    [waveHoloShaderRef.current, crackedHoloShaderRef.current]
+    [
+      waveHoloShaderRef.current,
+      crackedHoloShaderRef.current,
+      liftedWaveHoloShaderRef.current,
+      liftedCrackedHoloShaderRef.current,
+    ]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
@@ -2168,6 +2273,27 @@ function CardRig({
                     />
                   </mesh>
 
+                  {dimensionalLayer ? (
+                    <mesh
+                      position={[
+                        dimensionalShadowOffset.x,
+                        dimensionalShadowOffset.y,
+                        faceOffset + 0.0028,
+                      ]}
+                      scale={[1.0012, 1.0012, 1]}
+                    >
+                      <primitive attach="geometry" object={faceGeometry} />
+                      <meshBasicMaterial
+                        alphaMap={textures.dimensionalMask}
+                        color="#040506"
+                        depthWrite={false}
+                        opacity={dimensionalShadowOpacity}
+                        toneMapped={false}
+                        transparent
+                      />
+                    </mesh>
+                  ) : null}
+
                   <mesh position={[0, 0, faceOffset + 0.0048]} scale={[1.001, 1.001, 1]}>
                     <primitive attach="geometry" object={faceGeometry} />
                     <shaderMaterial
@@ -2178,6 +2304,8 @@ function CardRig({
                       toneMapped={false}
                       uniforms={{
                         uGlossMap: { value: textures.glossMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
@@ -2203,6 +2331,8 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: sugarLayerWeights },
                         uSurfaceReliefWeights: { value: sugarReliefWeights },
@@ -2231,6 +2361,8 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: sparkleLayerWeights },
                         uSurfaceReliefWeights: { value: sparkleReliefWeights },
@@ -2259,6 +2391,8 @@ function CardRig({
                         uSugarMap: { value: textures.sugarMask },
                         uSparkleMap: { value: textures.sparkleMask },
                         uPrismMap: { value: textures.prismMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uLayerWeights: { value: prismLayerWeights },
                         uSurfaceReliefWeights: { value: prismReliefWeights },
@@ -2308,6 +2442,8 @@ function CardRig({
                         uZoneMap: { value: textures.foilZone },
                         uTreatmentMap: { value: textures.holoTreatmentMap },
                         uPrismMap: { value: textures.prismMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
@@ -2336,6 +2472,8 @@ function CardRig({
                       uniforms={{
                         uTime: { value: 0 },
                         uMaskMap: { value: textures.waveHoloMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
@@ -2363,6 +2501,8 @@ function CardRig({
                       uniforms={{
                         uTime: { value: 0 },
                         uMaskMap: { value: textures.crackedHoloMask },
+                        uLiftMaskMap: { value: textures.dimensionalMask },
+                        uLiftMaskEnabled: { value: 0 },
                         uSurfaceNormalMap: { value: textures.surfaceNormalMap },
                         uAccent: { value: new Color(meta.accent) },
                         uHue: { value: new Color(meta.hue) },
@@ -2387,6 +2527,308 @@ function CardRig({
                     />
                   </mesh>
                 </>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0228 + dimensionalLiftDepth,
+                  ]}
+                  scale={[1.0015, 1.0015, 1]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <meshPhysicalMaterial
+                    alphaMap={textures.dimensionalMask}
+                    clearcoat={0.24 + dimensionalLayer.shimmer * 0.28}
+                    clearcoatNormalMap={textures.surfaceNormalMap}
+                    clearcoatNormalScale={surfaceClearcoatScale}
+                    clearcoatRoughness={0.16}
+                    depthWrite={false}
+                    map={textures.front}
+                    metalness={0.04}
+                    normalMap={textures.surfaceNormalMap}
+                    normalScale={surfaceNormalScale}
+                    opacity={dimensionalLayerOpacity}
+                    reflectivity={0.1}
+                    roughness={0.68 - dimensionalLayer.shimmer * 0.14}
+                    transparent
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0276 + dimensionalLiftDepth,
+                  ]}
+                  scale={[1.0016, 1.0016, 1]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedGlossShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uGlossMap: { value: textures.glossMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uGlareColor: { value: highlightPalette.glare.clone() },
+                      uGlossiness: { value: glossiness },
+                      uPointer: { value: new Vector2(0, 0) },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={glossFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.032 + dimensionalLiftDepth,
+                  ]}
+                  scale={[1.0018, 1.0018, 1]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedSugarFinishShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uSugarMap: { value: textures.sugarMask },
+                      uSparkleMap: { value: textures.sparkleMask },
+                      uPrismMap: { value: textures.prismMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uLayerWeights: { value: sugarLayerWeights },
+                      uSurfaceReliefWeights: { value: sugarReliefWeights },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uSugarIntensity: { value: sugarIntensity },
+                      uTime: { value: 0 },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={finishTreatmentFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0324 + dimensionalLiftDepth,
+                  ]}
+                  scale={[1.0018, 1.0018, 1]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedSparkleFinishShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uSugarMap: { value: textures.sugarMask },
+                      uSparkleMap: { value: textures.sparkleMask },
+                      uPrismMap: { value: textures.prismMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uLayerWeights: { value: sparkleLayerWeights },
+                      uSurfaceReliefWeights: { value: sparkleReliefWeights },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uSugarIntensity: { value: sugarIntensity },
+                      uTime: { value: 0 },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={finishTreatmentFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0328 + dimensionalLiftDepth,
+                  ]}
+                  scale={[1.0018, 1.0018, 1]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedPrismFinishShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uSugarMap: { value: textures.sugarMask },
+                      uSparkleMap: { value: textures.sparkleMask },
+                      uPrismMap: { value: textures.prismMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uLayerWeights: { value: prismLayerWeights },
+                      uSurfaceReliefWeights: { value: prismReliefWeights },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uSugarIntensity: { value: sugarIntensity },
+                      uTime: { value: 0 },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={finishTreatmentFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0388 + dimensionalLiftDepth,
+                  ]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedHoloShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    uniforms={{
+                      uTime: { value: 0 },
+                      uMaskMap: { value: textures.foil },
+                      uZoneMap: { value: textures.foilZone },
+                      uTreatmentMap: { value: textures.holoTreatmentMap },
+                      uPrismMap: { value: textures.prismMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uDensity: { value: tuning.density },
+                      uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
+                      uFresnelPower: { value: tuning.fresnelPower },
+                      uPointer: { value: new Vector2(0, 0) },
+                    }}
+                    vertexShader={cardSurfaceVertexShader}
+                    fragmentShader={holoFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0408 + dimensionalLiftDepth,
+                  ]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedWaveHoloShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uTime: { value: 0 },
+                      uMaskMap: { value: textures.waveHoloMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uFresnelPower: { value: tuning.fresnelPower },
+                      uPointer: { value: new Vector2(0, 0) },
+                      uSeed: { value: (card.holographicSeed % 6.28318) },
+                    }}
+                    vertexShader={holoSharedVertex}
+                    fragmentShader={waveHoloFragmentShader}
+                  />
+                </mesh>
+              ) : null}
+
+              {dimensionalLayer ? (
+                <mesh
+                  position={[
+                    dimensionalOffset.x,
+                    dimensionalOffset.y,
+                    faceOffset + 0.0418 + dimensionalLiftDepth,
+                  ]}
+                >
+                  <primitive attach="geometry" object={faceGeometry} />
+                  <shaderMaterial
+                    ref={liftedCrackedHoloShaderRef}
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    toneMapped={false}
+                    uniforms={{
+                      uTime: { value: 0 },
+                      uMaskMap: { value: textures.crackedHoloMask },
+                      uLiftMaskMap: { value: textures.dimensionalMask },
+                      uLiftMaskEnabled: { value: 1 },
+                      uSurfaceNormalMap: { value: textures.surfaceNormalMap },
+                      uAccent: { value: new Color(meta.accent) },
+                      uHue: { value: new Color(meta.hue) },
+                      uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
+                      uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
+                      uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
+                      uRimLightPos: { value: VIEWER_LIGHTS.rim.clone() },
+                      uAmbientLight: { value: crackedLightPalette.ambient.clone() },
+                      uSkyLight: { value: crackedLightPalette.sky.clone() },
+                      uGroundLight: { value: crackedLightPalette.ground.clone() },
+                      uKeyLightColor: { value: crackedLightPalette.key.clone() },
+                      uFillLightColor: { value: crackedLightPalette.fill.clone() },
+                      uAccentLightColor: { value: crackedLightPalette.accent.clone() },
+                      uRimLightColor: { value: crackedLightPalette.rim.clone() },
+                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uFresnelPower: { value: tuning.fresnelPower },
+                      uPointer: { value: new Vector2(0, 0) },
+                      uSeed: { value: (card.holographicSeed % 6.28318) },
+                    }}
+                    vertexShader={holoSharedVertex}
+                    fragmentShader={crackedHoloFragmentShader}
+                  />
+                </mesh>
               ) : null}
 
               {showDecorativeEffects ? (

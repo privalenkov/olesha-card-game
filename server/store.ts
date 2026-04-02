@@ -461,6 +461,8 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
         opacity: Math.max(0.18, Math.min(layer.opacity, 1)),
         shimmer: clampEffectShimmer(type, layer.shimmer ?? 1),
         relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
+        offsetX: Math.max(-0.2, Math.min(layer.offsetX ?? 0, 0.2)),
+        offsetY: Math.max(-0.2, Math.min(layer.offsetY ?? 0, 0.2)),
       };
     })
     .filter((layer): layer is CardEffectLayer => Boolean(layer && layer.id.length > 0));
@@ -588,6 +590,7 @@ const proposalEffectPools: Record<
       ['spot_holo', 30],
       ['sparkle_foil', 16],
       ['emboss', 8],
+      ['dimensional_lamination', 6],
     ],
   },
   epic: {
@@ -602,6 +605,7 @@ const proposalEffectPools: Record<
       ['sparkle_foil', 20],
       ['emboss', 16],
       ['prismatic_edge', 10],
+      ['dimensional_lamination', 12],
     ],
   },
   veryrare: {
@@ -616,6 +620,7 @@ const proposalEffectPools: Record<
       ['sparkle_foil', 18],
       ['emboss', 16],
       ['prismatic_edge', 28],
+      ['dimensional_lamination', 18],
     ],
   },
 };
