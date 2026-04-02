@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import closeIcon from '../assets/icons/close.svg';
 import { CardCreatorLink } from '../components/CardCreatorLink';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { CollectionCardTile } from '../components/CollectionCardTile';
-import { ApiError, fetchPublicShowcase, requestProposalStart } from '../game/api';
-import { buildCollectionPath } from '../game/collectionPaths';
+import { ApiError, fetchPublicShowcase } from '../game/api';
+import { copyTextToClipboard } from '../game/clipboard';
+import { buildCollectionCardShareUrl, buildCollectionPath } from '../game/collectionPaths';
 import { useGame } from '../game/GameContext';
 import type { CollectionFilter, OwnedCard, PublicPlayerProfile } from '../game/types';
 
@@ -16,11 +18,10 @@ export function CollectionPage() {
   const navigate = useNavigate();
   const { playerSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { authConfigured, authenticated, login, user } = useGame();
+  const { authenticated, notify, user } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
   const [activeCardCreatorVisible, setActiveCardCreatorVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
-  const [proposalBusy, setProposalBusy] = useState(false);
   const [collectionOwner, setCollectionOwner] = useState<PublicPlayerProfile | null>(null);
   const [loadedCards, setLoadedCards] = useState<OwnedCard[]>([]);
   const [collectionStatus, setCollectionStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
@@ -135,8 +136,8 @@ export function CollectionPage() {
             : requestError instanceof Error
               ? requestError.message
               : mode === 'append'
-                ? 'Не удалось догрузить карточки витрины.'
-                : 'Не удалось загрузить витрину игрока.';
+                ? 'Не удалось догрузить карточки коллекции.'
+                : 'Не удалось загрузить коллекцию игрока.';
 
         if (mode === 'replace') {
           resetCollectionState();
@@ -295,13 +296,36 @@ export function CollectionPage() {
     setSearchParams(nextSearchParams, { replace: true });
   }
 
-  const showProposalAction = !activePlayerSlug || isOwnCollection;
+  const handleShareActiveCard = useCallback(async () => {
+    const shareSlug = viewedOwner?.shareSlug?.trim() || activePlayerSlug;
+
+    if (!activeCard || !shareSlug) {
+      return;
+    }
+
+    const shareUrl = buildCollectionCardShareUrl(
+      window.location.origin,
+      shareSlug,
+      activeCard.instanceId,
+    );
+
+    try {
+      await copyTextToClipboard(shareUrl);
+      notify({
+        kind: 'success',
+        title: 'Ссылка скопирована',
+        message: 'Отправь её другому пользователю, чтобы показать эту карточку.',
+      });
+    } catch {
+      notify({
+        kind: 'error',
+        title: 'Не удалось скопировать ссылку',
+        message: 'Браузер не дал доступ к буферу обмена.',
+      });
+    }
+  }, [activeCard, activePlayerSlug, notify, viewedOwner?.shareSlug]);
+
   const isRemoteCollection = Boolean(activePlayerSlug) && !isOwnCollection;
-  const ownerSubtitle = isOwnCollection
-    ? 'Твоя публичная витрина'
-    : viewedOwner
-      ? 'Публичная витрина игрока'
-      : 'Витрина игрока';
   const emptyTitle = isRemoteCollection
     ? 'У этого игрока пока нет карточек'
     : authenticated
@@ -313,22 +337,26 @@ export function CollectionPage() {
     <div className="page page--collection page--collection-minimal">
       <section className="collection-toolbar">
         <div className="collection-owner">
-          <span>{ownerSubtitle}</span>
-          <strong>{viewedOwner?.name ?? 'Витрина'}</strong>
+          <strong className="collection-owner__name">{viewedOwner?.name ?? 'Игрок'}</strong>
+          <span className="collection-owner__label">Профиль</span>
         </div>
 
         <div className="collection-breakdown collection-breakdown--minimal">
-          <div>
+          <div className="collection-breakdown__item">
             <strong>{totalCards}</strong>
             <span>Всего карточек</span>
           </div>
-          <div>
+          <div className="collection-breakdown__item">
             <strong>{duplicateCount}</strong>
-            <span>Повторок</span>
+            <span>Дубли карточек</span>
           </div>
         </div>
 
-        <div className="filter-pills" role="tablist" aria-label="Фильтр коллекции">
+        <div
+          className="collection-toolbar__filters filter-pills"
+          role="tablist"
+          aria-label="Фильтр коллекции"
+        >
           <button
             className={`filter-pill ${activeTab === 'all' ? 'filter-pill--active' : ''}`}
             onClick={() => setActiveTab('all')}
@@ -341,46 +369,18 @@ export function CollectionPage() {
             onClick={() => setActiveTab('duplicates')}
             type="button"
           >
-            Повторки
+            Дубликаты
           </button>
         </div>
-
-        {showProposalAction ? (
-          <button
-            className="collection-toolbar__action action-button"
-            disabled={proposalBusy}
-            onClick={async () => {
-              if (!authenticated) {
-                if (authConfigured) {
-                  login();
-                }
-
-                return;
-              }
-
-              setProposalBusy(true);
-
-              try {
-                const response = await requestProposalStart();
-                navigate(`/creator/${response.proposal.id}`);
-              } finally {
-                setProposalBusy(false);
-              }
-            }}
-            type="button"
-          >
-            Предложить свою карточку
-          </button>
-        ) : null}
       </section>
 
       {Boolean(activePlayerSlug) && collectionStatus === 'loading' ? (
         <section className="collection-empty">
-          <strong>Загружаем витрину...</strong>
+          <strong>Загружаем коллекцию...</strong>
         </section>
       ) : Boolean(activePlayerSlug) && collectionStatus === 'error' ? (
         <section className="collection-empty">
-          <strong>{collectionError ?? 'Не удалось загрузить витрину игрока'}</strong>
+          <strong>{collectionError ?? 'Не удалось загрузить коллекцию игрока'}</strong>
         </section>
       ) : totalCards === 0 ? (
         <section className="collection-empty">
@@ -401,20 +401,29 @@ export function CollectionPage() {
         </section>
       ) : (
         <section className="collection-empty collection-empty--compact">
-          <strong>Повторок пока нет</strong>
+          <strong>Дубликаты пока не найдены</strong>
         </section>
       )}
 
       {loadingMoreCards && loadedCards.length > 0 ? (
         <section className="collection-pagination">
-          <strong>Подгружаем еще карточки...</strong>
+          <strong>Подгружаем коллекцию...</strong>
         </section>
       ) : null}
 
       {activeCard ? (
-        <div className="collection-overlay" onClick={closeViewer} role="presentation">
-          <button className="collection-overlay__close" onClick={closeViewer} type="button">
-            Закрыть
+        <div
+          className="collection-overlay collection-overlay--collection"
+          onClick={closeViewer}
+          role="presentation"
+        >
+          <button
+            aria-label="Закрыть просмотр карточки"
+            className="collection-overlay__close collection-overlay__close--icon"
+            onClick={closeViewer}
+            type="button"
+          >
+            <img alt="" aria-hidden="true" className="collection-overlay__close-icon" src={closeIcon} />
           </button>
           <div
             className="collection-overlay__viewer"
@@ -429,6 +438,7 @@ export function CollectionPage() {
                   cameraZ={10.6}
                   scaleMultiplier={0.7}
                   effectsPreset="full"
+                  transparentBackground
                   onIntroComplete={handleActiveCardIntroComplete}
                 />
               </div>
@@ -438,6 +448,16 @@ export function CollectionPage() {
                 scaleMultiplier={0.7}
                 visible={activeCardCreatorVisible}
                 className="card-creator-link-anchor--overlay"
+                action={
+                  (viewedOwner?.shareSlug?.trim() || activePlayerSlug) && activeCardCreatorVisible
+                    ? {
+                        label: 'Поделиться',
+                        onClick: () => {
+                          void handleShareActiveCard();
+                        },
+                      }
+                    : undefined
+                }
               />
             </div>
           </div>

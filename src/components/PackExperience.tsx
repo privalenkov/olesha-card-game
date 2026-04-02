@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { buildCollectionCardShareUrl } from '../game/collectionPaths';
+import { copyTextToClipboard } from '../game/clipboard';
 import { useGame } from '../game/GameContext';
 import type { OwnedCard, Rarity } from '../game/types';
 import { CardCreatorLink } from './CardCreatorLink';
@@ -121,30 +122,6 @@ function getShortestCarouselDelta(targetIndex: number, activeIndex: number, tota
   return Math.abs(backward) < Math.abs(forward) ? backward : forward;
 }
 
-async function copyTextToClipboard(text: string) {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  textarea.style.pointerEvents = 'none';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand('copy');
-  document.body.removeChild(textarea);
-
-  if (!copied) {
-    throw new Error('COPY_FAILED');
-  }
-}
-
 export function PackExperience() {
   const { authenticated, error, notify, openPack, state, timeUntilReset, user } = useGame();
   const [stage, setStage] = useState<ExperienceStage>('hero');
@@ -230,7 +207,7 @@ export function PackExperience() {
       notify({
         kind: 'success',
         title: 'Ссылка скопирована',
-        message: 'Открой её, чтобы показать эту карточку другим пользователям.',
+        message: 'Отправь её другому пользователю, чтобы показать эту карточку.',
       });
     } catch {
       notify({

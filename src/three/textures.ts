@@ -127,7 +127,7 @@ const CARD_FRONT_LAYOUT: CardFrontLayout = {
   descriptionBox: {
     x: 96,
     y: 1035,
-    width: 840,
+    width: 800,
     height: 262,
   },
   stars: {
@@ -814,16 +814,17 @@ function drawParagraphTextInBox(
   const fontFamily = options.fontFamily ?? 'Sora, sans-serif';
   const fontWeight = options.fontWeight ?? '500';
   const lineHeightMultiplier = options.lineHeightMultiplier ?? 1.26;
+  const minFontSize = Math.min(options.minFontSize, options.maxFontSize);
   let fontSize = options.maxFontSize;
   let lines = [text];
   let lineHeight = fontSize * lineHeightMultiplier;
 
-  while (fontSize > options.minFontSize) {
+  while (fontSize >= minFontSize) {
     ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
     lines = createWrappedTextLines(ctx, text, box.width);
     lineHeight = fontSize * lineHeightMultiplier;
 
-    if (lines.length * lineHeight <= box.height) {
+    if (lines.length * lineHeight <= box.height || fontSize === minFontSize) {
       break;
     }
 
@@ -2504,7 +2505,7 @@ function drawCardFront(
     layout.descriptionBox,
     {
       maxFontSize: 37,
-      minFontSize: 377,
+      minFontSize: 24,
       lineHeightMultiplier: 1.24,
       color: CARD_FRONT_TEXT_COLOR,
     },

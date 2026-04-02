@@ -19,6 +19,7 @@ export function CollectionCardTile({
         event.currentTarget.style.setProperty('--my', '50%');
         event.currentTarget.style.setProperty('--rx', '0deg');
         event.currentTarget.style.setProperty('--ry', '0deg');
+        event.currentTarget.style.setProperty('--gloss-shift', '0.5');
       }}
       onPointerMove={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -31,6 +32,7 @@ export function CollectionCardTile({
         event.currentTarget.style.setProperty('--my', `${(y * 100).toFixed(2)}%`);
         event.currentTarget.style.setProperty('--rx', `${rotateX}deg`);
         event.currentTarget.style.setProperty('--ry', `${rotateY}deg`);
+        event.currentTarget.style.setProperty('--gloss-shift', x.toFixed(3));
       }}
       type="button"
     >
