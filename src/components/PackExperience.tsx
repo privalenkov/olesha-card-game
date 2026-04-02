@@ -86,12 +86,12 @@ const revealProfiles: Record<Rarity, RevealProfile> = {
   common: {
     chargeMs: 120,
     effectMs: 240,
-    cardDelayLabel: 'Обычная карта раскрывается сразу.',
+    cardDelayLabel: 'Обычная карта раскрывается через короткую вспышку и маленький сплеш.',
   },
   uncommon: {
     chargeMs: 220,
     effectMs: 460,
-    cardDelayLabel: 'Необычная карта пробивается мягким светом.',
+    cardDelayLabel: 'Необычная карта получает мягкий свет и небольшой сплеш.',
   },
   rare: {
     chargeMs: 760,
@@ -261,12 +261,6 @@ export function PackExperience() {
 
     const requiresManualFlip = MANUAL_FLIP_REVEAL_RARITIES.includes(currentCard.rarity);
 
-    if (currentCard.rarity === 'common' || currentCard.rarity === 'uncommon') {
-      setRevealState('revealed');
-      setCardLaunchOffset(0);
-      return;
-    }
-
     if (requiresManualFlip) {
       setRevealState('awaiting_flip');
       setCardLaunchOffset(0);
@@ -274,7 +268,6 @@ export function PackExperience() {
     }
 
     const chargeDuration = Math.max(revealProfile?.chargeMs ?? 0, 0);
-    const impactDuration = Math.max(revealProfile?.effectMs ?? 0, 0);
 
     setRevealState(chargeDuration > 0 ? 'charging' : 'impact');
     setCardLaunchOffset(0);
@@ -283,13 +276,8 @@ export function PackExperience() {
       setRevealState('impact');
     }, chargeDuration);
 
-    const revealTimer = window.setTimeout(() => {
-      setRevealState(requiresManualFlip ? 'awaiting_flip' : 'revealed');
-    }, chargeDuration + impactDuration);
-
     return () => {
       window.clearTimeout(impactTimer);
-      window.clearTimeout(revealTimer);
     };
   }, [currentCard?.instanceId, currentCard?.rarity, revealProfile?.chargeMs, revealProfile?.effectMs, stage]);
 
@@ -870,12 +858,7 @@ export function PackExperience() {
               : 'none'
         : 'none';
     const revealImpactRarity =
-      !isOpening &&
-      revealState === 'impact' &&
-      currentCard.rarity !== 'common' &&
-      currentCard.rarity !== 'uncommon'
-        ? currentCard.rarity
-        : null;
+      !isOpening && revealState === 'impact' ? currentCard.rarity : null;
     function renderRevealCardLayer({
       card,
       layerKey,
@@ -903,7 +886,7 @@ export function PackExperience() {
       enterFromStackAnimation?: boolean;
       launchExitProgress?: number;
       introKeyOverride?: string;
-      revealImpactRarity: Extract<Rarity, 'rare' | 'epic' | 'veryrare'> | null;
+      revealImpactRarity: Rarity | null;
       revealImpactDurationMs: number;
       shakeMode: 'none' | 'rare' | 'epic' | 'veryrare';
       onUserFlip?: (side: 'front' | 'back') => void;

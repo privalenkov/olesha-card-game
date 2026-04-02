@@ -7,8 +7,8 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Canvas, type ThreeEvent, useFrame } from '@react-three/fiber';
-import { Float, Sparkles } from '@react-three/drei';
+import { Canvas, type ThreeEvent, useFrame, useLoader } from '@react-three/fiber';
+import { Sparkles } from '@react-three/drei';
 import {
   AdditiveBlending,
   Color,
@@ -23,10 +23,18 @@ import {
   ShaderMaterial,
   Shape,
   ShapeGeometry,
+  LinearFilter,
+  SRGBColorSpace,
+  TextureLoader,
+  type Texture,
   Vector2,
   Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
+import {
+  rarityRevealImpactOrder,
+  rarityRevealImpactProfiles,
+} from '../game/rarityRevealEffects';
 import {
   CARD_ASPECT_HEIGHT,
   CARD_ASPECT_WIDTH,
@@ -156,7 +164,7 @@ function createCrackedLightPalette(
 type ViewerEffectsPreset = 'full' | 'stack' | 'diagnostic';
 type CardSide = 'front' | 'back';
 type ViewerShakeMode = 'none' | 'rare' | 'epic' | 'veryrare';
-type ViewerImpactRarity = Extract<Rarity, 'rare' | 'epic' | 'veryrare'>;
+type ViewerImpactRarity = Rarity;
 
 interface DragState {
   active: boolean;
@@ -1295,18 +1303,22 @@ function createRoundedEdgeGeometry(width: number, height: number, radius: number
 }
 
 interface ImpactSplashProfile {
+  iconUrl: string;
+  flashOpacity: number;
   count: number;
   reach: number;
   verticalReach: number;
   sizeMin: number;
   sizeMax: number;
-  stretchMin: number;
-  stretchMax: number;
   delaySpread: number;
   burstWindow: number;
   orbit: number;
   depthSpread: number;
-  accentEvery: number;
+  angleJitter: number;
+  radiusStartMin: number;
+  radiusStartMax: number;
+  bandOffset: number;
+  spinFactor: number;
 }
 
 interface ImpactParticleConfig {
@@ -1315,58 +1327,14 @@ interface ImpactParticleConfig {
   radiusEnd: number;
   yLift: number;
   size: number;
-  stretch: number;
   spin: number;
   delay: number;
   depth: number;
   orbit: number;
-  secondary: boolean;
 }
 
-const impactSplashProfiles: Record<ViewerImpactRarity, ImpactSplashProfile> = {
-  rare: {
-    count: 16,
-    reach: 2.55,
-    verticalReach: 1.1,
-    sizeMin: 0.22,
-    sizeMax: 0.38,
-    stretchMin: 1.8,
-    stretchMax: 2.7,
-    delaySpread: 0.04,
-    burstWindow: 0.18,
-    orbit: 0.18,
-    depthSpread: 0.08,
-    accentEvery: 4,
-  },
-  epic: {
-    count: 24,
-    reach: 3.15,
-    verticalReach: 1.45,
-    sizeMin: 0.24,
-    sizeMax: 0.48,
-    stretchMin: 2.1,
-    stretchMax: 3.2,
-    delaySpread: 0.055,
-    burstWindow: 0.2,
-    orbit: 0.28,
-    depthSpread: 0.12,
-    accentEvery: 3,
-  },
-  veryrare: {
-    count: 34,
-    reach: 3.9,
-    verticalReach: 1.8,
-    sizeMin: 0.26,
-    sizeMax: 0.58,
-    stretchMin: 2.4,
-    stretchMax: 3.8,
-    delaySpread: 0.075,
-    burstWindow: 0.22,
-    orbit: 0.42,
-    depthSpread: 0.16,
-    accentEvery: 2,
-  },
-};
+const impactSplashProfiles: Record<ViewerImpactRarity, ImpactSplashProfile> =
+  rarityRevealImpactProfiles;
 
 function seededUnit(seed: number) {
   const value = Math.sin(seed * 127.1) * 43758.5453123;
@@ -1374,7 +1342,30 @@ function seededUnit(seed: number) {
 }
 
 function getImpactSplashRarity(rarity: Rarity): ViewerImpactRarity | null {
-  return rarity === 'rare' || rarity === 'epic' || rarity === 'veryrare' ? rarity : null;
+  return rarity;
+}
+
+function useImpactParticleTextures() {
+  const textures = useLoader(
+    TextureLoader,
+    rarityRevealImpactOrder.map((rarity) => rarityRevealImpactProfiles[rarity].iconUrl),
+  );
+
+  return useMemo(
+    () =>
+      Object.fromEntries(
+        rarityRevealImpactOrder.map((rarity, index) => {
+          const texture = textures[index];
+          texture.colorSpace = SRGBColorSpace;
+          texture.magFilter = LinearFilter;
+          texture.minFilter = LinearFilter;
+          texture.generateMipmaps = false;
+          texture.needsUpdate = true;
+          return [rarity, texture];
+        }),
+      ) as Record<Rarity, Texture>,
+    [textures],
+  );
 }
 
 function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
@@ -1384,10 +1375,15 @@ function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
     const seed = index + 1;
     const band = index % 3;
     const angle =
-      (index / profile.count) * Math.PI * 2 + (seededUnit(seed * 1.37) - 0.5) * 0.52;
-    const radiusStart = 0.12 + seededUnit(seed * 2.11) * 0.34;
+      (index / profile.count) * Math.PI * 2 +
+      (seededUnit(seed * 1.37) - 0.5) * profile.angleJitter;
+    const radiusStart = MathUtils.lerp(
+      profile.radiusStartMin,
+      profile.radiusStartMax,
+      seededUnit(seed * 2.11),
+    );
     const radiusEnd =
-      profile.reach * (0.74 + seededUnit(seed * 3.17) * 0.42) + band * 0.16;
+      profile.reach * (0.74 + seededUnit(seed * 3.17) * 0.42) + band * profile.bandOffset;
 
     return {
       angle,
@@ -1395,12 +1391,10 @@ function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
       radiusEnd,
       yLift: (seededUnit(seed * 4.09) - 0.5) * profile.verticalReach + (band - 1) * 0.12,
       size: MathUtils.lerp(profile.sizeMin, profile.sizeMax, seededUnit(seed * 5.33)),
-      stretch: MathUtils.lerp(profile.stretchMin, profile.stretchMax, seededUnit(seed * 6.41)),
-      spin: (seededUnit(seed * 7.07) - 0.5) * Math.PI * 1.2,
+      spin: (seededUnit(seed * 7.07) - 0.5) * Math.PI * profile.spinFactor,
       delay: seededUnit(seed * 8.17) * profile.delaySpread,
       depth: (seededUnit(seed * 9.91) - 0.5) * profile.depthSpread,
       orbit: (seededUnit(seed * 10.73) - 0.5) * profile.orbit,
-      secondary: index % profile.accentEvery === 0,
     };
   });
 }
@@ -1444,6 +1438,7 @@ function CardRig({
   pointer: Vector2;
   pointerTarget: Vector2;
 }) {
+  const floatGroupRef = useRef<Group>(null);
   const outerGroupRef = useRef<Group>(null);
   const stackGroupRef = useRef<Group>(null);
   const activeHoverGroupRef = useRef<Group>(null);
@@ -1480,6 +1475,7 @@ function CardRig({
   const textureAssetsReady = useCardTextureAssetsReady(card);
   const textures = useCardTextures(textureAssetsReady ? card : null);
   const stackBackTexture = useStackCardBackTexture();
+  const impactParticleTextures = useImpactParticleTextures();
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const hasArtImage = Boolean(card.urlImage?.trim());
@@ -1540,6 +1536,9 @@ function CardRig({
   const surfaceNormalScale = useMemo(() => new Vector2(0.16, 0.16), []);
   const surfaceClearcoatScale = useMemo(() => new Vector2(0.24, 0.24), []);
   const isStackPreset = effectsPreset === 'stack';
+  const floatSpeed = isStackPreset ? 0 : 1.35;
+  const floatRotationIntensity = isStackPreset ? 0 : 0.06;
+  const floatIntensity = isStackPreset ? 0 : 0.18;
   const showDecorativeEffects = false;
   const showPostProcessing = effectsPreset === 'full';
   const showFrontTreatments = !isStackPreset;
@@ -1550,6 +1549,20 @@ function CardRig({
     () => (impactSplashRarity ? createImpactParticleConfigs(impactSplashRarity) : []),
     [impactSplashRarity],
   );
+  const impactParticleTexture = impactSplashRarity
+    ? impactParticleTextures[impactSplashRarity]
+    : null;
+  const impactParticleTextureAspect = useMemo(() => {
+    const image = impactParticleTexture?.image as
+      | { width?: number; height?: number }
+      | undefined;
+
+    if (!image?.width || !image?.height) {
+      return 1;
+    }
+
+    return image.width / image.height;
+  }, [impactParticleTexture]);
   const faceGeometry = useMemo(
     () => createRoundedFaceGeometry(CARD_FACE.width, CARD_FACE.height, CARD_BODY.radius),
     [],
@@ -1729,6 +1742,29 @@ function CardRig({
   useFrame((state, delta) => {
     if (!outerGroupRef.current || !activeGroupRef.current || !activeHoverGroupRef.current) {
       return;
+    }
+
+    if (floatGroupRef.current) {
+      if (floatSpeed === 0) {
+        floatGroupRef.current.position.y = 0;
+        floatGroupRef.current.rotation.set(0, 0, 0);
+      } else {
+        const floatTime = state.clock.elapsedTime;
+        floatGroupRef.current.rotation.x =
+          (Math.cos((floatTime / 4) * floatSpeed) / 8) * floatRotationIntensity;
+        floatGroupRef.current.rotation.y =
+          (Math.sin((floatTime / 4) * floatSpeed) / 8) * floatRotationIntensity;
+        floatGroupRef.current.rotation.z =
+          (Math.sin((floatTime / 4) * floatSpeed) / 20) * floatRotationIntensity;
+        const floatYOffset = MathUtils.mapLinear(
+          Math.sin((floatTime / 4) * floatSpeed) / 10,
+          -0.1,
+          0.1,
+          -0.1,
+          0.1,
+        );
+        floatGroupRef.current.position.y = floatYOffset * floatIntensity;
+      }
     }
 
     pointer.x = MathUtils.damp(pointer.x, pointerTarget.x, 8, delta);
@@ -1987,7 +2023,7 @@ function CardRig({
                 : 0
           : 0;
 
-      impactFlashRef.current.opacity = fillOpacity;
+      impactFlashRef.current.opacity = fillOpacity * (splashProfile?.flashOpacity ?? 0);
       impactGlowRef.current.opacity = 0;
       impactFlashRef.current.color.set(meta.hue);
       impactGlowRef.current.color.set(meta.hue);
@@ -2080,11 +2116,7 @@ function CardRig({
         </mesh>
       ) : null}
 
-      <Float
-        speed={isStackPreset ? 0 : 1.35}
-        rotationIntensity={isStackPreset ? 0 : 0.06}
-        floatIntensity={isStackPreset ? 0 : 0.18}
-      >
+      <group ref={floatGroupRef}>
         <group ref={outerGroupRef}>
           {stackBackCount > 0 ? (
             <group ref={stackGroupRef}>
@@ -2208,7 +2240,7 @@ function CardRig({
                     />
                   </mesh>
 
-                  {impactParticleConfigs.length > 0 ? (
+                  {impactParticleConfigs.length > 0 && impactParticleTexture ? (
                     <group position={[0, 0, faceOffset + 0.052]}>
                       {impactParticleConfigs.map((particle, index) => (
                         <group
@@ -2218,40 +2250,17 @@ function CardRig({
                           }}
                           visible={false}
                         >
-                          <mesh rotation={[0, 0, particle.angle]} scale={[particle.stretch, 0.18, 1]}>
+                          <mesh rotation={[0, 0, particle.angle]} scale={[impactParticleTextureAspect, 1, 1]}>
                             <planeGeometry args={[1, 1]} />
                             <meshBasicMaterial
-                              color={new Color(meta.hue)}
+                              alphaTest={0.02}
                               depthTest={false}
                               depthWrite={false}
+                              map={impactParticleTexture}
                               toneMapped={false}
+                              transparent
                             />
                           </mesh>
-
-                          <mesh rotation={[0, 0, particle.angle + Math.PI * 0.25]} scale={[0.32, 0.32, 1]}>
-                            <planeGeometry args={[1, 1]} />
-                            <meshBasicMaterial
-                              color={new Color(meta.hue)}
-                              depthTest={false}
-                              depthWrite={false}
-                              toneMapped={false}
-                            />
-                          </mesh>
-
-                          {particle.secondary ? (
-                            <mesh
-                              rotation={[0, 0, particle.angle + Math.PI * 0.5]}
-                              scale={[particle.stretch * 0.64, 0.12, 1]}
-                            >
-                              <planeGeometry args={[1, 1]} />
-                              <meshBasicMaterial
-                                color={new Color(meta.hue)}
-                                depthTest={false}
-                                depthWrite={false}
-                                toneMapped={false}
-                              />
-                            </mesh>
-                          ) : null}
                         </group>
                       ))}
                     </group>
@@ -2847,7 +2856,7 @@ function CardRig({
             </group>
           </group>
         </group>
-      </Float>
+      </group>
 
       {showDecorativeEffects ? (
         <Sparkles

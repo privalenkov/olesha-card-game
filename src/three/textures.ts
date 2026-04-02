@@ -29,6 +29,7 @@ import {
   type CardTreatmentEffect,
   type CardVisuals,
   type OwnedCard,
+  type Rarity,
 } from '../game/types';
 
 interface CardFrontTextureOptions {
@@ -2299,13 +2300,9 @@ function drawPackFace(face: 'front' | 'back') {
       ctx.fillText(line, 132, 472 + index * 122);
     });
 
-    const rarityRows = [
-      ['COMMON', '#84c7ff'],
-      ['UNCOMMON', '#66ffcb'],
-      ['RARE', '#ffd46b'],
-      ['EPIC', '#ff7e5f'],
-      ['VERY RARE', '#fff9d8'],
-    ];
+    const rarityRows = (['common', 'uncommon', 'rare', 'epic', 'veryrare'] as Rarity[]).map(
+      (rarity) => [rarityMeta[rarity].label.toLocaleUpperCase(), rarityMeta[rarity].hue] as const,
+    );
 
     rarityRows.forEach(([label, color], index) => {
       const y = 1040 + index * 92;
