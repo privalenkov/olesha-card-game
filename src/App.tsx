@@ -73,7 +73,13 @@ function AppShell() {
 
     try {
       const response = await requestProposalStart();
-      navigate(`/creator/${response.proposal.id}`);
+      navigate(`/creator/${response.proposal.id}`, {
+        state: response.created
+          ? {
+              awardedProposalId: response.proposal.id,
+            }
+          : undefined,
+      });
     } catch (error) {
       if (error instanceof ApiError && error.alreadyNotified) {
         return;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { buildCollectionCardShareUrl } from '../game/collectionPaths';
 import { copyTextToClipboard } from '../game/clipboard';
 import { useGame } from '../game/GameContext';
+import { rarityRevealImpactDurationsMs } from '../game/rarityRevealEffects';
 import type { OwnedCard, Rarity } from '../game/types';
 import { CardCreatorLink } from './CardCreatorLink';
 import { CardViewerCanvas } from './CardViewerCanvas';
@@ -85,27 +86,27 @@ const initialCarouselSwipeGesture: CarouselSwipeGesture = {
 const revealProfiles: Record<Rarity, RevealProfile> = {
   common: {
     chargeMs: 120,
-    effectMs: 240,
+    effectMs: rarityRevealImpactDurationsMs.common,
     cardDelayLabel: 'Обычная карта раскрывается через короткую вспышку и маленький сплеш.',
   },
   uncommon: {
     chargeMs: 220,
-    effectMs: 460,
+    effectMs: rarityRevealImpactDurationsMs.uncommon,
     cardDelayLabel: 'Необычная карта получает мягкий свет и небольшой сплеш.',
   },
   rare: {
     chargeMs: 760,
-    effectMs: 2400,
+    effectMs: rarityRevealImpactDurationsMs.rare,
     cardDelayLabel: 'Редкая карта заливается цветом и выбрасывает крупный сплеш частиц.',
   },
   epic: {
     chargeMs: 980,
-    effectMs: 2600,
+    effectMs: rarityRevealImpactDurationsMs.epic,
     cardDelayLabel: 'Epic карта держит сплошную заливку дольше и раскрывается через более насыщенный сплеш.',
   },
   veryrare: {
     chargeMs: 1320,
-    effectMs: 2800,
+    effectMs: rarityRevealImpactDurationsMs.veryrare,
     cardDelayLabel: 'Very Rare карта получает самый крупный и сложный партикл-сплеш перед раскрытием.',
   },
 };

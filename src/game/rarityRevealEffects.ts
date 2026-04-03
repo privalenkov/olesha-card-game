@@ -32,6 +32,14 @@ export const rarityRevealImpactOrder: Rarity[] = [
   'veryrare',
 ];
 
+export const rarityRevealImpactDurationsMs: Record<Rarity, number> = {
+  common: 240,
+  uncommon: 460,
+  rare: 2400,
+  epic: 2600,
+  veryrare: 2800,
+};
+
 export const rarityRevealImpactProfiles: Record<Rarity, RarityRevealImpactProfile> = {
   common: {
     iconUrl: commonImpactIconUrl,

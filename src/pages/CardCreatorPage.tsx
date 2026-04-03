@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import ColorPicker from 'react-best-gradient-color-picker';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CardEffectMaskEditor } from '../components/CardEffectMaskEditor';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
+import { RarityGrantModal } from '../components/RarityGrantModal';
 import {
   ApiError,
   fetchProposal,
@@ -200,8 +201,13 @@ function triggerAssetDownload(url: string, fileName: string) {
   link.remove();
 }
 
+interface CreatorEntryLocationState {
+  awardedProposalId?: string;
+}
+
 export function CardCreatorPage() {
   const { proposalId = '' } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { authConfigured, authenticated, isAdmin, login, notify } = useGame();
   const [proposal, setProposal] = useState<CardProposal | null>(null);
@@ -216,6 +222,8 @@ export function CardCreatorPage() {
   const [eraseMode, setEraseMode] = useState(false);
   const [adminRarity, setAdminRarity] = useState<Rarity>('common');
   const [adminEffects, setAdminEffects] = useState<CardTreatmentEffect[]>([]);
+  const [grantedRarity, setGrantedRarity] = useState<Rarity | null>(null);
+  const [rarityGrantOpen, setRarityGrantOpen] = useState(false);
 
   useEffect(() => {
     if (!proposalId) {
@@ -265,6 +273,18 @@ export function CardCreatorPage() {
     setAdminRarity(proposal.rarity);
     setAdminEffects(proposal.allowedEffects);
   }, [proposal]);
+
+  useEffect(() => {
+    const state = location.state as CreatorEntryLocationState | null;
+
+    if (!proposal || !state?.awardedProposalId || state.awardedProposalId !== proposal.id) {
+      return;
+    }
+
+    setGrantedRarity(proposal.rarity);
+    setRarityGrantOpen(true);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate, proposal]);
 
   useEffect(() => {
     if (!draft) {
@@ -692,80 +712,81 @@ export function CardCreatorPage() {
   }
 
   return (
-    <section className="page page--creator">
-      <div className="creator-header">
-        <div>
-          <strong>Редактор карточки</strong>
-          {isAdmin ? (
-            <span>
-              Редкость выдана сервером: {proposal.rarity} • treatments: {draft.effectLayers.length}/
-              {proposal.maxEffectLayers}
-            </span>
-          ) : (
-            <span>
-              Доступно эффектов: {draft.effectLayers.length}/{proposal.maxEffectLayers}
-            </span>
-          )}
-        </div>
-        <div className="creator-header__actions">
-          <button
-            className="action-button"
-            disabled={saving || isLocked}
-            onClick={() => void persistDraft()}
-            type="button"
-          >
-            Сохранить черновик
-          </button>
-          <button
-            className="action-button action-button--solid"
-            disabled={saving || isLocked}
-            onClick={() => void handleSubmit()}
-            type="button"
-          >
-            Отправить на модерацию
-          </button>
-        </div>
-      </div>
-
-      {isAdmin && rarityBalance ? (
-        <div className="creator-rarity-balance">
-          {rarityOrder.map((rarity) => {
-            const entry = rarityBalance.entries.find((item) => item.rarity === rarity);
-
-            if (!entry) {
-              return null;
-            }
-
-            return (
-              <article
-                key={entry.rarity}
-                className="creator-rarity-balance__card"
-                style={{ '--rarity-color': rarityMeta[entry.rarity].hue } as CSSProperties}
-              >
-                <strong>{rarityMeta[entry.rarity].label}</strong>
-                <span>Сейчас в редакторе: {(entry.proposalChance * 100).toFixed(1)}%</span>
-                <span>
-                  В каталоге: {entry.catalogCount} • цель {(entry.targetCatalogShare * 100).toFixed(1)}%
-                </span>
-              </article>
-            );
-          })}
-        </div>
-      ) : null}
-
-      <div className="creator-layout">
-        <div className="creator-preview">
-          <CardViewerCanvas
-            key={viewerRenderKey}
-            card={previewCard}
-            introKey={previewCard.instanceId}
-            cameraZ={10.6}
-            scaleMultiplier={0.7}
-            effectsPreset="full"
-          />
+    <>
+      <section className="page page--creator">
+        <div className="creator-header">
+          <div>
+            <strong>Редактор карточки</strong>
+            {isAdmin ? (
+              <span>
+                Редкость выдана сервером: {proposal.rarity} • treatments: {draft.effectLayers.length}/
+                {proposal.maxEffectLayers}
+              </span>
+            ) : (
+              <span>
+                Доступно эффектов: {draft.effectLayers.length}/{proposal.maxEffectLayers}
+              </span>
+            )}
+          </div>
+          <div className="creator-header__actions">
+            <button
+              className="action-button"
+              disabled={saving || isLocked}
+              onClick={() => void persistDraft()}
+              type="button"
+            >
+              Сохранить черновик
+            </button>
+            <button
+              className="action-button action-button--solid"
+              disabled={saving || isLocked}
+              onClick={() => void handleSubmit()}
+              type="button"
+            >
+              Отправить на модерацию
+            </button>
+          </div>
         </div>
 
-        <div className="creator-form">
+        {isAdmin && rarityBalance ? (
+          <div className="creator-rarity-balance">
+            {rarityOrder.map((rarity) => {
+              const entry = rarityBalance.entries.find((item) => item.rarity === rarity);
+
+              if (!entry) {
+                return null;
+              }
+
+              return (
+                <article
+                  key={entry.rarity}
+                  className="creator-rarity-balance__card"
+                  style={{ '--rarity-color': rarityMeta[entry.rarity].hue } as CSSProperties}
+                >
+                  <strong>{rarityMeta[entry.rarity].label}</strong>
+                  <span>Сейчас в редакторе: {(entry.proposalChance * 100).toFixed(1)}%</span>
+                  <span>
+                    В каталоге: {entry.catalogCount} • цель {(entry.targetCatalogShare * 100).toFixed(1)}%
+                  </span>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div className="creator-layout">
+          <div className="creator-preview">
+            <CardViewerCanvas
+              key={viewerRenderKey}
+              card={previewCard}
+              introKey={previewCard.instanceId}
+              cameraZ={10.6}
+              scaleMultiplier={0.7}
+              effectsPreset="full"
+            />
+          </div>
+
+          <div className="creator-form">
           <div className="creator-section">
             <div className="creator-section__head">
               <strong>Основа карточки</strong>
@@ -1552,8 +1573,19 @@ export function CardCreatorPage() {
             {proposal.rejectionReason ? <span>Причина отказа: {proposal.rejectionReason}</span> : null}
             {statusMessage ? <span>{statusMessage}</span> : null}
           </div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {rarityGrantOpen && grantedRarity ? (
+        <RarityGrantModal
+          onClose={() => {
+            setRarityGrantOpen(false);
+            setGrantedRarity(null);
+          }}
+          rarity={grantedRarity}
+        />
+      ) : null}
+    </>
   );
 }

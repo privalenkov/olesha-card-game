@@ -1395,9 +1395,12 @@ export async function buildApp() {
       return;
     }
 
+    const result = store.startCardProposal(user);
+
     setNoStore(reply);
     reply.send({
-      proposal: store.startCardProposal(user),
+      created: result.created,
+      proposal: result.proposal,
       rarityBalance: store.getCurrentRarityBalance(),
     });
   });

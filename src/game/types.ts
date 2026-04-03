@@ -430,6 +430,7 @@ export interface AdminProposalOverridePayload {
 }
 
 export interface StartProposalResult {
+  created: boolean;
   proposal: CardProposal;
   rarityBalance: RarityBalanceSnapshot;
 }

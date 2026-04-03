@@ -2120,11 +2120,14 @@ export function createGameStore(config: ServerConfig) {
     return buildRarityBalanceSnapshot(getActiveCatalogDefinitions());
   }
 
-  function startCardProposal(user: AuthUser): CardProposal {
+  function startCardProposal(user: AuthUser): { proposal: CardProposal; created: boolean } {
     const existing = selectLatestActiveProposalByUser.get(user.id) as ProposalRow | undefined;
 
     if (existing) {
-      return toCardProposal(existing);
+      return {
+        proposal: toCardProposal(existing),
+        created: false,
+      };
     }
 
     const now = new Date().toISOString();
@@ -2161,7 +2164,10 @@ export function createGameStore(config: ServerConfig) {
       null,
     );
 
-    return toCardProposal(selectProposalById.get(proposalId) as ProposalRow);
+    return {
+      proposal: toCardProposal(selectProposalById.get(proposalId) as ProposalRow),
+      created: true,
+    };
   }
 
   function getProposalById(proposalId: string): CardProposal | null {

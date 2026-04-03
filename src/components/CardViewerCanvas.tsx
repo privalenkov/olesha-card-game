@@ -7,7 +7,7 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Canvas, type ThreeEvent, useFrame, useLoader } from '@react-three/fiber';
+import { Canvas, type ThreeEvent, useFrame } from '@react-three/fiber';
 import { Sparkles } from '@react-three/drei';
 import {
   AdditiveBlending,
@@ -23,18 +23,11 @@ import {
   ShaderMaterial,
   Shape,
   ShapeGeometry,
-  LinearFilter,
-  SRGBColorSpace,
-  TextureLoader,
-  type Texture,
   Vector2,
   Vector3,
 } from 'three';
 import { finishMeta, rarityMeta } from '../game/config';
-import {
-  rarityRevealImpactOrder,
-  rarityRevealImpactProfiles,
-} from '../game/rarityRevealEffects';
+import { rarityRevealImpactProfiles } from '../game/rarityRevealEffects';
 import {
   CARD_ASPECT_HEIGHT,
   CARD_ASPECT_WIDTH,
@@ -49,6 +42,7 @@ import {
   type Rarity,
 } from '../game/types';
 import { useCardTextureAssetsReady, useCardTextures, useStackCardBackTexture } from '../three/textures';
+import { createImpactParticleConfigs, useImpactParticleTextures } from './RarityImpactParticles';
 import {
   VIEWER_BASE_TILT_X,
   SharedViewerLighting,
@@ -1349,82 +1343,11 @@ interface ImpactSplashProfile {
   spinFactor: number;
 }
 
-interface ImpactParticleConfig {
-  angle: number;
-  radiusStart: number;
-  radiusEnd: number;
-  yLift: number;
-  size: number;
-  spin: number;
-  delay: number;
-  depth: number;
-  orbit: number;
-}
-
 const impactSplashProfiles: Record<ViewerImpactRarity, ImpactSplashProfile> =
   rarityRevealImpactProfiles;
 
-function seededUnit(seed: number) {
-  const value = Math.sin(seed * 127.1) * 43758.5453123;
-  return value - Math.floor(value);
-}
-
 function getImpactSplashRarity(rarity: Rarity): ViewerImpactRarity | null {
   return rarity;
-}
-
-function useImpactParticleTextures() {
-  const textures = useLoader(
-    TextureLoader,
-    rarityRevealImpactOrder.map((rarity) => rarityRevealImpactProfiles[rarity].iconUrl),
-  );
-
-  return useMemo(
-    () =>
-      Object.fromEntries(
-        rarityRevealImpactOrder.map((rarity, index) => {
-          const texture = textures[index];
-          texture.colorSpace = SRGBColorSpace;
-          texture.magFilter = LinearFilter;
-          texture.minFilter = LinearFilter;
-          texture.generateMipmaps = false;
-          texture.needsUpdate = true;
-          return [rarity, texture];
-        }),
-      ) as Record<Rarity, Texture>,
-    [textures],
-  );
-}
-
-function createImpactParticleConfigs(rarity: ViewerImpactRarity) {
-  const profile = impactSplashProfiles[rarity];
-
-  return Array.from({ length: profile.count }, (_, index): ImpactParticleConfig => {
-    const seed = index + 1;
-    const band = index % 3;
-    const angle =
-      (index / profile.count) * Math.PI * 2 +
-      (seededUnit(seed * 1.37) - 0.5) * profile.angleJitter;
-    const radiusStart = MathUtils.lerp(
-      profile.radiusStartMin,
-      profile.radiusStartMax,
-      seededUnit(seed * 2.11),
-    );
-    const radiusEnd =
-      profile.reach * (0.74 + seededUnit(seed * 3.17) * 0.42) + band * profile.bandOffset;
-
-    return {
-      angle,
-      radiusStart,
-      radiusEnd,
-      yLift: (seededUnit(seed * 4.09) - 0.5) * profile.verticalReach + (band - 1) * 0.12,
-      size: MathUtils.lerp(profile.sizeMin, profile.sizeMax, seededUnit(seed * 5.33)),
-      spin: (seededUnit(seed * 7.07) - 0.5) * Math.PI * profile.spinFactor,
-      delay: seededUnit(seed * 8.17) * profile.delaySpread,
-      depth: (seededUnit(seed * 9.91) - 0.5) * profile.depthSpread,
-      orbit: (seededUnit(seed * 10.73) - 0.5) * profile.orbit,
-    };
-  });
 }
 
 function CardRig({

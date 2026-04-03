@@ -1,0 +1,123 @@
+.rarity-grant-modal {
+  display: grid;
+  gap: 10px;
+}
+
+.rarity-grant-modal__pill-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 148px;
+  margin: 4px 0 8px;
+}
+
+.rarity-grant-modal__pill {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 90px;
+  height: 23px;
+  border-radius: 8px;
+  background: var(--rarity-color);
+}
+
+.rarity-grant-modal__pill span {
+  position: relative;
+  z-index: 1;
+  font-family: 'Inter', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #F4F1DE;
+}
+
+.rarity-grant-modal__particles {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 224px;
+  height: 132px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.rarity-grant-modal__particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--particle-size);
+  height: var(--particle-size);
+  opacity: 0;
+  transform:
+    translate(
+      calc(-50% + var(--particle-from-x)),
+      calc(-50% + var(--particle-from-y))
+    )
+    rotate(var(--particle-rotate-from))
+    scale(0.28);
+  transform-origin: center;
+  animation: rarity-grant-particle-stream var(--particle-duration) linear infinite;
+  animation-delay: var(--particle-delay);
+  will-change: transform, opacity;
+}
+
+.rarity-grant-modal__message {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: #B3AF98;
+}
+
+@keyframes rarity-grant-particle-stream {
+  0% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--particle-from-x)),
+        calc(-50% + var(--particle-from-y))
+      )
+      rotate(var(--particle-rotate-from))
+      scale(0.28);
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--particle-to-x)),
+        calc(-50% + var(--particle-to-y))
+      )
+      rotate(var(--particle-rotate-to))
+      scale(1);
+  }
+}
+
+@media (max-width: 768px) {
+  .rarity-grant-modal__pill-stage {
+    min-height: 132px;
+  }
+
+  .rarity-grant-modal__particles {
+    width: 208px;
+    height: 124px;
+  }
+
+  .rarity-grant-modal__message {
+    font-size: 12px;
+    max-width: 100%;
+  }
+}
