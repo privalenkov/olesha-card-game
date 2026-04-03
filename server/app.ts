@@ -363,7 +363,15 @@ function getRequestPath(request: FastifyRequest) {
 }
 
 function normalizeCollectionFilter(value: unknown): CollectionFilter {
-  return value === 'duplicates' ? 'duplicates' : 'all';
+  if (value === 'duplicates') {
+    return 'duplicates';
+  }
+
+  if (value === 'created') {
+    return 'created';
+  }
+
+  return 'all';
 }
 
 function normalizeCollectionOffset(value: unknown): number {

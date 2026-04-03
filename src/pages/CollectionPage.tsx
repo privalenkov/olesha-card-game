@@ -326,12 +326,22 @@ export function CollectionPage() {
   }, [activeCard, activePlayerSlug, notify, viewedOwner?.shareSlug]);
 
   const isRemoteCollection = Boolean(activePlayerSlug) && !isOwnCollection;
+  const canFilterCreatedCards = Boolean(activePlayerSlug);
+  const createdTabLabel = isOwnCollection ? 'Созданные мной' : 'Созданные пользователем';
   const emptyTitle = isRemoteCollection
     ? 'У этого игрока пока нет карточек'
     : authenticated
       ? 'Коллекция пока пустая'
       : 'Открой ссылку игрока или войди в аккаунт';
   const filteredCount = activeTab === 'duplicates' ? duplicateCount : filteredTotal;
+  const filteredEmptyTitle =
+    activeTab === 'duplicates'
+      ? 'Дубликаты пока не найдены'
+      : activeTab === 'created'
+        ? isOwnCollection
+          ? 'Карточки, созданные мной, пока не найдены'
+          : 'Карточки, созданные пользователем, пока не найдены'
+        : emptyTitle;
 
   return (
     <div className="page page--collection page--collection-minimal">
@@ -371,6 +381,15 @@ export function CollectionPage() {
           >
             Дубликаты
           </button>
+          {canFilterCreatedCards ? (
+            <button
+              className={`filter-pill ${activeTab === 'created' ? 'filter-pill--active' : ''}`}
+              onClick={() => setActiveTab('created')}
+              type="button"
+            >
+              {createdTabLabel}
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -401,7 +420,7 @@ export function CollectionPage() {
         </section>
       ) : (
         <section className="collection-empty collection-empty--compact">
-          <strong>Дубликаты пока не найдены</strong>
+          <strong>{filteredEmptyTitle}</strong>
         </section>
       )}
 

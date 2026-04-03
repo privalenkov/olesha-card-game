@@ -1512,6 +1512,17 @@ export function createGameStore(config: ServerConfig) {
     ) ranked_owned_cards
     where duplicate_rank > 1
   `);
+  const selectCreatedCollectionCount = db.prepare(`
+    select count(*) as count
+    from owned_cards
+    where owned_cards.user_id = ?
+      and exists (
+        select 1
+        from card_proposals
+        where card_proposals.approved_card_definition_id = owned_cards.card_definition_id
+          and card_proposals.creator_user_id = ?
+      )
+  `);
   const selectCollectionPage = db.prepare(`
     select
       card_definitions.id,
@@ -1546,6 +1557,49 @@ export function createGameStore(config: ServerConfig) {
     from owned_cards
     join card_definitions on card_definitions.id = owned_cards.card_definition_id
     where owned_cards.user_id = ?
+    order by owned_cards.acquired_at desc, owned_cards.instance_id desc
+    limit ? offset ?
+  `);
+  const selectCreatedCollectionPage = db.prepare(`
+    select
+      card_definitions.id,
+      card_definitions.title,
+      card_definitions.url_image,
+      card_definitions.rarity,
+      card_definitions.description,
+      card_definitions.power,
+      card_definitions.cringe,
+      card_definitions.fame,
+      card_definitions.rarity_score,
+      card_definitions.humor,
+      card_definitions.default_finish,
+      card_definitions.creator_name,
+      (
+        select coalesce(users.nickname, users.id)
+        from card_proposals
+        join users on users.id = card_proposals.creator_user_id
+        where card_proposals.approved_card_definition_id = card_definitions.id
+        order by datetime(coalesce(card_proposals.approved_at, card_proposals.updated_at)) desc
+        limit 1
+      ) as creator_share_slug,
+      card_definitions.visual_frame_style,
+      card_definitions.visual_accent_color,
+      card_definitions.visual_pattern_json,
+      card_definitions.effect_layers_json,
+      owned_cards.instance_id,
+      owned_cards.acquired_at,
+      owned_cards.pack_number,
+      owned_cards.finish,
+      owned_cards.holographic_seed
+    from owned_cards
+    join card_definitions on card_definitions.id = owned_cards.card_definition_id
+    where owned_cards.user_id = ?
+      and exists (
+        select 1
+        from card_proposals
+        where card_proposals.approved_card_definition_id = card_definitions.id
+          and card_proposals.creator_user_id = ?
+      )
     order by owned_cards.acquired_at desc, owned_cards.instance_id desc
     limit ? offset ?
   `);
@@ -1898,9 +1952,17 @@ export function createGameStore(config: ServerConfig) {
     const rows =
       filter === 'duplicates'
         ? selectDuplicateCollectionPage.all(userId, limit, offset)
-        : selectCollectionPage.all(userId, limit, offset);
+        : filter === 'created'
+          ? selectCreatedCollectionPage.all(userId, userId, limit, offset)
+          : selectCollectionPage.all(userId, limit, offset);
     const cards = rows.map((row) => toOwnedCard(row as OwnedCardRow));
-    const filteredTotal = filter === 'duplicates' ? summary.duplicateCards : summary.totalCards;
+    const filteredTotal =
+      filter === 'duplicates'
+        ? summary.duplicateCards
+        : filter === 'created'
+          ? ((selectCreatedCollectionCount.get(userId, userId) as { count: number } | undefined)
+              ?.count ?? 0)
+          : summary.totalCards;
 
     return {
       ...summary,

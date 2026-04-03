@@ -364,7 +364,7 @@ export interface PublicPlayerProfile {
   avatarUrl: string | null;
 }
 
-export type CollectionFilter = 'all' | 'duplicates';
+export type CollectionFilter = 'all' | 'duplicates' | 'created';
 
 export interface CollectionSummary {
   totalCards: number;
