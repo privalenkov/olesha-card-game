@@ -127,6 +127,14 @@ function AppShell() {
           >
             Главная
           </NavLink>
+          <button
+            aria-disabled="true"
+            className="nav-link nav-link--disabled"
+            disabled
+            type="button"
+          >
+            Дейлик
+          </button>
           <NavLink
             className={({ isActive }) =>
               isActive ? 'nav-link nav-link--active' : 'nav-link'

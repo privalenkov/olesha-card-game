@@ -235,6 +235,15 @@
   cursor: progress;
 }
 
+.nav-link--disabled,
+.nav-link--disabled:disabled,
+.nav-link--disabled:hover {
+  color: rgba(244, 241, 222, 0.42);
+  opacity: 1;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .nav-link:hover,
 .nav-link--active {
   color: var(--accent);
