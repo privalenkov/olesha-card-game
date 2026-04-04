@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import ColorPicker from 'react-best-gradient-color-picker';
-import { CardCreatorFeedback } from '../components/CardCreatorFeedback';
 import { CardCreatorPreviewPanel } from '../components/CardCreatorPreviewPanel';
 import { type CardCreatorPreviewTool } from '../components/CardCreatorPreviewMenu';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CardCreatorStatusHeader } from '../components/CardCreatorStatusHeader';
 import { RarityGrantModal } from '../components/RarityGrantModal';
+import { FileUpload } from '../components/ui/FileUpload';
+import { TextArea } from '../components/ui/TextArea';
+import { TextInput } from '../components/ui/TextInput';
 import {
   ApiError,
   fetchProposal,
@@ -193,6 +195,36 @@ function inferAssetExtension(url: string, fallback: string) {
   return match?.[1]?.toLowerCase() ?? fallback;
 }
 
+function extractAssetFileName(url: string) {
+  if (!url || url.startsWith('data:')) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(url, 'http://localhost');
+    const lastSegment = parsedUrl.pathname.split('/').filter(Boolean).pop();
+    return lastSegment ? decodeURIComponent(lastSegment) : null;
+  } catch {
+    const sanitizedUrl = url.split('#')[0]?.split('?')[0] ?? '';
+    const lastSegment = sanitizedUrl.split('/').filter(Boolean).pop();
+    return lastSegment ? decodeURIComponent(lastSegment) : null;
+  }
+}
+
+function getAssetDisplayName(url: string, fallbackBaseName: string, fallbackExtension: string) {
+  if (!url) {
+    return null;
+  }
+
+  const extractedFileName = extractAssetFileName(url);
+
+  if (extractedFileName && /\.[a-z0-9]+$/iu.test(extractedFileName)) {
+    return extractedFileName;
+  }
+
+  return `${fallbackBaseName}.${inferAssetExtension(url, fallbackExtension)}`;
+}
+
 function triggerAssetDownload(url: string, fileName: string) {
   const link = document.createElement('a');
   link.href = url;
@@ -217,7 +249,6 @@ export function CardCreatorPage() {
   const [draft, setDraft] = useState<ProposalEditorPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [brushSize, setBrushSize] = useState(18);
   const [brushSoftness, setBrushSoftness] = useState(0.5);
@@ -226,7 +257,23 @@ export function CardCreatorPage() {
   const [adminEffects, setAdminEffects] = useState<CardTreatmentEffect[]>([]);
   const [grantedRarity, setGrantedRarity] = useState<Rarity | null>(null);
   const [rarityGrantOpen, setRarityGrantOpen] = useState(false);
+  const [imageFileName, setImageFileName] = useState<string | null>(null);
+  const [decorativePatternFileName, setDecorativePatternFileName] = useState<string | null>(null);
+  const [effectMaskFileNames, setEffectMaskFileNames] = useState<Record<string, string>>({});
   const isLocked = proposal?.status !== 'draft';
+  const lastRejectionNoticeRef = useRef<string | null>(null);
+  const imageUploadRequestIdRef = useRef(0);
+  const decorativePatternUploadRequestIdRef = useRef(0);
+  const effectMaskUploadRequestIdsRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    setImageFileName(null);
+    setDecorativePatternFileName(null);
+    setEffectMaskFileNames({});
+    imageUploadRequestIdRef.current = 0;
+    decorativePatternUploadRequestIdRef.current = 0;
+    effectMaskUploadRequestIdsRef.current = {};
+  }, [proposalId]);
 
   useEffect(() => {
     if (!proposalId) {
@@ -249,7 +296,6 @@ export function CardCreatorPage() {
         setProposal(response.proposal);
         setRarityBalance(response.rarityBalance);
         setDraft(draftFromProposal(response.proposal));
-        setStatusMessage(null);
       } catch (error) {
         if (!cancelled) {
           showCreatorError(getRequestErrorMessage(error, 'Не удалось открыть редактор.'), 'Ошибка загрузки');
@@ -288,6 +334,27 @@ export function CardCreatorPage() {
     setRarityGrantOpen(true);
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [location.pathname, location.search, location.state, navigate, proposal]);
+
+  useEffect(() => {
+    if (!proposal?.rejectionReason) {
+      lastRejectionNoticeRef.current = null;
+      return;
+    }
+
+    const rejectionNoticeKey = `${proposal.id}:${proposal.rejectionReason}`;
+
+    if (lastRejectionNoticeRef.current === rejectionNoticeKey) {
+      return;
+    }
+
+    lastRejectionNoticeRef.current = rejectionNoticeKey;
+    notify({
+      kind: 'error',
+      title: 'Причина отказа',
+      message: proposal.rejectionReason,
+      proposalId: proposal.id,
+    });
+  }, [notify, proposal]);
 
   useEffect(() => {
     if (!draft) {
@@ -383,9 +450,20 @@ export function CardCreatorPage() {
     }));
   }, [draft, proposal]);
 
-  function showCreatorError(message: string, title = 'Ошибка', notifyUser = true) {
-    setStatusMessage(message);
+  const mainImageDisplayName =
+    imageFileName ?? getAssetDisplayName(draft?.urlImage ?? '', 'image', 'png');
+  const mainImagePreviewUrl = draft?.urlImage || null;
+  const decorativePatternDisplayName =
+    decorativePatternFileName ??
+    getAssetDisplayName(draft?.visuals.decorativePattern.svgUrl ?? '', 'pattern', 'svg');
+  const decorativePatternPreviewUrl = draft?.visuals.decorativePattern.svgUrl || null;
+  const selectedLayerMaskDisplayName = selectedLayer
+    ? effectMaskFileNames[selectedLayer.id] ??
+      getAssetDisplayName(selectedLayer.maskUrl, `${selectedLayer.type}-mask`, 'png')
+    : null;
+  const selectedLayerMaskPreviewUrl = selectedLayer?.maskUrl || null;
 
+  function showCreatorError(message: string, title = 'Ошибка', notifyUser = true) {
     if (!notifyUser) {
       return;
     }
@@ -486,7 +564,11 @@ export function CardCreatorPage() {
       const response = await saveProposal(proposal.id, uploadedDraft);
       setProposal(response.proposal);
       setDraft(draftFromProposal(response.proposal));
-      setStatusMessage('Черновик сохранен.');
+      notify({
+        kind: 'success',
+        title: 'Черновик сохранен',
+        message: 'Изменения сохранены и готовы к дальнейшему редактированию.',
+      });
       return response.proposal;
     } catch (error) {
       showCreatorRequestError(error, 'Не удалось сохранить черновик.', 'Ошибка сохранения');
@@ -509,9 +591,8 @@ export function CardCreatorPage() {
       const response = await submitProposal(saved.id);
       setProposal(response.proposal);
       setDraft(draftFromProposal(response.proposal));
-      setStatusMessage('Карточка отправлена на модерацию.');
       notify({
-        kind: 'info',
+        kind: 'success',
         title: 'Карточка отправлена',
         message: 'Карточка ушла на модерацию. Решение придет отдельным уведомлением.',
       });
@@ -531,18 +612,34 @@ export function CardCreatorPage() {
       return;
     }
 
-    setSaving(true);
+    const requestId = imageUploadRequestIdRef.current + 1;
+    imageUploadRequestIdRef.current = requestId;
+    setImageFileName(file.name);
 
     try {
       const localDataUrl = await fileToDataUrl(file);
+
+      if (requestId !== imageUploadRequestIdRef.current) {
+        return;
+      }
+
       setDraft((current) => (current ? { ...current, urlImage: localDataUrl } : current));
       const uploaded = await uploadCardArt(localDataUrl);
+
+      if (requestId !== imageUploadRequestIdRef.current) {
+        return;
+      }
+
       setDraft((current) => (current ? { ...current, urlImage: uploaded.url } : current));
-      setStatusMessage('Изображение загружено.');
+      notify({
+        kind: 'success',
+        title: 'Изображение загружено',
+        message: 'Новое изображение карточки применено к черновику.',
+      });
     } catch (error) {
-      showCreatorRequestError(error, 'Не удалось загрузить изображение.', 'Ошибка загрузки');
-    } finally {
-      setSaving(false);
+      if (requestId === imageUploadRequestIdRef.current) {
+        showCreatorRequestError(error, 'Не удалось загрузить изображение.', 'Ошибка загрузки');
+      }
     }
   }
 
@@ -560,10 +657,17 @@ export function CardCreatorPage() {
       return;
     }
 
-    setSaving(true);
+    const requestId = decorativePatternUploadRequestIdRef.current + 1;
+    decorativePatternUploadRequestIdRef.current = requestId;
+    setDecorativePatternFileName(file.name);
 
     try {
       const localDataUrl = await fileToDataUrl(file);
+
+      if (requestId !== decorativePatternUploadRequestIdRef.current) {
+        return;
+      }
+
       setDraft((current) =>
         current
           ? {
@@ -579,6 +683,11 @@ export function CardCreatorPage() {
           : current,
       );
       const uploaded = await uploadCardArt(localDataUrl);
+
+      if (requestId !== decorativePatternUploadRequestIdRef.current) {
+        return;
+      }
+
       setDraft((current) =>
         current
           ? {
@@ -593,11 +702,15 @@ export function CardCreatorPage() {
             }
           : current,
       );
-      setStatusMessage('SVG паттерн загружен.');
+      notify({
+        kind: 'success',
+        title: 'SVG паттерн загружен',
+        message: 'Декоративный паттерн применен к карточке.',
+      });
     } catch (error) {
-      showCreatorRequestError(error, 'Не удалось загрузить SVG паттерн.', 'Ошибка загрузки');
-    } finally {
-      setSaving(false);
+      if (requestId === decorativePatternUploadRequestIdRef.current) {
+        showCreatorRequestError(error, 'Не удалось загрузить SVG паттерн.', 'Ошибка загрузки');
+      }
     }
   }
 
@@ -618,18 +731,39 @@ export function CardCreatorPage() {
       return;
     }
 
+    const requestId = (effectMaskUploadRequestIdsRef.current[layerId] ?? 0) + 1;
+    effectMaskUploadRequestIdsRef.current = {
+      ...effectMaskUploadRequestIdsRef.current,
+      [layerId]: requestId,
+    };
+
     try {
+      setEffectMaskFileNames((current) => ({
+        ...current,
+        [layerId]: file.name,
+      }));
       const localDataUrl = await fileToDataUrl(file);
       const normalizedMaskUrl = await normalizeImportedMaskDataUrl(localDataUrl);
+
+      if (effectMaskUploadRequestIdsRef.current[layerId] !== requestId) {
+        return;
+      }
+
       updateDraft((current) => ({
         ...current,
         effectLayers: current.effectLayers.map((layer) =>
           layer.id === layerId ? { ...layer, maskUrl: normalizedMaskUrl } : layer,
         ),
       }));
-      setStatusMessage('Маска загружена в слой.');
+      notify({
+        kind: 'success',
+        title: 'Маска загружена',
+        message: 'Готовая маска применена к выбранному слою.',
+      });
     } catch (error) {
-      showCreatorRequestError(error, 'Не удалось загрузить маску.', 'Ошибка загрузки');
+      if (effectMaskUploadRequestIdsRef.current[layerId] === requestId) {
+        showCreatorRequestError(error, 'Не удалось загрузить маску.', 'Ошибка загрузки');
+      }
     }
   }
 
@@ -659,7 +793,6 @@ export function CardCreatorPage() {
     }));
     setSelectedLayerId(layer.id);
     setPreviewTool('brush');
-    setStatusMessage(`Добавлен слой: ${CARD_TREATMENT_EFFECT_LABELS[effect]}.`);
   }
 
   function removeEffectLayer(layerId: string) {
@@ -667,11 +800,68 @@ export function CardCreatorPage() {
       return;
     }
 
+    delete effectMaskUploadRequestIdsRef.current[layerId];
+    setEffectMaskFileNames((current) => {
+      if (!(layerId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[layerId];
+      return next;
+    });
+
     updateDraft((current) => ({
       ...current,
       effectLayers: current.effectLayers.filter((layer) => layer.id !== layerId),
     }));
-    setStatusMessage('Слой эффекта удален.');
+  }
+
+  function clearMainImage() {
+    imageUploadRequestIdRef.current += 1;
+    setImageFileName(null);
+    updateDraft((current) => ({
+      ...current,
+      urlImage: '',
+    }));
+  }
+
+  function clearDecorativePattern() {
+    decorativePatternUploadRequestIdRef.current += 1;
+    setDecorativePatternFileName(null);
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        decorativePattern: {
+          ...current.visuals.decorativePattern,
+          svgUrl: '',
+        },
+      },
+    }));
+  }
+
+  function clearEffectMask(layerId: string) {
+    effectMaskUploadRequestIdsRef.current = {
+      ...effectMaskUploadRequestIdsRef.current,
+      [layerId]: (effectMaskUploadRequestIdsRef.current[layerId] ?? 0) + 1,
+    };
+    setEffectMaskFileNames((current) => {
+      if (!(layerId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[layerId];
+      return next;
+    });
+
+    updateDraft((current) => ({
+      ...current,
+      effectLayers: current.effectLayers.map((layer) =>
+        layer.id === layerId ? { ...layer, maskUrl: '' } : layer,
+      ),
+    }));
   }
 
   async function applyAdminOverride() {
@@ -688,7 +878,11 @@ export function CardCreatorPage() {
       });
       setProposal(response.proposal);
       setDraft(draftFromProposal(response.proposal));
-      setStatusMessage('Админский override применен.');
+      notify({
+        kind: 'success',
+        title: 'Override применен',
+        message: 'Редкость и доступные эффекты обновлены для этого черновика.',
+      });
     } catch (error) {
       showCreatorRequestError(error, 'Не удалось применить админский override.', 'Ошибка override');
     } finally {
@@ -718,7 +912,6 @@ export function CardCreatorPage() {
       <section className="page page--creator">
         <div className="creator-empty empty-state">
           <strong>Загружаю редактор карточки...</strong>
-          {statusMessage ? <span>{statusMessage}</span> : null}
         </div>
       </section>
     );
@@ -768,6 +961,8 @@ export function CardCreatorPage() {
             brushSoftness={brushSoftness}
             card={previewCard}
             disabled={isLocked}
+            onBrushSizeChange={setBrushSize}
+            onBrushSoftnessChange={setBrushSoftness}
             onMaskChange={(maskUrl) =>
               updateDraft((current) => ({
                 ...current,
@@ -785,51 +980,55 @@ export function CardCreatorPage() {
           <div className="creator-form">
           <div className="creator-section">
             <div className="creator-section__head">
-              <strong>Основа карточки</strong>
-              <span>Изображение обязательно. Без него сервер не примет карточку.</span>
+              <strong>Базовые настройки</strong>
             </div>
 
             <label className="creator-field">
-              <span>Заголовок</span>
-              <input
+              <TextInput
+                debounceMs={400}
                 disabled={isLocked}
                 maxLength={80}
-                onChange={(event) =>
+                onValueChange={(value) =>
                   updateDraft((current) => ({
                     ...current,
-                    title: event.target.value,
+                    title: value,
                   }))
                 }
-                type="text"
+                placeholder="Заголовок"
                 value={draft.title}
               />
             </label>
 
             <label className="creator-field">
-              <span>Описание</span>
-              <textarea
+              <TextArea
+                debounceMs={400}
                 disabled={isLocked}
                 maxLength={280}
-                onChange={(event) =>
+                onValueChange={(value) =>
                   updateDraft((current) => ({
                     ...current,
-                    description: event.target.value,
+                    description: value,
                   }))
                 }
+                placeholder="Описание"
                 rows={5}
                 value={draft.description}
               />
             </label>
 
-            <label className="creator-field">
+            <div className="creator-field creator-field--upload">
               <span>Изображение</span>
-              <input
+              <FileUpload
                 accept="image/png,image/jpeg,image/webp"
-                disabled={isLocked || saving}
-                onChange={(event) => void handleImageChange(event.target.files?.[0] ?? null)}
-                type="file"
+                addLabel="Добавить изображение"
+                changeLabel="Изменить изображение"
+                disabled={isLocked}
+                fileName={mainImageDisplayName}
+                onClear={clearMainImage}
+                onFileSelect={(file) => void handleImageChange(file)}
+                previewUrl={mainImagePreviewUrl}
               />
-            </label>
+            </div>
           </div>
 
           <div className="creator-section">
@@ -897,17 +1096,19 @@ export function CardCreatorPage() {
             </label>
 
             <div className="creator-row">
-              <label className="creator-field">
+              <div className="creator-field creator-field--upload">
                 <span>SVG декоративного паттерна</span>
-                <input
+                <FileUpload
                   accept=".svg,image/svg+xml"
-                  disabled={isLocked || saving}
-                  onChange={(event) =>
-                    void handleDecorativePatternChange(event.target.files?.[0] ?? null)
-                  }
-                  type="file"
+                  addLabel="Добавить SVG"
+                  changeLabel="Изменить SVG"
+                  disabled={isLocked}
+                  fileName={decorativePatternDisplayName}
+                  onClear={clearDecorativePattern}
+                  onFileSelect={(file) => void handleDecorativePatternChange(file)}
+                  previewUrl={decorativePatternPreviewUrl}
                 />
-              </label>
+              </div>
 
               <label className="creator-field">
                 <span>
@@ -927,25 +1128,6 @@ export function CardCreatorPage() {
                     type="button"
                   >
                     Скачать паттерн
-                  </button>
-                  <button
-                    className="action-button"
-                    disabled={isLocked || !draft.visuals.decorativePattern.svgUrl}
-                    onClick={() =>
-                      updateDraft((current) => ({
-                        ...current,
-                        visuals: {
-                          ...current.visuals,
-                          decorativePattern: {
-                            ...current.visuals.decorativePattern,
-                            svgUrl: '',
-                          },
-                        },
-                      }))
-                    }
-                    type="button"
-                  >
-                    Очистить SVG
                   </button>
                 </div>
               </label>
@@ -1443,45 +1625,22 @@ export function CardCreatorPage() {
                     </label>
                   ) : null}
 
-                  <label className="creator-field">
-                    <span>Размер кисти: {brushSize}px</span>
-                    <input
-                      disabled={isLocked}
-                      max={64}
-                      min={6}
-                      onChange={(event) => setBrushSize(Number(event.target.value))}
-                      step={1}
-                      type="range"
-                      value={brushSize}
-                    />
-                  </label>
-
-                  <label className="creator-field">
-                    <span>Мягкость кисти: {Math.round(brushSoftness * 100)}%</span>
-                    <input
-                      disabled={isLocked}
-                      max={1}
-                      min={0}
-                      onChange={(event) => setBrushSoftness(Number(event.target.value))}
-                      step={0.02}
-                      type="range"
-                      value={brushSoftness}
-                    />
-                  </label>
                 </div>
 
                 <div className="creator-row">
-                  <label className="creator-field">
+                  <div className="creator-field creator-field--upload">
                     <span>Загрузить готовую маску</span>
-                    <input
+                    <FileUpload
                       accept="image/png,image/jpeg,image/webp"
+                      addLabel="Добавить изображение"
+                      changeLabel="Изменить изображение"
                       disabled={isLocked}
-                      onChange={(event) =>
-                        void handleEffectMaskUpload(event.target.files?.[0] ?? null, selectedLayer.id)
-                      }
-                      type="file"
+                      fileName={selectedLayerMaskDisplayName}
+                      onClear={() => clearEffectMask(selectedLayer.id)}
+                      onFileSelect={(file) => void handleEffectMaskUpload(file, selectedLayer.id)}
+                      previewUrl={selectedLayerMaskPreviewUrl}
                     />
-                  </label>
+                  </div>
 
                   <div className="creator-field">
                     <span>Подсказка по размеру</span>
@@ -1511,30 +1670,10 @@ export function CardCreatorPage() {
                   >
                     Скачать маску
                   </button>
-                  <button
-                    className="action-button"
-                    disabled={isLocked}
-                    onClick={() =>
-                      updateDraft((current) => ({
-                        ...current,
-                        effectLayers: current.effectLayers.map((layer) =>
-                          layer.id === selectedLayer.id ? { ...layer, maskUrl: '' } : layer,
-                        ),
-                      }))
-                    }
-                    type="button"
-                  >
-                    Очистить маску
-                  </button>
                 </div>
               </div>
             ) : null}
           </div>
-
-          <CardCreatorFeedback
-            rejectionReason={proposal.rejectionReason}
-            statusMessage={statusMessage}
-          />
           </div>
         </div>
       </section>

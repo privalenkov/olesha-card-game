@@ -5,6 +5,7 @@ import {
   CardCreatorPreviewMenu,
   type CardCreatorPreviewTool,
 } from './CardCreatorPreviewMenu';
+import { CardCreatorPreviewToolSettings } from './CardCreatorPreviewToolSettings';
 
 interface CardCreatorPreviewPanelProps {
   card: OwnedCard;
@@ -15,6 +16,8 @@ interface CardCreatorPreviewPanelProps {
   disabled?: boolean;
   previewImage: string;
   selectedLayer: CardEffectLayer | null;
+  onBrushSizeChange: (value: number) => void;
+  onBrushSoftnessChange: (value: number) => void;
   onMaskChange: (maskUrl: string) => void;
   onToolChange: (tool: CardCreatorPreviewTool) => void;
 }
@@ -28,20 +31,33 @@ export function CardCreatorPreviewPanel({
   disabled = false,
   previewImage,
   selectedLayer,
+  onBrushSizeChange,
+  onBrushSoftnessChange,
   onMaskChange,
   onToolChange,
 }: CardCreatorPreviewPanelProps) {
   const isMaskMode = activeTool !== 'hand';
+  const canEditMask = Boolean(selectedLayer && previewImage);
 
   return (
     <div className="creator-preview">
-      <CardCreatorPreviewMenu
-        activeTool={activeTool}
-        canEditMask={Boolean(selectedLayer && previewImage)}
-        disabled={disabled}
-        onToolChange={onToolChange}
-        rarity={card.rarity}
-      />
+      <div className="creator-preview__toolbar">
+        <CardCreatorPreviewMenu
+          activeTool={activeTool}
+          canEditMask={canEditMask}
+          disabled={disabled}
+          onToolChange={onToolChange}
+          rarity={card.rarity}
+        />
+        <CardCreatorPreviewToolSettings
+          activeTool={activeTool}
+          brushSize={brushSize}
+          brushSoftness={brushSoftness}
+          disabled={disabled || !canEditMask}
+          onBrushSizeChange={onBrushSizeChange}
+          onBrushSoftnessChange={onBrushSoftnessChange}
+        />
+      </div>
       <div className="creator-preview__stage">
         {isMaskMode ? (
           <CardEffectMaskEditor

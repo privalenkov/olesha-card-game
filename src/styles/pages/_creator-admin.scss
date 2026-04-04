@@ -133,7 +133,7 @@
 .creator-form {
   width: 100%;
   max-width: 480px;
-  padding: 24px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -197,9 +197,59 @@
   gap: 12px;
 }
 
-.creator-field span {
+.creator-field > span {
   color: var(--copy-faint);
   font-size: 13px;
+}
+
+.creator-form .creator-section__head {
+  gap: 0;
+}
+
+.creator-form .creator-section__head strong {
+  display: block;
+  margin: 22px 0 14px;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
+}
+
+.creator-form > .creator-section:first-child > .creator-section__head strong {
+  margin-top: 0;
+}
+
+.creator-form .creator-section__head span {
+  margin: 0;
+}
+
+.creator-form label.creator-field:not(.creator-field--picker) {
+  gap: 0;
+}
+
+.creator-form .creator-field--upload {
+  gap: 0;
+}
+
+.creator-form label.creator-field:not(.creator-field--picker) > span {
+  display: block;
+  margin: 14px 0 20px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
+}
+
+.creator-form .creator-field--upload > span {
+  display: block;
+  margin: 14px 0 20px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
 }
 
 .creator-field__hint {
@@ -208,9 +258,9 @@
   font-weight: 500;
 }
 
-.creator-field input,
+.creator-field input:not(.ui-text-input):not(.ui-file-upload__input),
 .creator-field select,
-.creator-field textarea {
+.creator-field textarea:not(.ui-text-area) {
   width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
@@ -253,16 +303,6 @@
 
 .creator-swatch--active {
   border-color: #ffffff;
-}
-
-.creator-feedback {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.creator-feedback span {
-  color: var(--copy-faint);
 }
 
 .creator-effect-grants {

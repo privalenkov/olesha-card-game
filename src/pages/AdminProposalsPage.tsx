@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
+import { TextArea } from '../components/ui/TextArea';
 import { rarityMeta } from '../game/config';
 import { rarityOrder } from '../game/rarityBalance';
 import {
@@ -491,10 +492,11 @@ export function AdminProposalsPage() {
             </div>
             <label className="creator-field">
               <span>Причина отказа</span>
-              <textarea
+              <TextArea
                 autoFocus
+                debounceMs={400}
                 maxLength={280}
-                onChange={(event) => setRejectionReason(event.target.value)}
+                onValueChange={setRejectionReason}
                 placeholder="Напиши коротко и по делу, что нужно исправить автору."
                 rows={5}
                 value={rejectionReason}

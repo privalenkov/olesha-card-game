@@ -1,0 +1,25 @@
+.ui-text-area {
+  width: 100%;
+  min-height: 128px;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #F4F1DE;
+  color: #080910;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  resize: vertical;
+  outline: none;
+}
+
+.ui-text-area::placeholder {
+  color: rgba(8, 9, 16, 0.52);
+}
+
+.ui-text-area:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
