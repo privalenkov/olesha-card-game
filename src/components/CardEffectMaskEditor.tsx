@@ -17,6 +17,8 @@ interface CardEffectMaskEditorProps {
   layer: CardEffectLayer | null;
   previewImage: string;
   onMaskChange: (maskUrl: string) => void;
+  embedded?: boolean;
+  showHint?: boolean;
 }
 
 function createMaskCanvas() {
@@ -56,12 +58,15 @@ export function CardEffectMaskEditor({
   layer,
   previewImage,
   onMaskChange,
+  embedded = false,
+  showHint = true,
 }: CardEffectMaskEditorProps) {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const dirtyRef = useRef(false);
+  const syncedMaskUrlRef = useRef<string | null>(null);
 
   if (!sourceCanvasRef.current) {
     sourceCanvasRef.current = createMaskCanvas();
@@ -74,19 +79,34 @@ export function CardEffectMaskEditor({
       return;
     }
 
-    source.width = CARD_MASK_EDITOR_WIDTH;
-    source.height = CARD_MASK_EDITOR_HEIGHT;
-    overlay.width = CARD_MASK_EDITOR_WIDTH;
-    overlay.height = CARD_MASK_EDITOR_HEIGHT;
+    const sourceResized =
+      source.width !== CARD_MASK_EDITOR_WIDTH || source.height !== CARD_MASK_EDITOR_HEIGHT;
+    const overlayResized =
+      overlay.width !== CARD_MASK_EDITOR_WIDTH || overlay.height !== CARD_MASK_EDITOR_HEIGHT;
+
+    if (sourceResized) {
+      source.width = CARD_MASK_EDITOR_WIDTH;
+      source.height = CARD_MASK_EDITOR_HEIGHT;
+    }
+
+    if (overlayResized) {
+      overlay.width = CARD_MASK_EDITOR_WIDTH;
+      overlay.height = CARD_MASK_EDITOR_HEIGHT;
+    }
 
     const sourceContext = getMaskContext(source);
     if (!sourceContext) {
       return;
     }
 
-    sourceContext.clearRect(0, 0, source.width, source.height);
-
     if (!layer?.maskUrl) {
+      syncedMaskUrlRef.current = null;
+      sourceContext.clearRect(0, 0, source.width, source.height);
+      drawOverlay(overlay, source);
+      return;
+    }
+
+    if (!sourceResized && syncedMaskUrlRef.current === layer.maskUrl) {
       drawOverlay(overlay, source);
       return;
     }
@@ -100,6 +120,7 @@ export function CardEffectMaskEditor({
 
       sourceContext.clearRect(0, 0, source.width, source.height);
       sourceContext.drawImage(image, 0, 0, source.width, source.height);
+      syncedMaskUrlRef.current = layer.maskUrl;
       drawOverlay(overlay, source);
     };
     image.src = layer.maskUrl;
@@ -224,7 +245,9 @@ export function CardEffectMaskEditor({
     }
 
     dirtyRef.current = false;
-    onMaskChange(sourceCanvasRef.current.toDataURL('image/png'));
+    const nextMaskUrl = sourceCanvasRef.current.toDataURL('image/png');
+    syncedMaskUrlRef.current = nextMaskUrl;
+    onMaskChange(nextMaskUrl);
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -261,7 +284,11 @@ export function CardEffectMaskEditor({
   };
 
   return (
-    <div className={`mask-editor ${disabled ? 'mask-editor--disabled' : ''}`}>
+    <div
+      className={`mask-editor ${disabled ? 'mask-editor--disabled' : ''} ${
+        embedded ? 'mask-editor--embedded' : ''
+      }`}
+    >
       <div className="mask-editor__stage">
         {previewImage ? (
           <img alt="" className="mask-editor__preview" draggable={false} src={previewImage} />
@@ -277,11 +304,13 @@ export function CardEffectMaskEditor({
           onPointerUp={handlePointerUp}
         />
       </div>
-      <div className="mask-editor__hint">
-        {layer
-          ? 'Рисуй по карточке белой маской: белое включает treatment, стирание убирает его.'
-          : 'Выбери или добавь effect layer, чтобы начать рисовать маску.'}
-      </div>
+      {showHint ? (
+        <div className="mask-editor__hint">
+          {layer
+            ? 'Рисуй по карточке белой маской: белое включает treatment, стирание убирает его.'
+            : 'Выбери или добавь effect layer, чтобы начать рисовать маску.'}
+        </div>
+      ) : null}
     </div>
   );
 }

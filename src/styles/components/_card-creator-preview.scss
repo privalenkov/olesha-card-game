@@ -1,0 +1,110 @@
+.creator-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.creator-preview__stage {
+  --creator-preview-card-height-ratio: 50.277%;
+  --creator-preview-card-center-y: 48.24%;
+  --creator-preview-card-radius: 7.212% / 5.147%;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.creator-preview__stage .card-viewer {
+  width: 100%;
+  height: 100%;
+}
+
+.creator-preview__stage .card-viewer canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.creator-preview-menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  height: 39px;
+  padding: 0 8px 0 0;
+  border-radius: 8px;
+  background: #1C1D25;
+}
+
+.creator-preview-menu__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.creator-preview-menu__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 39px;
+  height: 39px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 160ms ease, opacity 160ms ease;
+}
+
+.creator-preview-menu__tool:hover:not(:disabled),
+.creator-preview-menu__tool--active {
+  background: #262732;
+}
+
+.creator-preview-menu__tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.34;
+}
+
+.creator-preview-menu__tool-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.creator-preview-menu__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.creator-preview__stage .mask-editor {
+  width: 100%;
+  height: 100%;
+}
+
+.creator-preview__stage .mask-editor--embedded {
+  position: relative;
+}
+
+.creator-preview__stage .mask-editor--embedded .mask-editor__stage {
+  position: absolute;
+  left: 50%;
+  top: var(--creator-preview-card-center-y);
+  width: auto;
+  height: var(--creator-preview-card-height-ratio);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 344 / 482;
+  border: none;
+  border-radius: var(--creator-preview-card-radius);
+  background: transparent;
+  clip-path: inset(0 round var(--creator-preview-card-radius));
+  transform: translate(-50%, -50%);
+}

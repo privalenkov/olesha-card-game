@@ -149,6 +149,13 @@
   font-weight: 700;
 }
 
+.action-button--outline-light {
+  border: 1px solid #F4F1DE;
+  background: transparent;
+  color: #F4F1DE;
+  box-shadow: none;
+}
+
 .hero-panel__stage,
 .collection-hero__preview {
   position: relative;

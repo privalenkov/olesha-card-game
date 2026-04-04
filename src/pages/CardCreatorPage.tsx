@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import ColorPicker from 'react-best-gradient-color-picker';
+import { CardCreatorFeedback } from '../components/CardCreatorFeedback';
+import { CardCreatorPreviewPanel } from '../components/CardCreatorPreviewPanel';
+import { type CardCreatorPreviewTool } from '../components/CardCreatorPreviewMenu';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { CardEffectMaskEditor } from '../components/CardEffectMaskEditor';
-import { CardViewerCanvas } from '../components/CardViewerCanvas';
+import { CardCreatorStatusHeader } from '../components/CardCreatorStatusHeader';
 import { RarityGrantModal } from '../components/RarityGrantModal';
 import {
   ApiError,
@@ -219,11 +221,12 @@ export function CardCreatorPage() {
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [brushSize, setBrushSize] = useState(18);
   const [brushSoftness, setBrushSoftness] = useState(0.5);
-  const [eraseMode, setEraseMode] = useState(false);
+  const [previewTool, setPreviewTool] = useState<CardCreatorPreviewTool>('hand');
   const [adminRarity, setAdminRarity] = useState<Rarity>('common');
   const [adminEffects, setAdminEffects] = useState<CardTreatmentEffect[]>([]);
   const [grantedRarity, setGrantedRarity] = useState<Rarity | null>(null);
   const [rarityGrantOpen, setRarityGrantOpen] = useState(false);
+  const isLocked = proposal?.status !== 'draft';
 
   useEffect(() => {
     if (!proposalId) {
@@ -289,11 +292,13 @@ export function CardCreatorPage() {
   useEffect(() => {
     if (!draft) {
       setSelectedLayerId(null);
+      setPreviewTool('hand');
       return;
     }
 
     if (draft.effectLayers.length === 0) {
       setSelectedLayerId(null);
+      setPreviewTool('hand');
       return;
     }
 
@@ -301,6 +306,21 @@ export function CardCreatorPage() {
       setSelectedLayerId(draft.effectLayers[0].id);
     }
   }, [draft, selectedLayerId]);
+
+  const selectedLayer = useMemo(
+    () => draft?.effectLayers.find((layer) => layer.id === selectedLayerId) ?? null,
+    [draft, selectedLayerId],
+  );
+
+  useEffect(() => {
+    if (previewTool === 'hand') {
+      return;
+    }
+
+    if (isLocked || !selectedLayer) {
+      setPreviewTool('hand');
+    }
+  }, [isLocked, previewTool, selectedLayer]);
 
   const previewCard = useMemo(() => {
     if (!proposal || !draft) {
@@ -352,11 +372,6 @@ export function CardCreatorPage() {
     ].join('::');
   }, [previewCard]);
 
-  const selectedLayer = useMemo(
-    () => draft?.effectLayers.find((layer) => layer.id === selectedLayerId) ?? null,
-    [draft, selectedLayerId],
-  );
-
   const availableEffects = useMemo(() => {
     if (!proposal || !draft) {
       return [];
@@ -367,8 +382,6 @@ export function CardCreatorPage() {
       layer: draft.effectLayers.find((layer) => layer.type === effect) ?? null,
     }));
   }, [draft, proposal]);
-
-  const isLocked = proposal?.status !== 'draft';
 
   function showCreatorError(message: string, title = 'Ошибка', notifyUser = true) {
     setStatusMessage(message);
@@ -645,7 +658,7 @@ export function CardCreatorPage() {
       effectLayers: [...current.effectLayers, layer],
     }));
     setSelectedLayerId(layer.id);
-    setEraseMode(false);
+    setPreviewTool('brush');
     setStatusMessage(`Добавлен слой: ${CARD_TREATMENT_EFFECT_LABELS[effect]}.`);
   }
 
@@ -714,39 +727,13 @@ export function CardCreatorPage() {
   return (
     <>
       <section className="page page--creator">
-        <div className="creator-header">
-          <div>
-            <strong>Редактор карточки</strong>
-            {isAdmin ? (
-              <span>
-                Редкость выдана сервером: {proposal.rarity} • treatments: {draft.effectLayers.length}/
-                {proposal.maxEffectLayers}
-              </span>
-            ) : (
-              <span>
-                Доступно эффектов: {draft.effectLayers.length}/{proposal.maxEffectLayers}
-              </span>
-            )}
-          </div>
-          <div className="creator-header__actions">
-            <button
-              className="action-button"
-              disabled={saving || isLocked}
-              onClick={() => void persistDraft()}
-              type="button"
-            >
-              Сохранить черновик
-            </button>
-            <button
-              className="action-button action-button--solid"
-              disabled={saving || isLocked}
-              onClick={() => void handleSubmit()}
-              type="button"
-            >
-              Отправить на модерацию
-            </button>
-          </div>
-        </div>
+        <CardCreatorStatusHeader
+          disabled={isLocked}
+          onSaveDraft={() => void persistDraft()}
+          onSubmit={() => void handleSubmit()}
+          saving={saving}
+          statusLabel={PROPOSAL_STATUS_LABELS[proposal.status]}
+        />
 
         {isAdmin && rarityBalance ? (
           <div className="creator-rarity-balance">
@@ -775,16 +762,25 @@ export function CardCreatorPage() {
         ) : null}
 
         <div className="creator-layout">
-          <div className="creator-preview">
-            <CardViewerCanvas
-              key={viewerRenderKey}
-              card={previewCard}
-              introKey={previewCard.instanceId}
-              cameraZ={10.6}
-              scaleMultiplier={0.7}
-              effectsPreset="full"
-            />
-          </div>
+          <CardCreatorPreviewPanel
+            activeTool={previewTool}
+            brushSize={brushSize}
+            brushSoftness={brushSoftness}
+            card={previewCard}
+            disabled={isLocked}
+            onMaskChange={(maskUrl) =>
+              updateDraft((current) => ({
+                ...current,
+                effectLayers: current.effectLayers.map((layer) =>
+                  layer.id === selectedLayerId ? { ...layer, maskUrl } : layer,
+                ),
+              }))
+            }
+            onToolChange={setPreviewTool}
+            previewImage={previewImage}
+            selectedLayer={selectedLayer}
+            viewerRenderKey={viewerRenderKey}
+          />
 
           <div className="creator-form">
           <div className="creator-section">
@@ -1474,23 +1470,31 @@ export function CardCreatorPage() {
                   </label>
                 </div>
 
+                <div className="creator-row">
+                  <label className="creator-field">
+                    <span>Загрузить готовую маску</span>
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={isLocked}
+                      onChange={(event) =>
+                        void handleEffectMaskUpload(event.target.files?.[0] ?? null, selectedLayer.id)
+                      }
+                      type="file"
+                    />
+                  </label>
+
+                  <div className="creator-field">
+                    <span>Подсказка по размеру</span>
+                    <small>
+                      Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
+                      {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
+                      {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает
+                      ламинацию.
+                    </small>
+                  </div>
+                </div>
+
                 <div className="creator-tools">
-                  <button
-                    className={`action-button ${!eraseMode ? 'action-button--solid' : ''}`}
-                    disabled={isLocked}
-                    onClick={() => setEraseMode(false)}
-                    type="button"
-                  >
-                    Кисть
-                  </button>
-                  <button
-                    className={`action-button ${eraseMode ? 'action-button--solid' : ''}`}
-                    disabled={isLocked}
-                    onClick={() => setEraseMode(true)}
-                    type="button"
-                  >
-                    Стирание
-                  </button>
                   <button
                     className="action-button"
                     disabled={!selectedLayer.maskUrl}
@@ -1523,56 +1527,14 @@ export function CardCreatorPage() {
                     Очистить маску
                   </button>
                 </div>
-
-                <div className="creator-row">
-                  <label className="creator-field">
-                    <span>Загрузить готовую маску</span>
-                    <input
-                      accept="image/png,image/jpeg,image/webp"
-                      disabled={isLocked}
-                      onChange={(event) =>
-                        void handleEffectMaskUpload(event.target.files?.[0] ?? null, selectedLayer.id)
-                      }
-                      type="file"
-                    />
-                  </label>
-
-                  <div className="creator-field">
-                    <span>Подсказка по размеру</span>
-                    <small>
-                      Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
-                      {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
-                      {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает
-                      ламинацию.
-                    </small>
-                  </div>
-                </div>
-
-                <CardEffectMaskEditor
-                  brushSize={brushSize}
-                  brushSoftness={brushSoftness}
-                  disabled={isLocked}
-                  eraseMode={eraseMode}
-                  layer={selectedLayer}
-                  onMaskChange={(maskUrl) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      effectLayers: current.effectLayers.map((layer) =>
-                        layer.id === selectedLayer.id ? { ...layer, maskUrl } : layer,
-                      ),
-                    }))
-                  }
-                  previewImage={previewImage}
-                />
               </div>
             ) : null}
           </div>
 
-          <div className="creator-status">
-            <span>Статус: {PROPOSAL_STATUS_LABELS[proposal.status]}</span>
-            {proposal.rejectionReason ? <span>Причина отказа: {proposal.rejectionReason}</span> : null}
-            {statusMessage ? <span>{statusMessage}</span> : null}
-          </div>
+          <CardCreatorFeedback
+            rejectionReason={proposal.rejectionReason}
+            statusMessage={statusMessage}
+          />
           </div>
         </div>
       </section>

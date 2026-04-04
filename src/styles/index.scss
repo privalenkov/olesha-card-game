@@ -5,7 +5,9 @@
 @use './components/card-creator-link';
 @use './components/shared-ui';
 @use './components/info-modal';
+@use './components/rarity-pill-tag';
 @use './components/rarity-grant-modal';
+@use './components/card-creator-preview';
 @use './pages/collection';
 @use './pages/creator-admin';
 @use './components/collection-overlay';
