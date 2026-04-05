@@ -233,6 +233,10 @@ export function getDefaultCardVisuals(): CardVisuals {
   };
 }
 
+export interface ProposalEditorCapabilities {
+  decorativePattern: boolean;
+}
+
 export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {
   if (type === 'spot_gloss') {
     return Math.max(0, Math.min(shimmer, 1));
@@ -392,6 +396,7 @@ export interface CardProposal {
   urlImage: string;
   defaultFinish: CardFinish;
   visuals: CardVisuals;
+  editorCapabilities: ProposalEditorCapabilities;
   allowedEffects: CardTreatmentEffect[];
   maxEffectLayers: number;
   effectLayers: CardEffectLayer[];

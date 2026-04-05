@@ -1,4 +1,5 @@
 import type { CardCreatorPreviewTool } from './CardCreatorPreviewMenu';
+import { RangeInput } from './ui/RangeInput';
 
 interface CardCreatorPreviewToolSettingsProps {
   activeTool: CardCreatorPreviewTool;
@@ -23,31 +24,27 @@ export function CardCreatorPreviewToolSettings({
 
   return (
     <div className="creator-preview-tool-settings">
-      <label className="creator-preview-tool-settings__field">
-        <span>Размер кисти: {brushSize}px</span>
-        <input
-          disabled={disabled}
-          max={64}
-          min={6}
-          onChange={(event) => onBrushSizeChange(Number(event.target.value))}
-          step={1}
-          type="range"
-          value={brushSize}
-        />
-      </label>
+      <RangeInput
+        disabled={disabled}
+        label="Размер кисти"
+        max={64}
+        min={6}
+        onValueChange={onBrushSizeChange}
+        step={1}
+        value={brushSize}
+        valueLabel={`${brushSize}px`}
+      />
 
-      <label className="creator-preview-tool-settings__field">
-        <span>Мягкость кисти: {Math.round(brushSoftness * 100)}%</span>
-        <input
-          disabled={disabled}
-          max={1}
-          min={0}
-          onChange={(event) => onBrushSoftnessChange(Number(event.target.value))}
-          step={0.02}
-          type="range"
-          value={brushSoftness}
-        />
-      </label>
+      <RangeInput
+        disabled={disabled}
+        label="Мягкость кисти"
+        max={1}
+        min={0}
+        onValueChange={onBrushSoftnessChange}
+        step={0.02}
+        value={brushSoftness}
+        valueLabel={`${Math.round(brushSoftness * 100)}%`}
+      />
     </div>
   );
 }

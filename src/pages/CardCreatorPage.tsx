@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import ColorPicker from 'react-best-gradient-color-picker';
 import { CardCreatorPreviewPanel } from '../components/CardCreatorPreviewPanel';
 import { type CardCreatorPreviewTool } from '../components/CardCreatorPreviewMenu';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CardCreatorStatusHeader } from '../components/CardCreatorStatusHeader';
 import { RarityGrantModal } from '../components/RarityGrantModal';
+import { ColorPickerPopover } from '../components/ui/ColorPickerPopover';
 import { FileUpload } from '../components/ui/FileUpload';
+import { RangeInput } from '../components/ui/RangeInput';
+import { Switch } from '../components/ui/Switch';
 import { TextArea } from '../components/ui/TextArea';
 import { TextInput } from '../components/ui/TextInput';
 import {
@@ -122,6 +124,8 @@ function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
     effectLayers: proposal.effectLayers,
   };
 }
+
+type EffectLayerDraft = ProposalEditorPayload['effectLayers'][number];
 
 function isDataUrl(value: string) {
   return value.startsWith('data:image/');
@@ -260,20 +264,36 @@ export function CardCreatorPage() {
   const [imageFileName, setImageFileName] = useState<string | null>(null);
   const [decorativePatternFileName, setDecorativePatternFileName] = useState<string | null>(null);
   const [effectMaskFileNames, setEffectMaskFileNames] = useState<Record<string, string>>({});
+  const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
   const isLocked = proposal?.status !== 'draft';
+  const patternAvailable = proposal?.editorCapabilities.decorativePattern ?? false;
   const lastRejectionNoticeRef = useRef<string | null>(null);
   const imageUploadRequestIdRef = useRef(0);
   const decorativePatternUploadRequestIdRef = useRef(0);
   const effectMaskUploadRequestIdsRef = useRef<Record<string, number>>({});
+  const initializedPatternSettingsProposalIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setImageFileName(null);
     setDecorativePatternFileName(null);
     setEffectMaskFileNames({});
+    setPatternSettingsOpen(false);
     imageUploadRequestIdRef.current = 0;
     decorativePatternUploadRequestIdRef.current = 0;
     effectMaskUploadRequestIdsRef.current = {};
+    initializedPatternSettingsProposalIdRef.current = null;
   }, [proposalId]);
+
+  useEffect(() => {
+    const patternInitializationKey = `${proposalId}:${patternAvailable ? 'available' : 'hidden'}`;
+
+    if (!draft || initializedPatternSettingsProposalIdRef.current === patternInitializationKey) {
+      return;
+    }
+
+    initializedPatternSettingsProposalIdRef.current = patternInitializationKey;
+    setPatternSettingsOpen(patternAvailable && Boolean(draft.visuals.decorativePattern.svgUrl));
+  }, [draft, patternAvailable, proposalId]);
 
   useEffect(() => {
     if (!proposalId) {
@@ -457,12 +477,6 @@ export function CardCreatorPage() {
     decorativePatternFileName ??
     getAssetDisplayName(draft?.visuals.decorativePattern.svgUrl ?? '', 'pattern', 'svg');
   const decorativePatternPreviewUrl = draft?.visuals.decorativePattern.svgUrl || null;
-  const selectedLayerMaskDisplayName = selectedLayer
-    ? effectMaskFileNames[selectedLayer.id] ??
-      getAssetDisplayName(selectedLayer.maskUrl, `${selectedLayer.type}-mask`, 'png')
-    : null;
-  const selectedLayerMaskPreviewUrl = selectedLayer?.maskUrl || null;
-
   function showCreatorError(message: string, title = 'Ошибка', notifyUser = true) {
     if (!notifyUser) {
       return;
@@ -644,7 +658,7 @@ export function CardCreatorPage() {
   }
 
   async function handleDecorativePatternChange(file: File | null) {
-    if (!file || !draft) {
+    if (!file || !draft || !patternAvailable) {
       return;
     }
 
@@ -769,6 +783,204 @@ export function CardCreatorPage() {
 
   function updateDraft(transform: (current: ProposalEditorPayload) => ProposalEditorPayload) {
     setDraft((current) => (current ? transform(current) : current));
+  }
+
+  function updateEffectLayer(
+    layerId: string,
+    transform: (layer: EffectLayerDraft) => EffectLayerDraft,
+  ) {
+    updateDraft((current) => ({
+      ...current,
+      effectLayers: current.effectLayers.map((layer) =>
+        layer.id === layerId ? transform(layer) : layer,
+      ),
+    }));
+  }
+
+  function getEffectMaskDisplayName(layer: EffectLayerDraft) {
+    return (
+      effectMaskFileNames[layer.id] ??
+      getAssetDisplayName(layer.maskUrl, `${layer.type}-mask`, 'png')
+    );
+  }
+
+  function selectEffectLayer(layerId: string) {
+    setSelectedLayerId(layerId);
+  }
+
+  function renderEffectLayerSettings(layer: EffectLayerDraft) {
+    return (
+      <>
+        {layer.type !== 'emboss' && layer.type !== 'dimensional_lamination' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Интенсивность"
+            max={1}
+            min={0.2}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                opacity: value,
+              }))
+            }
+            step={0.02}
+            value={layer.opacity}
+            valueLabel={`${Math.round(layer.opacity * 100)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'spot_gloss' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Глянцевость"
+            max={1}
+            min={0}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                shimmer: value,
+              }))
+            }
+            step={0.01}
+            value={layer.shimmer}
+            valueLabel={`${Math.round(layer.shimmer * 100)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'texture_sugar' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Сила переливания"
+            max={1.4}
+            min={0.2}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                shimmer: value,
+              }))
+            }
+            step={0.02}
+            value={layer.shimmer}
+            valueLabel={`${Math.round(layer.shimmer * 100)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'emboss' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Рельеф"
+            max={1}
+            min={-1}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                relief: value,
+              }))
+            }
+            step={0.02}
+            value={layer.relief}
+            valueLabel={
+              layer.relief > 0
+                ? `+${Math.round(layer.relief * 100)}%`
+                : `${Math.round(layer.relief * 100)}%`
+            }
+          />
+        ) : null}
+
+        {layer.type === 'dimensional_lamination' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Высота слоя"
+            max={5}
+            min={0.2}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                shimmer: value,
+              }))
+            }
+            step={0.05}
+            value={layer.shimmer}
+            valueLabel={`${Math.round(layer.shimmer * 100)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'dimensional_lamination' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Сдвиг по X"
+            max={0.12}
+            min={-0.12}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                offsetX: value,
+              }))
+            }
+            step={0.002}
+            value={layer.offsetX}
+            valueLabel={`${layer.offsetX > 0 ? '+' : ''}${(layer.offsetX * 100).toFixed(1)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'dimensional_lamination' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Сдвиг по Y"
+            max={0.12}
+            min={-0.12}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                offsetY: value,
+              }))
+            }
+            step={0.002}
+            value={layer.offsetY}
+            valueLabel={`${layer.offsetY > 0 ? '+' : ''}${(layer.offsetY * 100).toFixed(1)}%`}
+          />
+        ) : null}
+
+        <div className="creator-field creator-field--upload">
+          <span>Загрузить готовую маску</span>
+          <FileUpload
+            accept="image/png,image/jpeg,image/webp"
+            addLabel="Добавить изображение"
+            changeLabel="Изменить изображение"
+            disabled={isLocked}
+            fileName={getEffectMaskDisplayName(layer)}
+            onClear={() => clearEffectMask(layer.id)}
+            onFileSelect={(file) => void handleEffectMaskUpload(file, layer.id)}
+            previewUrl={layer.maskUrl}
+          />
+        </div>
+
+        <div className="creator-field">
+          <span>Подсказка по размеру</span>
+          <small>
+            Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
+            {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
+            {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает ламинацию.
+          </small>
+        </div>
+
+        <div className="creator-tools">
+          <button
+            className="action-button"
+            disabled={!layer.maskUrl}
+            onClick={() =>
+              triggerAssetDownload(
+                layer.maskUrl,
+                `${layer.type}-mask.${inferAssetExtension(layer.maskUrl, 'png')}`,
+              )
+            }
+            type="button"
+          >
+            Скачать маску
+          </button>
+        </div>
+      </>
+    );
   }
 
   function addEffectLayer(effect: CardTreatmentEffect) {
@@ -978,6 +1190,10 @@ export function CardCreatorPage() {
           />
 
           <div className="creator-form">
+          <p className="creator-form__notice">
+            * В зависимости от редкости карточки, вам выдаются разные настройки. Чем реже
+            карточка, тем более уникальную карточку можно создать
+          </p>
           <div className="creator-section">
             <div className="creator-section__head">
               <strong>Базовые настройки</strong>
@@ -1029,24 +1245,12 @@ export function CardCreatorPage() {
                 previewUrl={mainImagePreviewUrl}
               />
             </div>
-          </div>
 
-          <div className="creator-section">
-            <div className="creator-section__head">
-              <strong>Базовый стиль</strong>
-              <span>Это общий вид карточки. Спецэффекты ниже работают отдельными слоями.</span>
-            </div>
-
-            <label className="creator-field creator-field--picker">
-              <span>Нижний слой `card-layer-one-front`</span>
-              <strong className="creator-field__hint">
-                Выбор цвета или линейного градиента для самого нижнего текстурного слоя.
-              </strong>
-              <ColorPicker
-                className={`creator-gradient-picker ${
-                  isLocked ? 'creator-gradient-picker--disabled' : ''
-                }`}
+            <div className="creator-field creator-field--picker">
+              <span>Цвет фона</span>
+              <ColorPickerPopover
                 disableLightMode
+                disabled={isLocked}
                 height={196}
                 hideAdvancedSliders
                 hideColorGuide
@@ -1064,18 +1268,13 @@ export function CardCreatorPage() {
                 value={draft.visuals.layerOneFill}
                 width={270}
               />
-            </label>
+            </div>
 
-            <label className="creator-field creator-field--picker">
-              <span>Верхний слой `card-layer-two-front`</span>
-              <strong className="creator-field__hint">
-                Цвет или линейный градиент для структуры карточки поверх нижнего слоя.
-              </strong>
-              <ColorPicker
-                className={`creator-gradient-picker ${
-                  isLocked ? 'creator-gradient-picker--disabled' : ''
-                }`}
+            <div className="creator-field creator-field--picker">
+              <span>Цвет контента</span>
+              <ColorPickerPopover
                 disableLightMode
+                disabled={isLocked}
                 height={196}
                 hideAdvancedSliders
                 hideColorGuide
@@ -1093,186 +1292,170 @@ export function CardCreatorPage() {
                 value={draft.visuals.layerTwoFill}
                 width={270}
               />
-            </label>
+            </div>
 
-            <div className="creator-row">
-              <div className="creator-field creator-field--upload">
-                <span>SVG декоративного паттерна</span>
-                <FileUpload
-                  accept=".svg,image/svg+xml"
-                  addLabel="Добавить SVG"
-                  changeLabel="Изменить SVG"
+            {patternAvailable ? (
+              <div className="creator-rarity-card creator-rarity-card--pattern">
+                <Switch
+                  checked={patternSettingsOpen}
                   disabled={isLocked}
-                  fileName={decorativePatternDisplayName}
-                  onClear={clearDecorativePattern}
-                  onFileSelect={(file) => void handleDecorativePatternChange(file)}
-                  previewUrl={decorativePatternPreviewUrl}
+                  label="Паттерн"
+                  onCheckedChange={setPatternSettingsOpen}
                 />
-              </div>
 
-              <label className="creator-field">
-                <span>
-                  Статус паттерна:{' '}
-                  {draft.visuals.decorativePattern.svgUrl ? 'SVG загружен' : 'SVG еще не загружен'}
-                </span>
-                <div className="creator-tools">
-                  <button
-                    className="action-button"
-                    disabled={!decorativePatternMaskImage}
-                    onClick={() =>
-                      triggerAssetDownload(
-                        decorativePatternMaskImage,
-                        'decorative-pattern-mask.png',
-                      )
-                    }
-                    type="button"
-                  >
-                    Скачать паттерн
-                  </button>
+                <div
+                  aria-hidden={!patternSettingsOpen}
+                  className={`creator-collapsible ${patternSettingsOpen ? 'creator-collapsible--open' : ''}`}
+                >
+                  <div className="creator-collapsible__inner">
+                    <div className="creator-field creator-field--upload">
+                      <FileUpload
+                        accept=".svg,image/svg+xml"
+                        addLabel="Добавить SVG"
+                        changeLabel="Изменить SVG"
+                        disabled={isLocked}
+                        fileName={decorativePatternDisplayName}
+                        onClear={clearDecorativePattern}
+                        onFileSelect={(file) => void handleDecorativePatternChange(file)}
+                        previewUrl={decorativePatternPreviewUrl}
+                      />
+                    </div>
+
+                    <RangeInput
+                      disabled={isLocked}
+                      label="Размер паттерна"
+                      max={260}
+                      min={24}
+                      onValueChange={(value) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          visuals: {
+                            ...current.visuals,
+                            decorativePattern: {
+                              ...current.visuals.decorativePattern,
+                              size: value,
+                            },
+                          },
+                        }))
+                      }
+                      step={2}
+                      value={draft.visuals.decorativePattern.size}
+                      valueLabel={`${Math.round(draft.visuals.decorativePattern.size)}px`}
+                    />
+
+                    <RangeInput
+                      disabled={isLocked}
+                      label="Отступ между элементами"
+                      max={220}
+                      min={0}
+                      onValueChange={(value) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          visuals: {
+                            ...current.visuals,
+                            decorativePattern: {
+                              ...current.visuals.decorativePattern,
+                              gap: value,
+                            },
+                          },
+                        }))
+                      }
+                      step={2}
+                      value={draft.visuals.decorativePattern.gap}
+                      valueLabel={`${Math.round(draft.visuals.decorativePattern.gap)}px`}
+                    />
+
+                    <RangeInput
+                      disabled={isLocked}
+                      label="Прозрачность паттерна"
+                      max={1}
+                      min={0}
+                      onValueChange={(value) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          visuals: {
+                            ...current.visuals,
+                            decorativePattern: {
+                              ...current.visuals.decorativePattern,
+                              opacity: value,
+                            },
+                          },
+                        }))
+                      }
+                      step={0.02}
+                      value={draft.visuals.decorativePattern.opacity}
+                      valueLabel={`${Math.round(draft.visuals.decorativePattern.opacity * 100)}%`}
+                    />
+
+                    <RangeInput
+                      disabled={isLocked}
+                      label="Смещение X"
+                      max={220}
+                      min={-220}
+                      onValueChange={(value) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          visuals: {
+                            ...current.visuals,
+                            decorativePattern: {
+                              ...current.visuals.decorativePattern,
+                              offsetX: value,
+                            },
+                          },
+                        }))
+                      }
+                      step={2}
+                      value={draft.visuals.decorativePattern.offsetX}
+                      valueLabel={`${Math.round(draft.visuals.decorativePattern.offsetX)}px`}
+                    />
+
+                    <RangeInput
+                      disabled={isLocked}
+                      label="Смещение Y"
+                      max={320}
+                      min={-320}
+                      onValueChange={(value) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          visuals: {
+                            ...current.visuals,
+                            decorativePattern: {
+                              ...current.visuals.decorativePattern,
+                              offsetY: value,
+                            },
+                          },
+                        }))
+                      }
+                      step={2}
+                      value={draft.visuals.decorativePattern.offsetY}
+                      valueLabel={`${Math.round(draft.visuals.decorativePattern.offsetY)}px`}
+                    />
+
+                    <div className="creator-tools">
+                      <button
+                        className="creator-link-button"
+                        disabled={!decorativePatternMaskImage}
+                        onClick={() =>
+                          triggerAssetDownload(
+                            decorativePatternMaskImage,
+                            'decorative-pattern-mask.png',
+                          )
+                        }
+                        type="button"
+                      >
+                        Скачать маску паттерна
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </label>
-            </div>
+              </div>
+            ) : null}
 
-            <div className="creator-field">
-              <span>SVG будет повторяться по всей карточке, кроме области изображения.</span>
-            </div>
-
-            <div className="creator-row">
-              <label className="creator-field">
-                <span>Размер паттерна: {Math.round(draft.visuals.decorativePattern.size)} px</span>
-                <input
-                  disabled={isLocked}
-                  max={260}
-                  min={24}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        decorativePattern: {
-                          ...current.visuals.decorativePattern,
-                          size: Number(event.target.value),
-                        },
-                      },
-                    }))
-                  }
-                  step={2}
-                  type="range"
-                  value={draft.visuals.decorativePattern.size}
-                />
-              </label>
-
-              <label className="creator-field">
-                <span>Отступ между элементами: {Math.round(draft.visuals.decorativePattern.gap)} px</span>
-                <input
-                  disabled={isLocked}
-                  max={220}
-                  min={0}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        decorativePattern: {
-                          ...current.visuals.decorativePattern,
-                          gap: Number(event.target.value),
-                        },
-                      },
-                    }))
-                  }
-                  step={2}
-                  type="range"
-                  value={draft.visuals.decorativePattern.gap}
-                />
-              </label>
-            </div>
-
-            <div className="creator-row">
-              <label className="creator-field">
-                <span>
-                  Прозрачность паттерна: {Math.round(draft.visuals.decorativePattern.opacity * 100)}%
-                </span>
-                <input
-                  disabled={isLocked}
-                  max={1}
-                  min={0}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        decorativePattern: {
-                          ...current.visuals.decorativePattern,
-                          opacity: Number(event.target.value),
-                        },
-                      },
-                    }))
-                  }
-                  step={0.02}
-                  type="range"
-                  value={draft.visuals.decorativePattern.opacity}
-                />
-              </label>
-
-              <label className="creator-field">
-                <span>Смещение X: {Math.round(draft.visuals.decorativePattern.offsetX)} px</span>
-                <input
-                  disabled={isLocked}
-                  max={220}
-                  min={-220}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      visuals: {
-                        ...current.visuals,
-                        decorativePattern: {
-                          ...current.visuals.decorativePattern,
-                          offsetX: Number(event.target.value),
-                        },
-                      },
-                    }))
-                  }
-                  step={2}
-                  type="range"
-                  value={draft.visuals.decorativePattern.offsetX}
-                />
-              </label>
-            </div>
-
-            <div className="creator-field">
-              <span>Смещение Y: {Math.round(draft.visuals.decorativePattern.offsetY)} px</span>
-              <input
-                disabled={isLocked}
-                max={320}
-                min={-320}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    visuals: {
-                      ...current.visuals,
-                      decorativePattern: {
-                        ...current.visuals.decorativePattern,
-                        offsetY: Number(event.target.value),
-                      },
-                    },
-                  }))
-                }
-                step={2}
-                type="range"
-                value={draft.visuals.decorativePattern.offsetY}
-              />
-            </div>
-
-            <label className="creator-field creator-field--picker">
-              <span>Акцентный цвет</span>
-              <strong className="creator-field__hint">
-                Цвет бордеров и световых акцентов карточки.
-              </strong>
-              <ColorPicker
-                className={`creator-gradient-picker ${
-                  isLocked ? 'creator-gradient-picker--disabled' : ''
-                }`}
+            <div className="creator-field creator-field--picker">
+              <span>Цвет обводки</span>
+              <ColorPickerPopover
                 disableLightMode
+                disabled={isLocked}
                 height={196}
                 hideAdvancedSliders
                 hideColorGuide
@@ -1299,7 +1482,7 @@ export function CardCreatorPage() {
                 value={draft.visuals.accentColor}
                 width={270}
               />
-            </label>
+            </div>
           </div>
 
           <div className="creator-section">
@@ -1367,312 +1550,79 @@ export function CardCreatorPage() {
               </div>
             ) : null}
 
-            <div className="creator-section__head">
-              <strong>{isAdmin ? 'Выданные сервером treatments' : 'Доступные эффекты'}</strong>
+            <div className="creator-section__head creator-section__head--effects">
+              <strong>Доступные эффекты</strong>
               {isAdmin ? (
-                <span>
-                  Чем редче карточка, тем больше сервер выдает effect slots и тем сильнее их набор.
-                </span>
+                <span>Чем реже карточка, тем больше эффектов доступно</span>
               ) : (
                 <span>Добавляй только те спецэффекты, которые доступны для этой карточки.</span>
               )}
             </div>
 
             {proposal.allowedEffects.length > 0 ? (
-              <div className="creator-effect-grants">
-                {availableEffects.map(({ effect, layer }) => (
-                  <button
-                    key={effect}
-                    className={`creator-effect-grant ${
-                      layer ? 'creator-effect-grant--active' : ''
-                    }`}
-                    disabled={isLocked && !layer}
-                    onClick={() => (layer ? setSelectedLayerId(layer.id) : addEffectLayer(effect))}
-                    type="button"
-                  >
-                    <strong>{CARD_TREATMENT_EFFECT_LABELS[effect]}</strong>
-                    <span>{CARD_TREATMENT_EFFECT_DESCRIPTIONS[effect]}</span>
-                    <em>{layer ? 'Редактировать маску' : 'Добавить слой'}</em>
-                  </button>
-                ))}
+              <div className="creator-effect-switches">
+                {availableEffects.map(({ effect, layer }) => {
+                  const isActive = Boolean(layer);
+                  const isSelected = layer ? selectedLayerId === layer.id : false;
+                  const canEnableEffect = Boolean(layer) || draft.effectLayers.length < proposal.maxEffectLayers;
+
+                  return (
+                    <div
+                      key={effect}
+                      className={`creator-effect-switch creator-rarity-card ${
+                        isActive ? 'creator-effect-switch--active' : ''
+                      } ${isSelected ? 'creator-effect-switch--selected' : ''}`.trim()}
+                    >
+                      <div className="creator-effect-switch__header">
+                        <button
+                          className="creator-effect-switch__select"
+                          disabled={!layer}
+                          onClick={() => {
+                            if (layer) {
+                              selectEffectLayer(layer.id);
+                            }
+                          }}
+                          type="button"
+                        >
+                          <strong>{CARD_TREATMENT_EFFECT_LABELS[effect]}</strong>
+                        </button>
+
+                        <Switch
+                          aria-label={`${isActive ? 'Выключить' : 'Включить'} эффект ${CARD_TREATMENT_EFFECT_LABELS[effect]}`}
+                          checked={isActive}
+                          className="creator-effect-switch__toggle"
+                          disabled={isLocked || !canEnableEffect}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              addEffectLayer(effect);
+                              return;
+                            }
+
+                            if (layer) {
+                              removeEffectLayer(layer.id);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div
+                        className={`creator-effect-switch__settings ${
+                          isActive ? 'creator-effect-switch__settings--open' : ''
+                        }`}
+                      >
+                        <div className="creator-effect-switch__settings-inner">
+                          {layer ? renderEffectLayerSettings(layer) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="creator-effect-empty">
                 Для этой карточки сейчас нет доступных специальных эффектов.
               </div>
             )}
-
-            {draft.effectLayers.length > 0 ? (
-              <div className="creator-layers">
-                {draft.effectLayers.map((layer) => (
-                  <div
-                    key={layer.id}
-                    className={`creator-layer-card ${
-                      selectedLayerId === layer.id ? 'creator-layer-card--active' : ''
-                    }`}
-                  >
-                    <button
-                      className="creator-layer-card__main"
-                      onClick={() => setSelectedLayerId(layer.id)}
-                      type="button"
-                    >
-                      <strong>{CARD_TREATMENT_EFFECT_LABELS[layer.type]}</strong>
-                      <span>{layer.maskUrl ? 'Маска нарисована' : 'Маска еще пустая'}</span>
-                    </button>
-                    <button
-                      className="creator-layer-card__remove"
-                      disabled={isLocked}
-                      onClick={() => removeEffectLayer(layer.id)}
-                      type="button"
-                    >
-                      Убрать
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {selectedLayer ? (
-              <div className="creator-layer-panel">
-                <div className="creator-row">
-                  {selectedLayer.type !== 'emboss' &&
-                  selectedLayer.type !== 'dimensional_lamination' ? (
-                    <label className="creator-field">
-                      <span>
-                        Интенсивность: {Math.round(selectedLayer.opacity * 100)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={1}
-                        min={0.2}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, opacity: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.02}
-                        type="range"
-                        value={selectedLayer.opacity}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'spot_gloss' ? (
-                    <label className="creator-field">
-                      <span>
-                        Глянцевость: {Math.round(selectedLayer.shimmer * 100)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={1}
-                        min={0}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, shimmer: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.01}
-                        type="range"
-                        value={selectedLayer.shimmer}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'texture_sugar' ? (
-                    <label className="creator-field">
-                      <span>
-                        Сила переливания: {Math.round(selectedLayer.shimmer * 100)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={1.4}
-                        min={0.2}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, shimmer: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.02}
-                        type="range"
-                        value={selectedLayer.shimmer}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'emboss' ? (
-                    <label className="creator-field">
-                      <span>
-                        Рельеф:{' '}
-                        {selectedLayer.relief === 0
-                          ? 'нейтрально'
-                          : selectedLayer.relief > 0
-                            ? `выпуклость ${Math.round(selectedLayer.relief * 100)}%`
-                            : `вдавленность ${Math.round(Math.abs(selectedLayer.relief) * 100)}%`}
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={1}
-                        min={-1}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, relief: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.02}
-                        type="range"
-                        value={selectedLayer.relief}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'dimensional_lamination' ? (
-                    <label className="creator-field">
-                      <span>
-                        Высота слоя: {Math.round(selectedLayer.shimmer * 100)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={5}
-                        min={0.2}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, shimmer: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.05}
-                        type="range"
-                        value={selectedLayer.shimmer}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'dimensional_lamination' ? (
-                    <label className="creator-field">
-                      <span>
-                        Сдвиг по X: {selectedLayer.offsetX > 0 ? '+' : ''}
-                        {(selectedLayer.offsetX * 100).toFixed(1)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={0.12}
-                        min={-0.12}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, offsetX: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.002}
-                        type="range"
-                        value={selectedLayer.offsetX}
-                      />
-                    </label>
-                  ) : null}
-
-                  {selectedLayer.type === 'dimensional_lamination' ? (
-                    <label className="creator-field">
-                      <span>
-                        Сдвиг по Y: {selectedLayer.offsetY > 0 ? '+' : ''}
-                        {(selectedLayer.offsetY * 100).toFixed(1)}%
-                      </span>
-                      <input
-                        disabled={isLocked}
-                        max={0.12}
-                        min={-0.12}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            effectLayers: current.effectLayers.map((layer) =>
-                              layer.id === selectedLayer.id
-                                ? { ...layer, offsetY: Number(event.target.value) }
-                                : layer,
-                            ),
-                          }))
-                        }
-                        step={0.002}
-                        type="range"
-                        value={selectedLayer.offsetY}
-                      />
-                    </label>
-                  ) : null}
-
-                </div>
-
-                <div className="creator-row">
-                  <div className="creator-field creator-field--upload">
-                    <span>Загрузить готовую маску</span>
-                    <FileUpload
-                      accept="image/png,image/jpeg,image/webp"
-                      addLabel="Добавить изображение"
-                      changeLabel="Изменить изображение"
-                      disabled={isLocked}
-                      fileName={selectedLayerMaskDisplayName}
-                      onClear={() => clearEffectMask(selectedLayer.id)}
-                      onFileSelect={(file) => void handleEffectMaskUpload(file, selectedLayer.id)}
-                      previewUrl={selectedLayerMaskPreviewUrl}
-                    />
-                  </div>
-
-                  <div className="creator-field">
-                    <span>Подсказка по размеру</span>
-                    <small>
-                      Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
-                      {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
-                      {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает
-                      ламинацию.
-                    </small>
-                  </div>
-                </div>
-
-                <div className="creator-tools">
-                  <button
-                    className="action-button"
-                    disabled={!selectedLayer.maskUrl}
-                    onClick={() =>
-                      triggerAssetDownload(
-                        selectedLayer.maskUrl,
-                        `${selectedLayer.type}-mask.${inferAssetExtension(
-                          selectedLayer.maskUrl,
-                          'png',
-                        )}`,
-                      )
-                    }
-                    type="button"
-                  >
-                    Скачать маску
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
           </div>
         </div>

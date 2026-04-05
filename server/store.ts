@@ -43,6 +43,10 @@ import {
   normalizeCardTreatmentEffects,
 } from '../src/game/types.js';
 import type { ServerConfig } from './config.js';
+import {
+  getProposalEditorCapabilities,
+  getProposalEffectGrantConfig,
+} from './proposalEditorConfig.js';
 import { getDayKey, getNextResetAt } from './time.js';
 
 interface GoogleProfile {
@@ -560,71 +564,6 @@ function makeSeededRoll(seed: string) {
   };
 }
 
-const proposalEffectPools: Record<
-  Rarity,
-  {
-    grantCountWeights: Array<[number, number]>;
-    pool: Array<[CardTreatmentEffect, number]>;
-  }
-> = {
-  common: {
-    grantCountWeights: [[0, 1]],
-    pool: [],
-  },
-  uncommon: {
-    grantCountWeights: [[1, 1]],
-    pool: [
-      ['spot_gloss', 48],
-      ['texture_sugar', 34],
-      ['spot_holo', 18],
-    ],
-  },
-  rare: {
-    grantCountWeights: [
-      [1, 54],
-      [2, 46],
-    ],
-    pool: [
-      ['spot_gloss', 28],
-      ['texture_sugar', 18],
-      ['spot_holo', 30],
-      ['sparkle_foil', 16],
-      ['emboss', 8],
-      ['dimensional_lamination', 6],
-    ],
-  },
-  epic: {
-    grantCountWeights: [
-      [2, 58],
-      [3, 42],
-    ],
-    pool: [
-      ['spot_gloss', 16],
-      ['texture_sugar', 14],
-      ['spot_holo', 24],
-      ['sparkle_foil', 20],
-      ['emboss', 16],
-      ['prismatic_edge', 10],
-      ['dimensional_lamination', 12],
-    ],
-  },
-  veryrare: {
-    grantCountWeights: [
-      [3, 62],
-      [4, 38],
-    ],
-    pool: [
-      ['spot_gloss', 10],
-      ['texture_sugar', 10],
-      ['spot_holo', 18],
-      ['sparkle_foil', 18],
-      ['emboss', 16],
-      ['prismatic_edge', 28],
-      ['dimensional_lamination', 18],
-    ],
-  },
-};
-
 function generateStatsForProposal(rarity: Rarity, seed: string) {
   const roll = makeSeededRoll(seed);
   const bases: Record<Rarity, { min: number; max: number; rarityScore: [number, number] }> = {
@@ -695,7 +634,7 @@ function pickDistinctEffects(
 }
 
 function buildProposalEffectGrant(rarity: Rarity): ProposalEffectGrant {
-  const config = proposalEffectPools[rarity];
+  const config = getProposalEffectGrantConfig(rarity);
   const grantCount = weightedPickValue(config.grantCountWeights);
   const allowedEffects = pickDistinctEffects(config.pool, grantCount);
 
@@ -896,6 +835,15 @@ function toOwnedCard(row: OwnedCardRow): OwnedCard {
 
 function toCardProposal(row: ProposalRow): CardProposal {
   const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
+  const editorCapabilities = getProposalEditorCapabilities(row.rarity);
+  const visuals = normalizeVisuals({
+    frameStyle: row.visual_frame_style,
+    accentColor: row.visual_accent_color,
+    decorativePattern: storedVisuals.decorativePattern,
+    layerOneFill: storedVisuals.layerOneFill,
+    layerTwoFill: storedVisuals.layerTwoFill,
+  });
+
   return {
     id: row.id,
     creatorUserId: row.creator_user_id,
@@ -906,13 +854,13 @@ function toCardProposal(row: ProposalRow): CardProposal {
     description: row.description,
     urlImage: row.url_image,
     defaultFinish: row.default_finish,
-    visuals: normalizeVisuals({
-      frameStyle: row.visual_frame_style,
-      accentColor: row.visual_accent_color,
-      decorativePattern: storedVisuals.decorativePattern,
-      layerOneFill: storedVisuals.layerOneFill,
-      layerTwoFill: storedVisuals.layerTwoFill,
-    }),
+    visuals: editorCapabilities.decorativePattern
+      ? visuals
+      : {
+          ...visuals,
+          decorativePattern: getDefaultCardVisuals().decorativePattern,
+        },
+    editorCapabilities,
     allowedEffects: normalizeCardTreatmentEffects(
       parseJsonArray<string>(row.allowed_effects_json, []),
     ),

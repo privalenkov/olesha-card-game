@@ -1,0 +1,82 @@
+.ui-range-input {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 104px) minmax(0, 1fr) minmax(0, 50px);
+  align-items: center;
+  column-gap: 18px;
+}
+
+.ui-range-input__label,
+.ui-range-input__value {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
+}
+
+.ui-range-input__label {
+  max-width: 104px;
+}
+
+.ui-range-input__value {
+  max-width: 50px;
+  text-align: right;
+}
+
+.ui-range-input__control {
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+
+.ui-range-input__control:focus {
+  outline: none;
+}
+
+.ui-range-input__control::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 20px;
+  background: #F4F1DE;
+}
+
+.ui-range-input__control::-webkit-slider-thumb {
+  width: 28px;
+  height: 28px;
+  margin-top: -11px;
+  border: none;
+  border-radius: 999px;
+  background: #EC0B43;
+  appearance: none;
+}
+
+.ui-range-input__control::-moz-range-track {
+  height: 6px;
+  border: none;
+  border-radius: 20px;
+  background: #F4F1DE;
+}
+
+.ui-range-input__control::-moz-range-progress {
+  height: 6px;
+  border-radius: 20px;
+  background: #F4F1DE;
+}
+
+.ui-range-input__control::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: #EC0B43;
+}
+
+.ui-range-input__control:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}

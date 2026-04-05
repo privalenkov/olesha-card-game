@@ -142,6 +142,15 @@
   background: #0D0E17;
 }
 
+.creator-form__notice {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: #B3AF98;
+}
+
 .creator-section {
   display: flex;
   flex-direction: column;
@@ -208,7 +217,7 @@
 
 .creator-form .creator-section__head strong {
   display: block;
-  margin: 22px 0 14px;
+  margin: 0 0 5px;
   font-family: 'Inter', sans-serif;
   font-size: 14px;
   font-weight: 700;
@@ -224,6 +233,18 @@
   margin: 0;
 }
 
+.creator-form .creator-section__head--effects strong {
+  margin-top: 50px;
+}
+
+.creator-form .creator-section__head--effects span {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: #B3AF98;
+}
+
 .creator-form label.creator-field:not(.creator-field--picker) {
   gap: 0;
 }
@@ -232,9 +253,23 @@
   gap: 0;
 }
 
+.creator-form .creator-field--picker {
+  gap: 0;
+}
+
 .creator-form label.creator-field:not(.creator-field--picker) > span {
   display: block;
-  margin: 14px 0 20px;
+  margin: 0 0 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
+}
+
+.creator-form .creator-field--picker > span {
+  display: block;
+  margin: 0 0 10px;
   font-family: 'Inter', sans-serif;
   font-size: 12px;
   font-weight: 700;
@@ -244,12 +279,66 @@
 
 .creator-form .creator-field--upload > span {
   display: block;
-  margin: 14px 0 20px;
+  margin: 0 0 10px;
   font-family: 'Inter', sans-serif;
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   color: #F4F1DE;
+}
+
+.creator-rarity-card {
+  padding: 21px;
+  border-radius: 12px;
+  background: #B3AF98;
+}
+
+.creator-rarity-card .ui-switch-row__label,
+.creator-rarity-card .ui-range-input__label,
+.creator-rarity-card .ui-range-input__value,
+.creator-rarity-card .creator-link-button,
+.creator-rarity-card .creator-effect-switch__select strong,
+.creator-rarity-card .creator-field > span,
+.creator-rarity-card .creator-field small {
+  color: #0D0E17;
+}
+
+.creator-rarity-card--pattern .creator-collapsible {
+  margin-top: 0;
+  transition:
+    max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    transform 220ms ease,
+    margin-top 220ms ease;
+}
+
+.creator-rarity-card--pattern .creator-collapsible--open {
+  margin-top: 14px;
+}
+
+.creator-collapsible {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition:
+    max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.creator-collapsible--open {
+  max-height: 1600px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.creator-collapsible__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .creator-field__hint {
@@ -258,7 +347,7 @@
   font-weight: 500;
 }
 
-.creator-field input:not(.ui-text-input):not(.ui-file-upload__input),
+.creator-field input:not(.ui-text-input):not(.ui-file-upload__input):not(.ui-range-input__control),
 .creator-field select,
 .creator-field textarea:not(.ui-text-area) {
   width: 100%;
@@ -269,21 +358,6 @@
   color: #ffffff;
   font: inherit;
   resize: vertical;
-}
-
-.creator-gradient-picker {
-  width: fit-content;
-  max-width: 100%;
-  padding: 12px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  overflow: hidden;
-}
-
-.creator-gradient-picker--disabled {
-  opacity: 0.56;
-  pointer-events: none;
 }
 
 .creator-swatches {
@@ -351,67 +425,112 @@
   color: var(--copy-faint);
 }
 
-.creator-layers {
-  display: grid;
-  gap: 10px;
-}
-
-.creator-layer-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.creator-layer-card--active {
-  border-color: rgba(141, 229, 255, 0.38);
-  box-shadow: 0 0 0 1px rgba(141, 229, 255, 0.12) inset;
-}
-
-.creator-layer-card__main,
-.creator-layer-card__remove {
-  border: none;
-  background: transparent;
-  color: #ffffff;
-}
-
-.creator-layer-card__main {
+.creator-effect-switches {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  gap: 14px;
+}
+
+.creator-effect-switch {
+  border: none;
+}
+
+.creator-effect-switch__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.creator-effect-switch__select {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.creator-layer-card__main strong {
+.creator-effect-switch__select:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.creator-effect-switch__select strong {
   font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
 }
 
-.creator-layer-card__main span,
-.creator-layer-card__remove {
-  color: var(--copy-faint);
+.creator-effect-switch__toggle {
+  width: auto;
+  flex: 0 0 auto;
 }
 
-.creator-layer-card__remove {
-  padding: 8px 0;
-  cursor: pointer;
+.creator-effect-switch__settings {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition:
+    max-height 320ms ease,
+    margin-top 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
 }
 
-.creator-layer-panel {
+.creator-effect-switch__settings--open {
+  max-height: 960px;
+  margin-top: 14px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.creator-effect-switch__settings-inner {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.creator-effect-switch__settings .creator-tools {
+  justify-content: flex-end;
 }
 
 .creator-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.creator-link-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #F4F1DE;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.creator-link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.creator-collapsible__inner > .creator-tools {
+  justify-content: flex-end;
 }
 
 .mask-editor {

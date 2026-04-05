@@ -4,7 +4,10 @@
 @use './components/pack-ritual';
 @use './components/card-creator-link';
 @use './components/shared-ui';
+@use './components/color-picker-popover';
 @use './components/file-upload';
+@use './components/range-input';
+@use './components/switch';
 @use './components/text-area';
 @use './components/text-input';
 @use './components/info-modal';

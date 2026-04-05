@@ -24,6 +24,7 @@ import {
   type CollectionFilter,
   type CardTreatmentEffect,
   type ProposalEditorPayload,
+  type ProposalEditorCapabilities,
   type Rarity,
   type SessionState,
 } from '../src/game/types.js';
@@ -414,6 +415,7 @@ function isStoredAssetUrl(value: string) {
 function normalizeProposalPayload(
   value: unknown,
   effectBudget: { allowedEffects: CardEffectLayer['type'][]; maxEffectLayers: number },
+  editorCapabilities: ProposalEditorCapabilities,
 ): ProposalEditorPayload | null {
   if (typeof value !== 'object' || value === null) {
     return null;
@@ -484,7 +486,11 @@ function normalizeProposalPayload(
     return null;
   }
 
-  if (!isStoredAssetUrl(decorativePatternSvgUrl) && decorativePatternSvgUrl !== '') {
+  if (
+    editorCapabilities.decorativePattern &&
+    !isStoredAssetUrl(decorativePatternSvgUrl) &&
+    decorativePatternSvgUrl !== ''
+  ) {
     return null;
   }
 
@@ -567,14 +573,16 @@ function normalizeProposalPayload(
       accentColor,
       layerOneFill,
       layerTwoFill,
-      decorativePattern: {
-        svgUrl: decorativePatternSvgUrl,
-        size: Math.max(20, Math.min(decorativePatternSize, 320)),
-        gap: Math.max(0, Math.min(decorativePatternGap, 320)),
-        opacity: Math.max(0, Math.min(decorativePatternOpacity, 1)),
-        offsetX: Math.max(-1024, Math.min(decorativePatternOffsetX, 1024)),
-        offsetY: Math.max(-1536, Math.min(decorativePatternOffsetY, 1536)),
-      } satisfies CardDecorativePattern,
+      decorativePattern: editorCapabilities.decorativePattern
+        ? ({
+            svgUrl: decorativePatternSvgUrl,
+            size: Math.max(20, Math.min(decorativePatternSize, 320)),
+            gap: Math.max(0, Math.min(decorativePatternGap, 320)),
+            opacity: Math.max(0, Math.min(decorativePatternOpacity, 1)),
+            offsetX: Math.max(-1024, Math.min(decorativePatternOffsetX, 1024)),
+            offsetY: Math.max(-1536, Math.min(decorativePatternOffsetY, 1536)),
+          } satisfies CardDecorativePattern)
+        : decorativePatternDefaults,
     },
     effectLayers,
   };
@@ -1468,7 +1476,7 @@ export async function buildApp() {
     const payload = normalizeProposalPayload(request.body, {
       allowedEffects: proposal.allowedEffects,
       maxEffectLayers: proposal.maxEffectLayers,
-    });
+    }, proposal.editorCapabilities);
 
     if (!payload) {
       reply.code(400).send(apiError('INVALID_PROPOSAL'));
