@@ -15,7 +15,6 @@ import {
   fetchNotifications,
   fetchSessionState,
   formatResetCountdown,
-  markNotificationRead,
   requestNicknameUpdate,
   requestLogout,
   requestPackOpen,
@@ -71,7 +70,6 @@ export function GameProvider({ children }: PropsWithChildren) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const activeNotificationIdsRef = useRef(new Set<string>());
-  const remoteNotificationIdsRef = useRef(new Set<string>());
   const notificationTimersRef = useRef(new Map<string, number>());
   const notificationRemovalTimersRef = useRef(new Map<string, number>());
 
@@ -142,26 +140,9 @@ export function GameProvider({ children }: PropsWithChildren) {
       clearNotificationTimer(notificationId);
       clearNotificationRemovalTimer(notificationId);
       activeNotificationIdsRef.current.delete(notificationId);
-      const isRemoteNotification = remoteNotificationIdsRef.current.has(notificationId);
-      remoteNotificationIdsRef.current.delete(notificationId);
       setNotifications((current) => current.filter((item) => item.id !== notificationId));
-
-      if (!isRemoteNotification) {
-        return;
-      }
-
-      try {
-        await markNotificationRead(notificationId);
-      } catch (requestError) {
-        if (
-          requestError instanceof ApiError &&
-          requestError.error === API_ERROR_PRESETS.UNAUTHORIZED.code
-        ) {
-          await refresh();
-        }
-      }
     },
-    [clearNotificationRemovalTimer, clearNotificationTimer, refresh],
+    [clearNotificationRemovalTimer, clearNotificationTimer],
   );
 
   const dismissNotification = useCallback(
@@ -201,7 +182,7 @@ export function GameProvider({ children }: PropsWithChildren) {
   );
 
   const enqueueNotifications = useCallback(
-    (incoming: AppNotification[], source: 'local' | 'remote') => {
+    (incoming: AppNotification[]) => {
       const nextItems = incoming
         .filter((item) => !activeNotificationIdsRef.current.has(item.id))
         .map((item) => ({
@@ -217,10 +198,6 @@ export function GameProvider({ children }: PropsWithChildren) {
 
       for (const item of nextItems) {
         activeNotificationIdsRef.current.add(item.id);
-
-        if (source === 'remote') {
-          remoteNotificationIdsRef.current.add(item.id);
-        }
 
         const timer = window.setTimeout(() => {
           void dismissNotification(item.id);
@@ -254,7 +231,6 @@ export function GameProvider({ children }: PropsWithChildren) {
             createdAt: new Date().toISOString(),
           },
         ],
-        'local',
       );
     },
     [enqueueNotifications],
@@ -266,7 +242,6 @@ export function GameProvider({ children }: PropsWithChildren) {
     notificationRemovalTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     notificationRemovalTimersRef.current.clear();
     activeNotificationIdsRef.current.clear();
-    remoteNotificationIdsRef.current.clear();
     setNotifications([]);
   }, []);
 
@@ -280,7 +255,7 @@ export function GameProvider({ children }: PropsWithChildren) {
       const hasNewRemoteNotifications = response.notifications.some(
         (item) => !activeNotificationIdsRef.current.has(item.id),
       );
-      enqueueNotifications(response.notifications, 'remote');
+      enqueueNotifications(response.notifications);
 
       if (hasNewRemoteNotifications) {
         await refresh();

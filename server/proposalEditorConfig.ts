@@ -6,7 +6,12 @@ import type {
 
 export interface ProposalEditorRarityConfig {
   settings: ProposalEditorCapabilities;
+  // Пары вида [количество эффектов, вес]. Вес не обязан быть равен 100:
+  // сервер выбирает вариант пропорционально весу.
+  // Пример: [[1, 54], [2, 46]] ~= 54% на 1 эффект и 46% на 2 эффекта.
   effectGrantCountWeights: Array<[number, number]>;
+  // Пары вида [effectId, вес]. Чем больше вес, тем чаще конкретный эффект
+  // выпадает относительно остальных эффектов в пуле этой редкости.
   effectPool: Array<[CardTreatmentEffect, number]>;
 }
 
@@ -26,6 +31,12 @@ export interface ProposalEditorRarityConfig {
  * - основное изображение
  * - цвета карточки
  *
+ * Как читать числа в весах:
+ * - это НЕ "жесткие проценты", а относительные веса
+ * - чем больше число, тем выше шанс относительно соседних значений
+ * - если веса одинаковые, шанс одинаковый
+ * - для примерной вероятности дели вес на сумму весов в конкретном списке
+ *
  * `maxEffectLayers` отдельно не задается. Сервер считает его по фактически
  * выданному количеству `allowedEffects`.
  */
@@ -41,7 +52,9 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     settings: {
       decorativePattern: false,
     },
+    // Всегда выдается ровно 1 эффект.
     effectGrantCountWeights: [[1, 1]],
+    // Сумма весов тут 100, поэтому можно читать почти как проценты.
     effectPool: [
       ['spot_gloss', 48],
       ['texture_sugar', 34],
@@ -52,10 +65,12 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     settings: {
       decorativePattern: true,
     },
+    // 1 эффект ~= 54%, 2 эффекта ~= 46%.
     effectGrantCountWeights: [
       [1, 54],
       [2, 46],
     ],
+    // Относительные шансы выбора эффекта внутри редкости rare.
     effectPool: [
       ['spot_gloss', 28],
       ['texture_sugar', 18],
@@ -69,10 +84,12 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     settings: {
       decorativePattern: true,
     },
+    // 2 эффекта ~= 58%, 3 эффекта ~= 42%.
     effectGrantCountWeights: [
       [2, 58],
       [3, 42],
     ],
+    // Относительные шансы выбора эффекта внутри редкости epic.
     effectPool: [
       ['spot_gloss', 16],
       ['texture_sugar', 14],
@@ -87,10 +104,12 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     settings: {
       decorativePattern: true,
     },
+    // 3 эффекта ~= 62%, 4 эффекта ~= 38%.
     effectGrantCountWeights: [
       [3, 62],
       [4, 38],
     ],
+    // Относительные шансы выбора эффекта внутри редкости veryrare.
     effectPool: [
       ['spot_gloss', 10],
       ['texture_sugar', 10],

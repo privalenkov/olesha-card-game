@@ -36,6 +36,7 @@ import {
   CARD_TREATMENT_EFFECT_DESCRIPTIONS,
   CARD_TREATMENT_EFFECT_LABELS,
   getDefaultCardVisuals,
+  getDefaultDecorativePattern,
   getDefaultEffectLayer,
   PROPOSAL_STATUS_LABELS,
   type CardProposal,
@@ -1053,6 +1054,24 @@ export function CardCreatorPage() {
     }));
   }
 
+  function handlePatternSettingsToggle(checked: boolean) {
+    if (checked) {
+      setPatternSettingsOpen(true);
+      return;
+    }
+
+    decorativePatternUploadRequestIdRef.current += 1;
+    setDecorativePatternFileName(null);
+    setPatternSettingsOpen(false);
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        decorativePattern: getDefaultDecorativePattern(),
+      },
+    }));
+  }
+
   function clearEffectMask(layerId: string) {
     effectMaskUploadRequestIdsRef.current = {
       ...effectMaskUploadRequestIdsRef.current,
@@ -1300,7 +1319,7 @@ export function CardCreatorPage() {
                   checked={patternSettingsOpen}
                   disabled={isLocked}
                   label="Паттерн"
-                  onCheckedChange={setPatternSettingsOpen}
+                  onCheckedChange={handlePatternSettingsToggle}
                 />
 
                 <div

@@ -1803,12 +1803,17 @@ export function createGameStore(config: ServerConfig) {
       id, user_id, kind, title, message, proposal_id, card_instance_id, created_at, read_at
     ) values (?, ?, ?, ?, ?, ?, ?, ?, null)
   `);
-  const selectUnreadNotifications = db.prepare(`
-    select *
-    from user_notifications
-    where user_id = ? and read_at is null
-    order by datetime(created_at) asc, id asc
-    limit 20
+  const takeUnreadNotifications = db.prepare(`
+    update user_notifications
+    set read_at = @read_at
+    where id in (
+      select id
+      from user_notifications
+      where user_id = @user_id and read_at is null
+      order by datetime(created_at) asc, id asc
+      limit 20
+    )
+    returning *
   `);
   const markNotificationRead = db.prepare(`
     update user_notifications
@@ -2051,9 +2056,13 @@ export function createGameStore(config: ServerConfig) {
   }
 
   function listUnreadNotifications(userId: string): AppNotification[] {
-    return selectUnreadNotifications
-      .all(userId)
-      .map((row) => toAppNotification(row as NotificationRow));
+    return takeUnreadNotifications
+      .all({
+        user_id: userId,
+        read_at: new Date().toISOString(),
+      })
+      .map((row) => toAppNotification(row as NotificationRow))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
   }
 
   function markNotificationReadById(userId: string, notificationId: string) {
