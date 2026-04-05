@@ -1125,14 +1125,12 @@ export function CardCreatorPage() {
     return (
       <section className="page page--creator">
         <div className="creator-empty empty-state">
-          <strong>Редактор доступен после входа</strong>
+          <strong className="creator-empty__title">Редактор доступен после входа</strong>
           {authConfigured ? (
             <button className="action-button action-button--solid" onClick={login} type="button">
               Войти через Google
             </button>
-          ) : (
-            <span>Google OAuth пока не настроен.</span>
-          )}
+          ) : null}
         </div>
       </section>
     );
@@ -1142,7 +1140,7 @@ export function CardCreatorPage() {
     return (
       <section className="page page--creator">
         <div className="creator-empty empty-state">
-          <strong>Загружаю редактор карточки...</strong>
+          <strong className="creator-empty__title">загрузка</strong>
         </div>
       </section>
     );

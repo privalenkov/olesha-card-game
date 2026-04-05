@@ -23,6 +23,7 @@ function AppShell() {
   const navigate = useNavigate();
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [proposalBusy, setProposalBusy] = useState(false);
+  const [topbarScrolled, setTopbarScrolled] = useState(false);
   const {
     authConfigured,
     authenticated,
@@ -44,6 +45,19 @@ function AppShell() {
     setReleaseNotesOpen(true);
   }, []);
 
+  useEffect(() => {
+    function syncTopbarScrollState() {
+      setTopbarScrolled(window.scrollY > 12);
+    }
+
+    syncTopbarScrollState();
+    window.addEventListener('scroll', syncTopbarScrollState, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', syncTopbarScrollState);
+    };
+  }, []);
+
   function closeReleaseNotes() {
     try {
       window.localStorage.setItem(RELEASE_NOTES_STORAGE_KEY, RELEASE_NOTES_VERSION);
@@ -62,7 +76,7 @@ function AppShell() {
         notify({
           kind: 'error',
           title: 'Авторизация недоступна',
-          message: 'Google OAuth пока не настроен.',
+          message: 'Вход недоступен',
         });
       }
 
@@ -120,7 +134,7 @@ function AppShell() {
         ))}
       </div>
 
-      <header className="topbar">
+      <header className={`topbar${topbarScrolled ? ' topbar--scrolled' : ''}`}>
         <div aria-hidden="true" className="topbar__spacer" />
 
         <nav aria-label="Основная навигация" className="topbar__nav">

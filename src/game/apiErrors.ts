@@ -60,12 +60,12 @@ export const API_ERROR_PRESETS = {
   AUTH_NOT_CONFIGURED: {
     code: 'AUTH_NOT_CONFIGURED',
     title: 'Авторизация недоступна',
-    message: 'Google OAuth пока не настроен на сервере.',
+    message: 'Вход недоступен',
   },
   INVALID_OAUTH_STATE: {
     code: 'INVALID_OAUTH_STATE',
     title: 'Ошибка авторизации',
-    message: 'Некорректный OAuth state.',
+    message: 'Некорректное состояние входа',
   },
   GOOGLE_AUTH_UNAVAILABLE_TOKEN_EXCHANGE: {
     code: 'GOOGLE_AUTH_UNAVAILABLE',

@@ -588,9 +588,30 @@
   font-size: 14px;
 }
 
-.creator-empty {
+.creator-empty.empty-state {
   min-height: calc(100vh - 160px);
   min-height: calc(100dvh - 160px);
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  text-align: center;
+}
+
+.creator-empty__title {
+  margin: 0;
+  max-width: 240px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: #B3AF98;
+}
+
+.creator-empty .action-button {
+  align-self: center;
 }
 
 .admin-grid {

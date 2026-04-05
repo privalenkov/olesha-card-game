@@ -16,6 +16,32 @@
   gap: 18px;
   width: 100%;
   padding: 0 var(--page-gutter-desktop);
+  isolation: isolate;
+}
+
+.topbar::before {
+  content: '';
+  position: absolute;
+  inset: -14px 12px;
+  z-index: 0;
+  border-radius: 24px;
+  opacity: 0;
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  pointer-events: none;
+  transition:
+    opacity 220ms ease,
+    background 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    backdrop-filter 220ms ease,
+    -webkit-backdrop-filter 220ms ease;
+}
+
+.topbar--scrolled::before {
+  background: rgba(8, 12, 18, 0.3);
+  opacity: 1;
+  backdrop-filter: blur(10px);
 }
 
 .topbar__spacer {
@@ -24,6 +50,8 @@
 
 .topbar__nav,
 .topbar__auth {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 22px;
