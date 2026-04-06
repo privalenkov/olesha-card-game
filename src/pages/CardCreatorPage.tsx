@@ -1700,9 +1700,7 @@ export function CardCreatorPage() {
                 })}
               </div>
             ) : (
-              <div className="creator-effect-empty creator-rarity-card">
-                Для этой карточки сейчас нет доступных специальных эффектов.
-              </div>
+              <div className="creator-effect-empty">Нет доступных эффектов</div>
             )}
           </div>
           </div>

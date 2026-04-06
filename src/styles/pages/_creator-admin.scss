@@ -419,16 +419,13 @@
 }
 
 .creator-effect-empty {
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--copy-faint);
-}
-
-.creator-effect-empty.creator-rarity-card {
-  padding: 21px;
-  background: #B3AF98;
-  color: #0D0E17;
+  padding: 0;
+  background: none;
+  color: #EC0B43;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.2px;
 }
 
 .creator-effect-switches {
