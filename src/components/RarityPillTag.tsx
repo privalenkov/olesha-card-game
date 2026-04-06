@@ -44,8 +44,8 @@ function getRarityPillTextColor(backgroundColor: string) {
 }
 
 const rarityPillParticleCount: Record<Rarity, number> = {
-  common: 6,
-  uncommon: 6,
+  common: 0,
+  uncommon: 0,
   rare: 7,
   epic: 8,
   veryrare: 8,
@@ -174,30 +174,32 @@ export function RarityPillTag({
 
   return (
     <div className={classes} style={pillStyle}>
-      <div className="rarity-pill-tag__particles" aria-hidden="true">
-        {particles.map((particle, index) => (
-          <img
-            key={`rarity-pill-particle-${rarity}-${index}`}
-            alt=""
-            aria-hidden="true"
-            className="rarity-pill-tag__particle"
-            src={particleIconUrl}
-            style={
-              {
-                ['--particle-duration' as string]: `${rarityPillParticleDurationMs[rarity]}ms`,
-                ['--particle-delay' as string]: `${particle.delayMs}ms`,
-                ['--particle-from-x' as string]: `${particle.fromX}px`,
-                ['--particle-from-y' as string]: `${particle.fromY}px`,
-                ['--particle-to-x' as string]: `${particle.toX}px`,
-                ['--particle-to-y' as string]: `${particle.toY}px`,
-                ['--particle-size' as string]: `${particle.size}px`,
-                ['--particle-rotate-from' as string]: `${particle.rotateFrom}deg`,
-                ['--particle-rotate-to' as string]: `${particle.rotateTo}deg`,
-              } as CSSProperties
-            }
-          />
-        ))}
-      </div>
+      {particles.length > 0 ? (
+        <div className="rarity-pill-tag__particles" aria-hidden="true">
+          {particles.map((particle, index) => (
+            <img
+              key={`rarity-pill-particle-${rarity}-${index}`}
+              alt=""
+              aria-hidden="true"
+              className="rarity-pill-tag__particle"
+              src={particleIconUrl}
+              style={
+                {
+                  ['--particle-duration' as string]: `${rarityPillParticleDurationMs[rarity]}ms`,
+                  ['--particle-delay' as string]: `${particle.delayMs}ms`,
+                  ['--particle-from-x' as string]: `${particle.fromX}px`,
+                  ['--particle-from-y' as string]: `${particle.fromY}px`,
+                  ['--particle-to-x' as string]: `${particle.toX}px`,
+                  ['--particle-to-y' as string]: `${particle.toY}px`,
+                  ['--particle-size' as string]: `${particle.size}px`,
+                  ['--particle-rotate-from' as string]: `${particle.rotateFrom}deg`,
+                  ['--particle-rotate-to' as string]: `${particle.rotateTo}deg`,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+      ) : null}
 
       <div className="rarity-pill-tag__pill">
         <span>{label}</span>

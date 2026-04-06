@@ -10,8 +10,7 @@ import defaultPatternUrl from '../assets/cards/default-pattern.png';
 import defaultReflectPatternUrl from '../assets/cards/default-reflect-pattern.png';
 import cardLayerOneFrontUrl from '../assets/cards/card-layer-one-front.png';
 import cardLayerTwoFrontUrl from '../assets/cards/card-layer-two-front.png';
-import emptyStarUrl from '../assets/cards/empty-star.svg';
-import fillStarUrl from '../assets/cards/fill-star.svg';
+import rarityStarUrl from '../assets/icons/rarity-star.svg';
 import {
   CARD_PREVIEW_HEIGHT,
   CARD_PREVIEW_WIDTH,
@@ -49,6 +48,10 @@ const opaqueImageBoundsCache = new WeakMap<
   HTMLImageElement | HTMLCanvasElement,
   { x: number; y: number; width: number; height: number } | null
 >();
+const tintedImageCache = new WeakMap<
+  HTMLImageElement | HTMLCanvasElement,
+  Map<string, HTMLCanvasElement>
+>();
 
 function getCardRemoteAssetUrls(card: OwnedCard | null) {
   if (!card) {
@@ -61,8 +64,7 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
     defaultReflectPatternUrl,
     cardLayerOneFrontUrl,
     cardLayerTwoFrontUrl,
-    emptyStarUrl,
-    fillStarUrl,
+    rarityStarUrl,
     card.urlImage,
     card.visuals?.decorativePattern.svgUrl ?? '',
     ...getCardEffectLayers(card).map((layer) => layer.maskUrl),
@@ -225,16 +227,16 @@ const CARD_FRONT_LAYOUTS: Record<CardLayoutType, CardFrontLayout> = {
     artBox: {
       x: 44,
       y: 183,
-      width: 936,
-      height: 1257,
-      radius: 46,
+      width: 944,
+      height: 1219,
+      radius: 72,
     },
     heroBox: {
       x: 44,
       y: 183,
-      width: 936,
-      height: 1257,
-      radius: 46,
+      width: 944,
+      height: 1219,
+      radius: 72,
     },
     rarityBox: {
       x: 104,
@@ -253,15 +255,15 @@ const CARD_FRONT_LAYOUTS: Record<CardLayoutType, CardFrontLayout> = {
       size: 44,
       gap: 22,
       filledColor: '#EC0B43',
-      emptyColor: '#F5F0DC',
+      emptyColor: '#080910',
     },
   },
   type4: {
     cardType: 'type4',
     titleBox: {
       x: 64,
-      y: 50,
-      width: 582,
+      y: 80,
+      width: 120,
       height: 76,
       paddingX: 30,
       radius: 38,
@@ -275,17 +277,17 @@ const CARD_FRONT_LAYOUTS: Record<CardLayoutType, CardFrontLayout> = {
     },
     artBox: {
       x: 44,
-      y: 150,
-      width: 936,
-      height: 1290,
-      radius: 46,
+      y: 38,
+      width: 944,
+      height: 1371,
+      radius: 72,
     },
     heroBox: {
       x: 44,
-      y: 150,
-      width: 936,
-      height: 1290,
-      radius: 46,
+      y: 38,
+      width: 944,
+      height: 1371,
+      radius: 72,
     },
     rarityBox: {
       x: 104,
@@ -304,7 +306,7 @@ const CARD_FRONT_LAYOUTS: Record<CardLayoutType, CardFrontLayout> = {
       size: 44,
       gap: 22,
       filledColor: '#EC0B43',
-      emptyColor: '#F5F0DC',
+      emptyColor: '#080910',
     },
   },
 };
@@ -978,6 +980,80 @@ function drawSingleLineTextInBox(
   ctx.fillText(text, box.x + paddingX, centerY);
 }
 
+function drawWrappedTextInBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  box: CardFrontBox,
+  options: {
+    maxFontSize: number;
+    minFontSize: number;
+    lineHeightMultiplier?: number;
+    fontWeight?: string;
+    fontFamily?: string;
+    color?: string;
+    align?: CanvasTextAlign;
+    paddingX?: number;
+    shadowColor?: string;
+    shadowBlur?: number;
+    shadowOffsetY?: number;
+  },
+) {
+  const fontFamily = options.fontFamily ?? 'Space Grotesk, sans-serif';
+  const fontWeight = options.fontWeight ?? '700';
+  const lineHeightMultiplier = options.lineHeightMultiplier ?? 0.94;
+  const paddingX = options.paddingX ?? 0;
+  const availableWidth = Math.max(box.width - paddingX * 2, 1);
+  const minFontSize = Math.min(options.minFontSize, options.maxFontSize);
+  let fontSize = options.maxFontSize;
+  let lines = [text];
+  let lineHeight = fontSize * lineHeightMultiplier;
+
+  while (fontSize >= minFontSize) {
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    lines = createWrappedTextLines(ctx, text, availableWidth);
+    lineHeight = fontSize * lineHeightMultiplier;
+    const widestLine = lines.reduce(
+      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
+      0,
+    );
+
+    if (
+      (widestLine <= availableWidth && lines.length * lineHeight <= box.height) ||
+      fontSize === minFontSize
+    ) {
+      break;
+    }
+
+    fontSize -= 1;
+  }
+
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = options.color ?? CARD_FRONT_TEXT_COLOR;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = options.align ?? 'left';
+  ctx.shadowColor = options.shadowColor ?? 'rgba(0,0,0,0)';
+  ctx.shadowBlur = options.shadowBlur ?? 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = options.shadowOffsetY ?? 0;
+
+  const totalTextHeight = lines.length * lineHeight;
+  const startY = box.y + Math.max((box.height - totalTextHeight) / 2, 0);
+
+  lines.forEach((line, index) => {
+    if ((options.align ?? 'left') === 'center') {
+      ctx.fillText(line, box.x + box.width / 2, startY + index * lineHeight);
+      return;
+    }
+
+    if ((options.align ?? 'left') === 'right') {
+      ctx.fillText(line, box.x + box.width - paddingX, startY + index * lineHeight);
+      return;
+    }
+
+    ctx.fillText(line, box.x + paddingX, startY + index * lineHeight);
+  });
+}
+
 function drawParagraphTextInBox(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -1057,8 +1133,7 @@ function drawRarityStars(
   ctx: CanvasRenderingContext2D,
   card: OwnedCard,
   box: CardFrontLayout['rarityBox'],
-  fillStarImage: HTMLImageElement | null,
-  emptyStarImage: HTMLImageElement | null,
+  starImage: HTMLImageElement | null,
   starConfig: CardFrontLayout['stars'],
 ) {
   const totalStars = 5;
@@ -1071,19 +1146,17 @@ function drawRarityStars(
 
   for (let index = 0; index < totalStars; index += 1) {
     const x = startX + index * (starConfig.size + starConfig.gap);
-    const starImage =
-      starConfig.filledColor || starConfig.emptyColor
-        ? null
-        : index < filledStars
-          ? fillStarImage
-          : emptyStarImage;
+    const starColor = index < filledStars ? filledColor : emptyColor;
+    const tintedStarImage = starImage
+      ? getTintedImageVariant(starImage, starColor, starConfig.size, starConfig.size)
+      : null;
 
-    if (starImage) {
-      ctx.drawImage(starImage, x, startY, starConfig.size, starConfig.size);
+    if (tintedStarImage) {
+      ctx.drawImage(tintedStarImage, x, startY, starConfig.size, starConfig.size);
       continue;
     }
 
-    ctx.fillStyle = index < filledStars ? filledColor : emptyColor;
+    ctx.fillStyle = starColor;
     drawStarShape(
       ctx,
       x + starConfig.size / 2,
@@ -1593,6 +1666,46 @@ function createCanvas(width: number, height: number) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
+  return canvas;
+}
+
+function getTintedImageVariant(
+  image: HTMLImageElement | HTMLCanvasElement,
+  color: string,
+  width: number,
+  height: number,
+) {
+  const cachedVariants = tintedImageCache.get(image);
+  const cacheKey = `${color}:${width}x${height}`;
+  const cached = cachedVariants?.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return null;
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'source-in';
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'source-over';
+
+  const nextVariants = cachedVariants ?? new Map<string, HTMLCanvasElement>();
+  nextVariants.set(cacheKey, canvas);
+
+  if (!cachedVariants) {
+    tintedImageCache.set(image, nextVariants);
+  }
+
   return canvas;
 }
 
@@ -2730,8 +2843,7 @@ function drawCardFront(
   defaultPatternImage: HTMLImageElement | null,
   layerOneImage: HTMLImageElement | null,
   layerTwoImage: HTMLImageElement | null,
-  fillStarImage: HTMLImageElement | null,
-  emptyStarImage: HTMLImageElement | null,
+  rarityStarImage: HTMLImageElement | null,
   options: CardFrontTextureOptions = {},
 ) {
   const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
@@ -2747,6 +2859,7 @@ function drawCardFront(
   const accent = visuals.accentColor;
   const detailBorderColor = accent;
   const defaults = getDefaultCardVisuals();
+  const includeLayerTwoTemplate = layout.cardType !== 'type4';
 
   drawTintedTemplateLayer(ctx, layerOneImage, visuals.layerOneFill, {
     detailAlpha: 0.72,
@@ -2754,7 +2867,7 @@ function drawCardFront(
     fallbackValue: defaults.layerOneFill,
   });
 
-  if (layerTwoImage) {
+  if (layerTwoImage && includeLayerTwoTemplate) {
     drawTintedTemplateLayer(ctx, layerTwoImage, visuals.layerTwoFill, {
       detailAlpha: 0.66,
       fallbackRadius: 56,
@@ -2812,8 +2925,7 @@ function drawCardFront(
       ctx,
       card,
       layout.rarityBox,
-      fillStarImage,
-      emptyStarImage,
+      rarityStarImage,
       layout.stars,
     );
 
@@ -2942,8 +3054,7 @@ function drawCardFront(
         ctx,
         card,
         layout.rarityBox,
-        fillStarImage,
-        emptyStarImage,
+        rarityStarImage,
         layout.stars,
       );
 
@@ -3025,8 +3136,7 @@ function drawCardFront(
           ...layout.rarityBox,
           paddingX: 0,
         },
-        fillStarImage,
-        emptyStarImage,
+        rarityStarImage,
         layout.stars,
       );
       drawParagraphTextInBox(
@@ -3068,13 +3178,14 @@ function drawCardFront(
         strokeRoundedPanel(ctx, layout.heroBox, detailBorderColor, 3);
       }
 
-      drawSingleLineTextInBox(
+      drawWrappedTextInBox(
         ctx,
         card.title.toLocaleUpperCase(),
         layout.titleBox,
         {
-          maxFontSize: 30,
-          minFontSize: 24,
+          maxFontSize: 64,
+          minFontSize: 64,
+          lineHeightMultiplier: 1.2,
           paddingX: layout.titleBox.paddingX,
         },
       );
@@ -3115,8 +3226,7 @@ function drawCardFront(
           ...layout.rarityBox,
           paddingX: 0,
         },
-        fillStarImage,
-        emptyStarImage,
+        rarityStarImage,
         layout.stars,
       );
       drawParagraphTextInBox(
@@ -3517,8 +3627,7 @@ export function useCardTextures(card: OwnedCard | null) {
   const defaultReflectPatternImage = useRemoteImage(defaultReflectPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
-  const emptyStarImage = useRemoteImage(emptyStarUrl);
-  const fillStarImage = useRemoteImage(fillStarUrl);
+  const rarityStarImage = useRemoteImage(rarityStarUrl);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
@@ -3549,8 +3658,7 @@ export function useCardTextures(card: OwnedCard | null) {
             defaultPatternImage,
             layerOneImage,
             layerTwoImage,
-            fillStarImage,
-            emptyStarImage,
+            rarityStarImage,
             {
               includeTreatmentLayers: false,
             },
@@ -3613,10 +3721,9 @@ export function useCardTextures(card: OwnedCard | null) {
     defaultReflectPatternImage,
     decorativePatternImage,
     effectMaskImages,
-    emptyStarImage,
-    fillStarImage,
     layerOneImage,
     layerTwoImage,
+    rarityStarImage,
   ]);
 }
 
@@ -3625,8 +3732,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
   const defaultPatternImage = useRemoteImage(defaultPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
-  const emptyStarImage = useRemoteImage(emptyStarUrl);
-  const fillStarImage = useRemoteImage(fillStarUrl);
+  const rarityStarImage = useRemoteImage(rarityStarUrl);
   const decorativePatternImage = useRemoteImage(card?.visuals?.decorativePattern.svgUrl ?? null);
   const effectLayerUrls = useMemo(
     () => (card ? getCardEffectLayers(card).map((layer) => layer.maskUrl) : []),
@@ -3648,8 +3754,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
         defaultPatternImage,
         layerOneImage,
         layerTwoImage,
-        fillStarImage,
-        emptyStarImage,
+        rarityStarImage,
         {
           treatmentPaintStrength: 0.8,
         },
@@ -3676,10 +3781,9 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     defaultPatternImage,
     decorativePatternImage,
     effectMaskImages,
-    emptyStarImage,
-    fillStarImage,
     layerOneImage,
     layerTwoImage,
+    rarityStarImage,
   ]);
 }
 

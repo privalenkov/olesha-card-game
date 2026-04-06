@@ -1,5 +1,6 @@
 import type {
   AdminCatalogResult,
+  DeleteAdminCardResult,
   FetchProposalResult,
   NotificationListResult,
   AdminProposalOverridePayload,
@@ -274,6 +275,13 @@ export function deleteProposal(proposalId: string, reason: string) {
   return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}`, {
     method: 'DELETE',
     body: JSON.stringify({ reason }),
+  });
+}
+
+export function deleteAdminCard(cardId: string) {
+  return apiRequest<DeleteAdminCardResult>(`/api/admin/cards/${cardId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({}),
   });
 }
 

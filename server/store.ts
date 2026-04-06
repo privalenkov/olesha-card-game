@@ -1881,9 +1881,28 @@ export function createGameStore(config: ServerConfig) {
     set read_at = ?
     where id = ? and user_id = ? and read_at is null
   `);
+  const selectCardDefinitionIdById = db.prepare(`
+    select id
+    from card_definitions
+    where id = ?
+    limit 1
+  `);
   const deactivateCardDefinition = db.prepare(`
     update card_definitions
     set is_active = 0, updated_at = ?
+    where id = ?
+  `);
+  const clearApprovedCardDefinitionReference = db.prepare(`
+    update card_proposals
+    set approved_card_definition_id = null
+    where approved_card_definition_id = ?
+  `);
+  const deleteOwnedCardsByDefinitionId = db.prepare(`
+    delete from owned_cards
+    where card_definition_id = ?
+  `);
+  const deleteCardDefinitionById = db.prepare(`
+    delete from card_definitions
     where id = ?
   `);
   const insertPackOpenEvent = db.prepare(`
@@ -2473,6 +2492,38 @@ export function createGameStore(config: ServerConfig) {
     }
   }
 
+  function deleteAdminCardById(
+    cardId: string,
+  ): { cardId: string; deletedOwnedCount: number } | null {
+    const existing = selectCardDefinitionIdById.get(cardId) as { id: string } | undefined;
+
+    if (!existing) {
+      return null;
+    }
+
+    db.exec('BEGIN IMMEDIATE');
+
+    try {
+      clearApprovedCardDefinitionReference.run(cardId);
+      const deletedOwned = deleteOwnedCardsByDefinitionId.run(cardId);
+      const deletedCard = deleteCardDefinitionById.run(cardId);
+
+      if (deletedCard.changes === 0) {
+        db.exec('ROLLBACK');
+        return null;
+      }
+
+      db.exec('COMMIT');
+      return {
+        cardId,
+        deletedOwnedCount: deletedOwned.changes,
+      };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   function openPackForUser(userId: string, now = new Date()): OpenPackResult {
     const dayKey = getDayKey(now, config.appTimeZone);
     const nowIso = now.toISOString();
@@ -2554,6 +2605,7 @@ export function createGameStore(config: ServerConfig) {
     markNotificationReadById,
     approveProposalById,
     deleteProposalById,
+    deleteAdminCardById,
   };
 }
 

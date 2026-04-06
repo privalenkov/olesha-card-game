@@ -1614,6 +1614,40 @@ export async function buildApp() {
     reply.send(store.listAdminCards());
   });
 
+  app.delete('/api/admin/cards/:cardId', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'admin:delete-card', MUTATION_RATE_LIMITS.admin)) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('ADMIN_ONLY'));
+      return;
+    }
+
+    const result = store.deleteAdminCardById((request.params as { cardId: string }).cardId);
+
+    if (!result) {
+      reply.code(404).send(apiError('CARD_NOT_FOUND_ADMIN_DELETE'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({
+      ok: true,
+      cardId: result.cardId,
+      deletedOwnedCount: result.deletedOwnedCount,
+    });
+    void scheduleUploadsCleanup();
+  });
+
   app.get('/api/admin/users', async (request, reply) => {
     const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
 

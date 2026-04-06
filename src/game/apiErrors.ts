@@ -189,6 +189,11 @@ export const API_ERROR_PRESETS = {
     title: 'Предложение не найдено',
     message: 'Предложение не найдено или уже обработано.',
   },
+  CARD_NOT_FOUND_ADMIN_DELETE: {
+    code: 'CARD_NOT_FOUND',
+    title: 'Карточка не найдена',
+    message: 'Карточка не найдена или уже удалена.',
+  },
   PACK_LIMIT_REACHED: {
     code: 'PACK_LIMIT_REACHED',
     title: 'Пак недоступен',

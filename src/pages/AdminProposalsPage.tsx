@@ -4,6 +4,7 @@ import { TextArea } from '../components/ui/TextArea';
 import { rarityMeta } from '../game/config';
 import {
   approveProposal,
+  deleteAdminCard,
   deleteProposal,
   fetchAdminCatalog,
   fetchAdminProposals,
@@ -85,10 +86,14 @@ function ProposalRow({
 
 function AdminCatalogRow({
   item,
+  busy,
   onOpen,
+  onDelete,
 }: {
   item: AdminCatalogCard;
+  busy: boolean;
   onOpen: (card: OwnedCard) => void;
+  onDelete: () => void;
 }) {
   const previewCard = useMemo(() => buildPreviewCardFromDefinition(item.card), [item.card]);
   const previewImage = useCardPreviewImage(previewCard);
@@ -120,6 +125,11 @@ function AdminCatalogRow({
           <span>Владельцев: {item.uniqueOwners}</span>
           <span>Шанс в паке: {(item.dropChancePerPack * 100).toFixed(2)}%</span>
           <span>ID: {item.card.id}</span>
+        </div>
+        <div className="proposal-card__actions">
+          <button className="action-button" disabled={busy} onClick={onDelete} type="button">
+            {busy ? 'Удаляем...' : 'Удалить у всех'}
+          </button>
         </div>
       </div>
     </article>
@@ -179,6 +189,7 @@ export function AdminProposalsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejectingProposal, setRejectingProposal] = useState<CardProposal | null>(null);
+  const [deletingCard, setDeletingCard] = useState<AdminCatalogCard | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const rarityBreakdown = useMemo(() => {
     return rarityOrder.map((rarity) => {
@@ -239,6 +250,7 @@ export function AdminProposalsPage() {
       if (event.key === 'Escape') {
         setActiveCard(null);
         setRejectingProposal(null);
+        setDeletingCard(null);
         setRejectionReason('');
       }
     };
@@ -270,6 +282,37 @@ export function AdminProposalsPage() {
     } catch (deleteError) {
       setError(
         deleteError instanceof Error ? deleteError.message : 'Не удалось отклонить предложение.',
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmCardDeletion() {
+    if (!deletingCard) {
+      return;
+    }
+
+    const busyKey = `delete-card:${deletingCard.card.id}`;
+    setBusyId(busyKey);
+
+    try {
+      await deleteAdminCard(deletingCard.card.id);
+
+      const [cardsResponse, usersResponse] = await Promise.all([
+        fetchAdminCatalog(),
+        fetchAdminUsers(),
+      ]);
+
+      setCards(cardsResponse.cards);
+      setRarityBalance(cardsResponse.rarityBalance);
+      setUsers(usersResponse.users);
+      setActiveCard((current) => (current?.id === deletingCard.card.id ? null : current));
+      setDeletingCard(null);
+      setError(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : 'Не удалось удалить карточку из игры.',
       );
     } finally {
       setBusyId(null);
@@ -395,7 +438,16 @@ export function AdminProposalsPage() {
 
               <div className="admin-grid">
                 {cards.map((item) => (
-                  <AdminCatalogRow key={item.card.id} item={item} onOpen={setActiveCard} />
+                  <AdminCatalogRow
+                    key={item.card.id}
+                    busy={busyId === `delete-card:${item.card.id}`}
+                    item={item}
+                    onDelete={() => {
+                      setDeletingCard(item);
+                      setError(null);
+                    }}
+                    onOpen={setActiveCard}
+                  />
                 ))}
               </div>
             </>
@@ -521,6 +573,58 @@ export function AdminProposalsPage() {
                 type="button"
               >
                 Отклонить с причиной
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deletingCard ? (
+        <div
+          className="admin-dialog-backdrop"
+          onClick={() => {
+            if (busyId !== `delete-card:${deletingCard.card.id}`) {
+              setDeletingCard(null);
+            }
+          }}
+          role="presentation"
+        >
+          <div
+            className="admin-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-card-delete-title"
+          >
+            <div className="admin-dialog__head">
+              <strong id="admin-card-delete-title">Удалить карточку у всех</strong>
+              <span>{deletingCard.card.title}</span>
+            </div>
+            <p>
+              Карточка будет полностью удалена из игры, пропадет из паков и исчезнет у всех
+              владельцев.
+            </p>
+            <div className="admin-metrics">
+              <span>Всего копий: {deletingCard.totalOwned}</span>
+              <span>Владельцев: {deletingCard.uniqueOwners}</span>
+              <span>ID: {deletingCard.card.id}</span>
+            </div>
+            <div className="admin-dialog__actions">
+              <button
+                className="action-button"
+                disabled={busyId === `delete-card:${deletingCard.card.id}`}
+                onClick={() => setDeletingCard(null)}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="action-button action-button--solid"
+                disabled={busyId === `delete-card:${deletingCard.card.id}`}
+                onClick={() => void confirmCardDeletion()}
+                type="button"
+              >
+                Удалить навсегда
               </button>
             </div>
           </div>

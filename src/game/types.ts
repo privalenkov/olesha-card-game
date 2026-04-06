@@ -525,6 +525,12 @@ export interface AdminCatalogResult {
   rarityBalance: RarityBalanceSnapshot;
 }
 
+export interface DeleteAdminCardResult {
+  ok: true;
+  cardId: string;
+  deletedOwnedCount: number;
+}
+
 export interface AdminUserRecord {
   id: string;
   googleSub: string;
