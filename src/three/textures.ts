@@ -1168,6 +1168,54 @@ function drawRarityStars(
   }
 }
 
+function getRarityStarsBox(layout: CardFrontLayout) {
+  return layout.cardType === 'type3' || layout.cardType === 'type4'
+    ? { ...layout.rarityBox, paddingX: 0 }
+    : layout.rarityBox;
+}
+
+function eraseRarityStarsFromMask(
+  ctx: CanvasRenderingContext2D,
+  layout: CardFrontLayout,
+  bleed = 3,
+) {
+  const starBox = getRarityStarsBox(layout);
+  const totalStars = 5;
+  const { stars } = layout;
+  const totalWidth = totalStars * stars.size + (totalStars - 1) * stars.gap;
+  const startX = starBox.x + starBox.width - starBox.paddingX - totalWidth;
+  const startY = starBox.y + (starBox.height - stars.size) / 2;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000000';
+
+  for (let index = 0; index < totalStars; index += 1) {
+    const x = startX + index * (stars.size + stars.gap);
+    drawStarShape(
+      ctx,
+      x + stars.size / 2,
+      startY + stars.size / 2,
+      stars.size / 2 + bleed,
+      stars.size * 0.22 + bleed * 0.5,
+    );
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawRarityStarsOverlay(
+  ctx: CanvasRenderingContext2D,
+  card: OwnedCard,
+  layout: CardFrontLayout,
+  rarityStarImage: HTMLImageElement | null,
+) {
+  const rarityBox = getRarityStarsBox(layout);
+
+  drawRarityStars(ctx, card, rarityBox, rarityStarImage, layout.stars);
+}
+
 function ensureRemoteImage(url: string) {
   const cached = remoteImageCache.get(url);
   if (cached) {
@@ -2921,14 +2969,6 @@ function drawCardFront(
       },
     );
 
-    drawRarityStars(
-      ctx,
-      card,
-      layout.rarityBox,
-      rarityStarImage,
-      layout.stars,
-    );
-
     drawParagraphTextInBox(
       ctx,
       card.description,
@@ -3050,14 +3090,6 @@ function drawCardFront(
         },
       );
 
-      drawRarityStars(
-        ctx,
-        card,
-        layout.rarityBox,
-        rarityStarImage,
-        layout.stars,
-      );
-
       drawParagraphTextInBox(
         ctx,
         card.description,
@@ -3128,16 +3160,6 @@ function drawCardFront(
           shadowBlur: 16,
           shadowOffsetY: 2,
         },
-      );
-      drawRarityStars(
-        ctx,
-        card,
-        {
-          ...layout.rarityBox,
-          paddingX: 0,
-        },
-        rarityStarImage,
-        layout.stars,
       );
       drawParagraphTextInBox(
         ctx,
@@ -3219,16 +3241,6 @@ function drawCardFront(
           shadowOffsetY: 2,
         },
       );
-      drawRarityStars(
-        ctx,
-        card,
-        {
-          ...layout.rarityBox,
-          paddingX: 0,
-        },
-        rarityStarImage,
-        layout.stars,
-      );
       drawParagraphTextInBox(
         ctx,
         card.description,
@@ -3260,6 +3272,7 @@ function drawCardFront(
   }
 
   addNoise(ctx, canvas.width, canvas.height, 7200);
+  drawRarityStarsOverlay(ctx, card, layout, rarityStarImage);
   return canvas;
 }
 
@@ -3519,6 +3532,8 @@ function drawHoloZoneMask(
     ctx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
     ctx.restore();
   });
+
+  eraseRarityStarsFromMask(ctx, layout, 4);
 
   return canvas;
 }
