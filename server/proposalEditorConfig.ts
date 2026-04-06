@@ -6,6 +6,7 @@ import type {
 
 export interface ProposalEditorRarityConfig {
   decorativePatternGrantWeights: Array<[boolean, number]>;
+  gradientFillGrantWeights: Array<[boolean, number]>;
   // Пары вида [количество эффектов, вес]. Вес не обязан быть равен 100:
   // сервер выбирает вариант пропорционально весу.
   // Пример: [[1, 54], [2, 46]] ~= 54% на 1 эффект и 46% на 2 эффекта.
@@ -25,6 +26,9 @@ export interface ProposalEditorRarityConfig {
  * Какие rarity-зависимые настройки существуют сейчас:
  * - `decorativePatternGrantWeights`
  *   Шанс получить блок "Паттерн" в редакторе: свитч, загрузка SVG и все слайдеры паттерна.
+ * - `gradientFillGrantWeights`
+ *   Шанс получить возможность использовать градиенты в цветовых настройках карточки.
+ *   Этот grant общий сразу для всех color-fill полей предложения, а не по одному на каждое поле.
  * - `effectGrantCountWeights`
  *   Сколько спецэффектов сервер может выдать предложению этой редкости.
  * - `effectPool`
@@ -35,7 +39,7 @@ export interface ProposalEditorRarityConfig {
  * Что сейчас НЕ настраивается по редкости в этом файле:
  * - заголовок и описание
  * - основное изображение
- * - цвета карточки
+ * - конкретный выбранный solid-цвет карточки
  *
  * Как читать числа в весах:
  * - это НЕ "жесткие проценты", а относительные веса
@@ -49,6 +53,7 @@ export interface ProposalEditorRarityConfig {
 export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConfig> = {
   common: {
     decorativePatternGrantWeights: [[false, 1]],
+    gradientFillGrantWeights: [[false, 1]],
     effectGrantCountWeights: [[0, 1]],
     effectPool: [],
     cardTypeGrantCountWeights: [[1, 1]],
@@ -58,6 +63,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     decorativePatternGrantWeights: [
       [false, 95],
       [true, 5],
+    ],
+    gradientFillGrantWeights: [
+      [false, 94],
+      [true, 6],
     ],
     // Всегда выдается ровно 1 эффект.
     effectGrantCountWeights: [[1, 1]],
@@ -80,6 +89,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     decorativePatternGrantWeights: [
       [false, 78],
       [true, 22],
+    ],
+    gradientFillGrantWeights: [
+      [false, 68],
+      [true, 32],
     ],
     // 1 эффект ~= 54%, 2 эффекта ~= 46%.
     effectGrantCountWeights: [
@@ -110,6 +123,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     decorativePatternGrantWeights: [
       [false, 52],
       [true, 48],
+    ],
+    gradientFillGrantWeights: [
+      [false, 34],
+      [true, 66],
     ],
     // 2 эффекта ~= 58%, 3 эффекта ~= 42%.
     effectGrantCountWeights: [
@@ -142,6 +159,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 28],
       [true, 72],
     ],
+    gradientFillGrantWeights: [
+      [false, 16],
+      [true, 84],
+    ],
     // 3 эффекта ~= 62%, 4 эффекта ~= 38%.
     effectGrantCountWeights: [
       [3, 62],
@@ -173,6 +194,7 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
 export function getProposalEditorCapabilityGrantConfig(rarity: Rarity) {
   return {
     decorativePatternGrantWeights: proposalEditorRarityConfig[rarity].decorativePatternGrantWeights,
+    gradientFillGrantWeights: proposalEditorRarityConfig[rarity].gradientFillGrantWeights,
   };
 }
 

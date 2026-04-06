@@ -17,6 +17,7 @@ import {
   clampEffectShimmer,
   getDefaultCardVisuals,
   normalizeCardLayerFill,
+  normalizeCardLayerFillForCapability,
   normalizeCardTreatmentEffect,
   type CardDecorativePattern,
   type AdminProposalOverridePayload,
@@ -591,8 +592,16 @@ function normalizeProposalPayload(
       cardType,
       frameStyle,
       accentColor,
-      layerOneFill,
-      layerTwoFill,
+      layerOneFill: normalizeCardLayerFillForCapability(
+        layerOneFill,
+        defaults.layerOneFill,
+        editorCapabilities.gradientFill,
+      ),
+      layerTwoFill: normalizeCardLayerFillForCapability(
+        layerTwoFill,
+        defaults.layerTwoFill,
+        editorCapabilities.gradientFill,
+      ),
       decorativePattern: editorCapabilities.decorativePattern
         ? ({
             svgUrl: decorativePatternSvgUrl,

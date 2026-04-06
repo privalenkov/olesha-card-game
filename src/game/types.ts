@@ -224,6 +224,25 @@ export function normalizeCardLayerFill(
   return fallback;
 }
 
+export function isGradientCardLayerFill(value: string | null | undefined) {
+  const normalized = value?.trim() ?? '';
+  return /^linear-gradient\(.+\)$/iu.test(normalized);
+}
+
+export function normalizeCardLayerFillForCapability(
+  value: string | null | undefined,
+  fallback: string,
+  gradientFillEnabled: boolean,
+) {
+  const normalized = normalizeCardLayerFill(value, fallback);
+
+  if (!gradientFillEnabled && isGradientCardLayerFill(normalized)) {
+    return fallback;
+  }
+
+  return normalized;
+}
+
 export function getDefaultDecorativePattern(): CardDecorativePattern {
   return {
     svgUrl: '',
@@ -284,6 +303,7 @@ export function normalizeCardLayoutTypes(
 
 export interface ProposalEditorCapabilities {
   decorativePattern: boolean;
+  gradientFill: boolean;
 }
 
 export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {

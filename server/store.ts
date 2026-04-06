@@ -44,8 +44,10 @@ import {
   normalizeCardLayoutType,
   normalizeCardLayoutTypes,
   normalizeCardLayerFill,
+  normalizeCardLayerFillForCapability,
   normalizeCardTreatmentEffect,
   normalizeCardTreatmentEffects,
+  isGradientCardLayerFill,
 } from '../src/game/types.js';
 import type { ServerConfig } from './config.js';
 import {
@@ -112,6 +114,7 @@ interface ProposalRow {
   creator_name: string;
   rarity: Rarity;
   editor_decorative_pattern: number;
+  editor_gradient_fill: number;
   status: CardProposal['status'];
   title: string;
   description: string;
@@ -465,6 +468,30 @@ function normalizeVisuals(visuals?: PartialCardVisualsInput | null): CardVisuals
   };
 }
 
+function applyEditorCapabilityVisualRestrictions(
+  visuals: CardVisuals,
+  editorCapabilities: ProposalEditorCapabilities,
+): CardVisuals {
+  const defaults = getDefaultCardVisuals();
+
+  return {
+    ...visuals,
+    decorativePattern: editorCapabilities.decorativePattern
+      ? visuals.decorativePattern
+      : defaults.decorativePattern,
+    layerOneFill: normalizeCardLayerFillForCapability(
+      visuals.layerOneFill,
+      defaults.layerOneFill,
+      editorCapabilities.gradientFill,
+    ),
+    layerTwoFill: normalizeCardLayerFillForCapability(
+      visuals.layerTwoFill,
+      defaults.layerTwoFill,
+      editorCapabilities.gradientFill,
+    ),
+  };
+}
+
 function parseStoredAllowedCardTypesPayload(
   value: string | null | undefined,
 ): CardLayoutType[] {
@@ -674,6 +701,7 @@ function buildProposalEditorCapabilities(rarity: Rarity): ProposalEditorCapabili
 
   return {
     decorativePattern: weightedPickValue(config.decorativePatternGrantWeights),
+    gradientFill: weightedPickValue(config.gradientFillGrantWeights),
   };
 }
 
@@ -886,6 +914,7 @@ function toCardProposal(row: ProposalRow): CardProposal {
   const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
   const editorCapabilities = {
     decorativePattern: row.editor_decorative_pattern === 1,
+    gradientFill: row.editor_gradient_fill === 1,
   };
   const baseVisuals = normalizeVisuals({
     cardType: storedVisuals.cardType,
@@ -916,12 +945,7 @@ function toCardProposal(row: ProposalRow): CardProposal {
     description: row.description,
     urlImage: row.url_image,
     defaultFinish: row.default_finish,
-    visuals: editorCapabilities.decorativePattern
-      ? visuals
-      : {
-          ...visuals,
-          decorativePattern: getDefaultCardVisuals().decorativePattern,
-        },
+    visuals: applyEditorCapabilityVisualRestrictions(visuals, editorCapabilities),
     editorCapabilities,
     allowedCardTypes,
     allowedEffects: normalizeCardTreatmentEffects(
@@ -1123,6 +1147,7 @@ export function createGameStore(config: ServerConfig) {
       creator_name text not null,
       rarity text not null,
       editor_decorative_pattern integer not null default 0,
+      editor_gradient_fill integer not null default 0,
       status text not null,
       title text not null,
       description text not null,
@@ -1308,8 +1333,12 @@ export function createGameStore(config: ServerConfig) {
   const hadProposalDecorativePatternColumn = proposalColumns.some(
     (column) => column.name === 'editor_decorative_pattern',
   );
+  const hadProposalGradientFillColumn = proposalColumns.some(
+    (column) => column.name === 'editor_gradient_fill',
+  );
   const requiredProposalColumns = [
     ['editor_decorative_pattern', 'integer not null default 0'],
+    ['editor_gradient_fill', 'integer not null default 0'],
     ['visual_pattern_json', "text not null default '{}'"],
     ['allowed_card_types_json', "text not null default '[]'"],
     ['allowed_effects_json', "text not null default '[]'"],
@@ -1347,6 +1376,31 @@ export function createGameStore(config: ServerConfig) {
         else 0
       end
     `);
+  }
+  if (!hadProposalGradientFillColumn) {
+    const proposalGradientMigrationRows = db.prepare(`
+      select id, rarity, visual_pattern_json
+      from card_proposals
+    `).all() as Array<{
+      id: string;
+      rarity: Rarity;
+      visual_pattern_json: string;
+    }>;
+    const updateProposalGradientFillMigration = db.prepare(`
+      update card_proposals
+      set editor_gradient_fill = ?
+      where id = ?
+    `);
+    const migrateProposalGradientFill = db.transaction(() => {
+      for (const row of proposalGradientMigrationRows) {
+        const visuals = normalizeVisuals(parseStoredVisualPatternPayload(row.visual_pattern_json));
+        const hasGradient =
+          isGradientCardLayerFill(visuals.layerOneFill) || isGradientCardLayerFill(visuals.layerTwoFill);
+        const nextValue = hasGradient ? 1 : buildProposalEditorCapabilities(row.rarity).gradientFill ? 1 : 0;
+        updateProposalGradientFillMigration.run(nextValue, row.id);
+      }
+    });
+    migrateProposalGradientFill();
   }
   db.exec(`
     update card_proposals
@@ -1717,12 +1771,12 @@ export function createGameStore(config: ServerConfig) {
   `);
   const insertProposal = db.prepare(`
     insert into card_proposals (
-      id, creator_user_id, creator_name, rarity, editor_decorative_pattern, status, title, description, url_image,
+      id, creator_user_id, creator_name, rarity, editor_decorative_pattern, editor_gradient_fill, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
       visual_effect_placement, visual_pattern_json, allowed_card_types_json,
       allowed_effects_json, max_effect_layers, effect_layers_json,
       created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1853,6 +1907,8 @@ export function createGameStore(config: ServerConfig) {
     update card_proposals
     set
       rarity = @rarity,
+      editor_decorative_pattern = @editor_decorative_pattern,
+      editor_gradient_fill = @editor_gradient_fill,
       visual_pattern_json = @visual_pattern_json,
       allowed_card_types_json = @allowed_card_types_json,
       allowed_effects_json = @allowed_effects_json,
@@ -2212,6 +2268,7 @@ export function createGameStore(config: ServerConfig) {
       user.name,
       rarity,
       editorCapabilities.decorativePattern ? 1 : 0,
+      editorCapabilities.gradientFill ? 1 : 0,
       'draft',
       'Новая карточка',
       'Опиши, чем эта карточка должна запомниться.',
@@ -2249,7 +2306,20 @@ export function createGameStore(config: ServerConfig) {
     proposalId: string,
     payload: ProposalEditorPayload,
   ): CardProposal | null {
-    const visuals = normalizeVisuals(payload.visuals);
+    const existing = selectProposalById.get(proposalId) as ProposalRow | undefined;
+
+    if (!existing || existing.status !== 'draft') {
+      return null;
+    }
+
+    const editorCapabilities = {
+      decorativePattern: existing.editor_decorative_pattern === 1,
+      gradientFill: existing.editor_gradient_fill === 1,
+    } satisfies ProposalEditorCapabilities;
+    const visuals = applyEditorCapabilityVisualRestrictions(
+      normalizeVisuals(payload.visuals),
+      editorCapabilities,
+    );
     const effectLayers = normalizeEffectLayers(payload.effectLayers);
     const row = updateProposalDraft.get({
       id: proposalId,
@@ -2283,6 +2353,7 @@ export function createGameStore(config: ServerConfig) {
       normalizeEffectLayers(parseJsonArray<CardEffectLayer>(existing.effect_layers_json, [])),
       allowedEffects,
     );
+    const editorCapabilities = buildProposalEditorCapabilities(rarity);
     const grantedCardTypeConfig = buildProposalCardTypeGrant(rarity);
     const nextAllowedCardTypes = normalizeCardLayoutTypes(
       allowedCardTypes && allowedCardTypes.length > 0
@@ -2290,15 +2361,17 @@ export function createGameStore(config: ServerConfig) {
         : grantedCardTypeConfig.allowedCardTypes,
     );
     const existingVisuals = normalizeVisuals(parseStoredVisualPatternPayload(existing.visual_pattern_json));
-    const nextVisuals = {
+    const nextVisuals = applyEditorCapabilityVisualRestrictions({
       ...existingVisuals,
       cardType: nextAllowedCardTypes.includes(existingVisuals.cardType)
         ? existingVisuals.cardType
         : nextAllowedCardTypes[0] ?? grantedCardTypeConfig.defaultCardType,
-    };
+    }, editorCapabilities);
     const row = updateProposalAdminOverride.get({
       id: proposalId,
       rarity,
+      editor_decorative_pattern: editorCapabilities.decorativePattern ? 1 : 0,
+      editor_gradient_fill: editorCapabilities.gradientFill ? 1 : 0,
       visual_pattern_json: serializeStoredVisualPatternPayload(nextVisuals),
       allowed_card_types_json: JSON.stringify(nextAllowedCardTypes),
       allowed_effects_json: JSON.stringify(allowedEffects),

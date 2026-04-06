@@ -36,6 +36,8 @@ import {
   CARD_ACCENT_SWATCHES,
   CARD_LAYOUT_TYPE_OPTIONS,
   CARD_LAYOUT_TYPE_LABELS,
+  DEFAULT_CARD_LAYER_ONE_FILL,
+  DEFAULT_CARD_LAYER_TWO_FILL,
   CARD_LAYER_ONE_FILL_PRESETS,
   CARD_LAYER_TWO_FILL_PRESETS,
   CARD_TREATMENT_EFFECT_OPTIONS,
@@ -45,6 +47,7 @@ import {
   getDefaultCardVisuals,
   getDefaultDecorativePattern,
   getDefaultEffectLayer,
+  normalizeCardLayerFillForCapability,
   PROPOSAL_STATUS_LABELS,
   type CardProposal,
   type CardTreatmentEffect,
@@ -301,6 +304,7 @@ export function CardCreatorPage() {
   const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
   const isLocked = proposal?.status !== 'draft';
   const patternAvailable = proposal?.editorCapabilities.decorativePattern ?? false;
+  const gradientAvailable = proposal?.editorCapabilities.gradientFill ?? false;
   const availableCardTypes = proposal?.allowedCardTypes ?? [];
   const availableCardTypeOptions = useMemo<SelectOption<CardLayoutType>[]>(
     () =>
@@ -337,6 +341,39 @@ export function CardCreatorPage() {
     initializedPatternSettingsProposalIdRef.current = patternInitializationKey;
     setPatternSettingsOpen(patternAvailable && Boolean(draft.visuals.decorativePattern.svgUrl));
   }, [draft, patternAvailable, proposalId]);
+
+  useEffect(() => {
+    if (!draft || gradientAvailable) {
+      return;
+    }
+
+    const nextLayerOneFill = normalizeCardLayerFillForCapability(
+      draft.visuals.layerOneFill,
+      DEFAULT_CARD_LAYER_ONE_FILL,
+      false,
+    );
+    const nextLayerTwoFill = normalizeCardLayerFillForCapability(
+      draft.visuals.layerTwoFill,
+      DEFAULT_CARD_LAYER_TWO_FILL,
+      false,
+    );
+
+    if (
+      nextLayerOneFill === draft.visuals.layerOneFill &&
+      nextLayerTwoFill === draft.visuals.layerTwoFill
+    ) {
+      return;
+    }
+
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        layerOneFill: nextLayerOneFill,
+        layerTwoFill: nextLayerTwoFill,
+      },
+    }));
+  }, [draft, gradientAvailable]);
 
   useEffect(() => {
     if (!proposalId) {
@@ -559,11 +596,14 @@ export function CardCreatorPage() {
   }
 
   function updateVisualFill(fillKey: 'layerOneFill' | 'layerTwoFill', value: string) {
+    const fallback =
+      fillKey === 'layerOneFill' ? DEFAULT_CARD_LAYER_ONE_FILL : DEFAULT_CARD_LAYER_TWO_FILL;
+
     updateDraft((current) => ({
       ...current,
       visuals: {
         ...current.visuals,
-        [fillKey]: value,
+        [fillKey]: normalizeCardLayerFillForCapability(value, fallback, gradientAvailable),
       },
     }));
   }
@@ -998,20 +1038,14 @@ export function CardCreatorPage() {
             onFileSelect={(file) => void handleEffectMaskUpload(file, layer.id)}
             previewUrl={layer.maskUrl}
           />
-        </div>
-
-        <div className="creator-field">
-          <span>Подсказка по размеру</span>
-          <small>
-            Лучше загружать маску в пропорции карточки: {CARD_MASK_EDITOR_WIDTH}x
-            {CARD_MASK_EDITOR_HEIGHT} px для редактора или {CARD_TEXTURE_WIDTH}x
-            {CARD_TEXTURE_HEIGHT} px для максимально четкого рендера. Белое включает ламинацию.
+          <small className="creator-mask-upload-hint">
+            * Пропорции маски: {CARD_TEXTURE_WIDTH}x{CARD_TEXTURE_HEIGHT}px
           </small>
         </div>
 
         <div className="creator-tools">
           <button
-            className="action-button"
+            className="creator-link-button"
             disabled={!layer.maskUrl}
             onClick={() =>
               triggerAssetDownload(
@@ -1340,52 +1374,66 @@ export function CardCreatorPage() {
               />
             </div>
 
-            <div className="creator-field creator-field--picker">
-              <span>Цвет фона</span>
-              <ColorPickerPopover
-                disableLightMode
-                disabled={isLocked}
-                height={196}
-                hideAdvancedSliders
-                hideColorGuide
-                hideEyeDrop
-                hideGradientType
-                hideInputType
-                idSuffix="layer-one-fill"
-                locales={GRADIENT_PICKER_LOCALES}
-                onChange={(value) => {
-                  if (!isLocked) {
-                    updateVisualFill('layerOneFill', value);
+            <div className={`creator-fill-group${gradientAvailable ? ' creator-rarity-card' : ''}`}>
+              <div className="creator-field creator-field--picker">
+                <span>Цвет фона</span>
+                <ColorPickerPopover
+                  disableLightMode
+                  disabled={isLocked}
+                  height={196}
+                  hideAdvancedSliders
+                  hideColorGuide
+                  hideColorTypeBtns={!gradientAvailable}
+                  hideEyeDrop
+                  hideGradientControls={!gradientAvailable}
+                  hideGradientType
+                  hideInputType
+                  idSuffix="layer-one-fill"
+                  locales={GRADIENT_PICKER_LOCALES}
+                  onChange={(value) => {
+                    if (!isLocked) {
+                      updateVisualFill('layerOneFill', value);
+                    }
+                  }}
+                  presets={
+                    gradientAvailable
+                      ? [...CARD_LAYER_ONE_FILL_PRESETS]
+                      : [DEFAULT_CARD_LAYER_ONE_FILL]
                   }
-                }}
-                presets={[...CARD_LAYER_ONE_FILL_PRESETS]}
-                value={draft.visuals.layerOneFill}
-                width={270}
-              />
-            </div>
+                  value={draft.visuals.layerOneFill}
+                  width={270}
+                />
+              </div>
 
-            <div className="creator-field creator-field--picker">
-              <span>Цвет контента</span>
-              <ColorPickerPopover
-                disableLightMode
-                disabled={isLocked}
-                height={196}
-                hideAdvancedSliders
-                hideColorGuide
-                hideEyeDrop
-                hideGradientType
-                hideInputType
-                idSuffix="layer-two-fill"
-                locales={GRADIENT_PICKER_LOCALES}
-                onChange={(value) => {
-                  if (!isLocked) {
-                    updateVisualFill('layerTwoFill', value);
+              <div className="creator-field creator-field--picker">
+                <span>Цвет контента</span>
+                <ColorPickerPopover
+                  disableLightMode
+                  disabled={isLocked}
+                  height={196}
+                  hideAdvancedSliders
+                  hideColorGuide
+                  hideColorTypeBtns={!gradientAvailable}
+                  hideEyeDrop
+                  hideGradientControls={!gradientAvailable}
+                  hideGradientType
+                  hideInputType
+                  idSuffix="layer-two-fill"
+                  locales={GRADIENT_PICKER_LOCALES}
+                  onChange={(value) => {
+                    if (!isLocked) {
+                      updateVisualFill('layerTwoFill', value);
+                    }
+                  }}
+                  presets={
+                    gradientAvailable
+                      ? [...CARD_LAYER_TWO_FILL_PRESETS]
+                      : [DEFAULT_CARD_LAYER_TWO_FILL]
                   }
-                }}
-                presets={[...CARD_LAYER_TWO_FILL_PRESETS]}
-                value={draft.visuals.layerTwoFill}
-                width={270}
-              />
+                  value={draft.visuals.layerTwoFill}
+                  width={270}
+                />
+              </div>
             </div>
 
             {patternAvailable ? (

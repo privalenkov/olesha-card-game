@@ -314,6 +314,12 @@
   background: #B3AF98;
 }
 
+.creator-fill-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .creator-rarity-card .ui-switch-row__label,
 .creator-rarity-card .ui-range-input__label,
 .creator-rarity-card .ui-range-input__value,
@@ -366,6 +372,16 @@
   color: var(--copy-faint);
   font-size: 12px;
   font-weight: 500;
+}
+
+.creator-mask-upload-hint {
+  display: block;
+  margin-top: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: #080910;
 }
 
 .creator-field input:not(.ui-text-input):not(.ui-file-upload__input):not(.ui-range-input__control),
