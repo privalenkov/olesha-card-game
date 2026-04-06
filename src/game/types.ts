@@ -1,7 +1,9 @@
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'veryrare';
+export const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
 
 export type CardFinish = 'standard' | 'foil' | 'prismatic';
 export type CardFrameStyle = 'aurora' | 'ember' | 'mint' | 'onyx' | 'plasma';
+export type CardLayoutType = 'type1' | 'type2' | 'type3' | 'type4';
 export type CardTreatmentEffect =
   | 'spot_gloss'
   | 'spot_holo'
@@ -34,6 +36,7 @@ export interface CardDecorativePattern {
 }
 
 export interface CardVisuals {
+  cardType: CardLayoutType;
   frameStyle: CardFrameStyle;
   accentColor: string;
   decorativePattern: CardDecorativePattern;
@@ -59,6 +62,15 @@ export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
   'onyx',
   'plasma',
 ];
+
+export const CARD_LAYOUT_TYPE_OPTIONS: CardLayoutType[] = ['type1', 'type2', 'type3', 'type4'];
+
+export const CARD_LAYOUT_TYPE_LABELS: Record<CardLayoutType, string> = {
+  type1: 'Тип 1',
+  type2: 'Тип 2',
+  type3: 'Тип 3',
+  type4: 'Тип 4',
+};
 
 export const CARD_FINISH_OPTIONS: CardFinish[] = ['standard', 'foil', 'prismatic'];
 
@@ -225,12 +237,49 @@ export function getDefaultDecorativePattern(): CardDecorativePattern {
 
 export function getDefaultCardVisuals(): CardVisuals {
   return {
+    cardType: 'type1',
     frameStyle: 'aurora',
     accentColor: CARD_ACCENT_SWATCHES[0],
     decorativePattern: getDefaultDecorativePattern(),
     layerOneFill: DEFAULT_CARD_LAYER_ONE_FILL,
     layerTwoFill: DEFAULT_CARD_LAYER_TWO_FILL,
   };
+}
+
+export function normalizeCardLayoutType(
+  value: string | null | undefined,
+): CardLayoutType | null {
+  if (!value) {
+    return null;
+  }
+
+  return CARD_LAYOUT_TYPE_OPTIONS.includes(value as CardLayoutType)
+    ? (value as CardLayoutType)
+    : null;
+}
+
+export function normalizeCardLayoutTypes(
+  values: ReadonlyArray<string> | null | undefined,
+): CardLayoutType[] {
+  if (!values || values.length === 0) {
+    return [];
+  }
+
+  const seen = new Set<CardLayoutType>();
+  const normalized: CardLayoutType[] = [];
+
+  for (const value of values) {
+    const layoutType = normalizeCardLayoutType(value);
+
+    if (!layoutType || seen.has(layoutType)) {
+      continue;
+    }
+
+    seen.add(layoutType);
+    normalized.push(layoutType);
+  }
+
+  return normalized;
 }
 
 export interface ProposalEditorCapabilities {
@@ -397,6 +446,7 @@ export interface CardProposal {
   defaultFinish: CardFinish;
   visuals: CardVisuals;
   editorCapabilities: ProposalEditorCapabilities;
+  allowedCardTypes: CardLayoutType[];
   allowedEffects: CardTreatmentEffect[];
   maxEffectLayers: number;
   effectLayers: CardEffectLayer[];

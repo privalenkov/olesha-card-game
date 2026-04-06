@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { CARDS_PER_PACK, rarityWeights } from '../src/game/config.js';
+import { CARDS_PER_PACK } from '../src/game/config.js';
 import { API_ERROR_PRESETS } from '../src/game/apiErrors.js';
 import {
   buildRarityBalanceSnapshot,
@@ -11,8 +11,8 @@ import {
   getProposalRarityWeights,
   getRarityChanceMap,
   getTotalRarityCount,
-  rarityOrder,
-} from '../src/game/rarityBalance.js';
+} from './rarityBalance.js';
+import { rarityWeights } from './packConfig.js';
 import type {
   AdminCatalogCard,
   AdminCatalogResult,
@@ -25,6 +25,7 @@ import type {
   CardProposal,
   CardDefinition,
   CardFinish,
+  CardLayoutType,
   CollectionFilter,
   CardTreatmentEffect,
   CardVisuals,
@@ -35,9 +36,12 @@ import type {
   Rarity,
   RemoteGameState,
 } from '../src/game/types.js';
+import { rarityOrder } from '../src/game/types.js';
 import {
   clampEffectShimmer,
   getDefaultCardVisuals,
+  normalizeCardLayoutType,
+  normalizeCardLayoutTypes,
   normalizeCardLayerFill,
   normalizeCardTreatmentEffect,
   normalizeCardTreatmentEffects,
@@ -45,6 +49,7 @@ import {
 import type { ServerConfig } from './config.js';
 import {
   getProposalEditorCapabilities,
+  getProposalCardTypeGrantConfig,
   getProposalEffectGrantConfig,
 } from './proposalEditorConfig.js';
 import { getDayKey, getNextResetAt } from './time.js';
@@ -113,6 +118,7 @@ interface ProposalRow {
   visual_frame_style: CardVisuals['frameStyle'];
   visual_accent_color: string;
   visual_pattern_json: string;
+  allowed_card_types_json: string;
   allowed_effects_json: string;
   max_effect_layers: number;
   effect_layers_json: string;
@@ -139,6 +145,11 @@ interface NotificationRow {
 interface ProposalEffectGrant {
   allowedEffects: CardTreatmentEffect[];
   maxEffectLayers: number;
+}
+
+interface ProposalCardTypeGrant {
+  allowedCardTypes: CardLayoutType[];
+  defaultCardType: CardLayoutType;
 }
 
 interface AdminCardRow extends CardRow {
@@ -401,6 +412,7 @@ function normalizeDecorativePattern(pattern?: Partial<CardDecorativePattern> | n
 }
 
 interface StoredVisualPatternPayload {
+  cardType?: CardVisuals['cardType'];
   decorativePattern?: Partial<CardDecorativePattern>;
   layerOneFill?: string;
   layerTwoFill?: string;
@@ -420,6 +432,9 @@ function parseStoredVisualPatternPayload(
       : (parsed as Partial<CardDecorativePattern>);
 
   return {
+    cardType: normalizeCardLayoutType(
+      typeof parsed.cardType === 'string' ? parsed.cardType : null,
+    ) ?? undefined,
     decorativePattern,
     layerOneFill: typeof parsed.layerOneFill === 'string' ? parsed.layerOneFill : undefined,
     layerTwoFill: typeof parsed.layerTwoFill === 'string' ? parsed.layerTwoFill : undefined,
@@ -428,6 +443,7 @@ function parseStoredVisualPatternPayload(
 
 function serializeStoredVisualPatternPayload(visuals: CardVisuals) {
   return JSON.stringify({
+    cardType: visuals.cardType,
     decorativePattern: visuals.decorativePattern,
     layerOneFill: visuals.layerOneFill,
     layerTwoFill: visuals.layerTwoFill,
@@ -438,12 +454,19 @@ function normalizeVisuals(visuals?: PartialCardVisualsInput | null): CardVisuals
   const defaults = getDefaultCardVisuals();
 
   return {
+    cardType: normalizeCardLayoutType(visuals?.cardType) ?? defaults.cardType,
     frameStyle: visuals?.frameStyle ?? defaults.frameStyle,
     accentColor: visuals?.accentColor ?? defaults.accentColor,
     decorativePattern: normalizeDecorativePattern(visuals?.decorativePattern),
     layerOneFill: normalizeCardLayerFill(visuals?.layerOneFill, defaults.layerOneFill),
     layerTwoFill: normalizeCardLayerFill(visuals?.layerTwoFill, defaults.layerTwoFill),
   };
+}
+
+function parseStoredAllowedCardTypesPayload(
+  value: string | null | undefined,
+): CardLayoutType[] {
+  return normalizeCardLayoutTypes(parseJsonArray<string>(value, []));
 }
 
 function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEffectLayer[] {
@@ -614,17 +637,17 @@ function weightedPick(weights: Array<[Rarity, number]>): Rarity {
   return weightedPickValue(weights);
 }
 
-function pickDistinctEffects(
-  pool: Array<[CardTreatmentEffect, number]>,
+function pickDistinctWeightedValues<T>(
+  pool: Array<[T, number]>,
   count: number,
-): CardTreatmentEffect[] {
+): T[] {
   const available = [...pool];
-  const picked: CardTreatmentEffect[] = [];
+  const picked: T[] = [];
 
   while (picked.length < count && available.length > 0) {
     const next = weightedPickValue(available);
     picked.push(next);
-    const nextIndex = available.findIndex(([effect]) => effect === next);
+    const nextIndex = available.findIndex(([value]) => value === next);
     if (nextIndex >= 0) {
       available.splice(nextIndex, 1);
     }
@@ -636,11 +659,26 @@ function pickDistinctEffects(
 function buildProposalEffectGrant(rarity: Rarity): ProposalEffectGrant {
   const config = getProposalEffectGrantConfig(rarity);
   const grantCount = weightedPickValue(config.grantCountWeights);
-  const allowedEffects = pickDistinctEffects(config.pool, grantCount);
+  const allowedEffects = pickDistinctWeightedValues(config.pool, grantCount);
 
   return {
     allowedEffects,
     maxEffectLayers: allowedEffects.length,
+  };
+}
+
+function buildProposalCardTypeGrant(rarity: Rarity): ProposalCardTypeGrant {
+  const config = getProposalCardTypeGrantConfig(rarity);
+  const grantedCardTypes = pickDistinctWeightedValues(
+    config.pool,
+    weightedPickValue(config.grantCountWeights),
+  );
+  const allowedCardTypes = normalizeCardLayoutTypes(grantedCardTypes);
+  const fallbackCardType = getDefaultCardVisuals().cardType;
+
+  return {
+    allowedCardTypes: allowedCardTypes.length > 0 ? allowedCardTypes : [fallbackCardType],
+    defaultCardType: allowedCardTypes[0] ?? fallbackCardType,
   };
 }
 
@@ -793,6 +831,7 @@ function toCardDefinition(row: CardRow): CardDefinition {
   const visuals =
     row.visual_frame_style && row.visual_accent_color
       ? normalizeVisuals({
+          cardType: storedVisuals.cardType,
           frameStyle: row.visual_frame_style,
           accentColor: row.visual_accent_color,
           decorativePattern: storedVisuals.decorativePattern,
@@ -836,13 +875,24 @@ function toOwnedCard(row: OwnedCardRow): OwnedCard {
 function toCardProposal(row: ProposalRow): CardProposal {
   const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
   const editorCapabilities = getProposalEditorCapabilities(row.rarity);
-  const visuals = normalizeVisuals({
+  const baseVisuals = normalizeVisuals({
+    cardType: storedVisuals.cardType,
     frameStyle: row.visual_frame_style,
     accentColor: row.visual_accent_color,
     decorativePattern: storedVisuals.decorativePattern,
     layerOneFill: storedVisuals.layerOneFill,
     layerTwoFill: storedVisuals.layerTwoFill,
   });
+  const allowedCardTypes = (() => {
+    const parsed = parseStoredAllowedCardTypesPayload(row.allowed_card_types_json);
+    return parsed.length > 0 ? parsed : [baseVisuals.cardType];
+  })();
+  const visuals = allowedCardTypes.includes(baseVisuals.cardType)
+    ? baseVisuals
+    : {
+        ...baseVisuals,
+        cardType: allowedCardTypes[0],
+      };
 
   return {
     id: row.id,
@@ -861,6 +911,7 @@ function toCardProposal(row: ProposalRow): CardProposal {
           decorativePattern: getDefaultCardVisuals().decorativePattern,
         },
     editorCapabilities,
+    allowedCardTypes,
     allowedEffects: normalizeCardTreatmentEffects(
       parseJsonArray<string>(row.allowed_effects_json, []),
     ),
@@ -1069,6 +1120,7 @@ export function createGameStore(config: ServerConfig) {
       visual_effect_pattern text not null,
       visual_effect_placement text not null,
       visual_pattern_json text not null default '{}',
+      allowed_card_types_json text not null default '[]',
       allowed_effects_json text not null default '[]',
       max_effect_layers integer not null default 0,
       effect_layers_json text not null default '[]',
@@ -1242,6 +1294,7 @@ export function createGameStore(config: ServerConfig) {
     .all() as Array<{ name: string }>;
   const requiredProposalColumns = [
     ['visual_pattern_json', "text not null default '{}'"],
+    ['allowed_card_types_json', "text not null default '[]'"],
     ['allowed_effects_json', "text not null default '[]'"],
     ['max_effect_layers', 'integer not null default 0'],
     ['effect_layers_json', "text not null default '[]'"],
@@ -1258,6 +1311,11 @@ export function createGameStore(config: ServerConfig) {
     update card_proposals
     set visual_pattern_json = '{}'
     where visual_pattern_json is null or trim(visual_pattern_json) = ''
+  `);
+  db.exec(`
+    update card_proposals
+    set allowed_card_types_json = '[]'
+    where allowed_card_types_json is null or trim(allowed_card_types_json) = ''
   `);
   db.exec(`
     update card_proposals
@@ -1635,9 +1693,10 @@ export function createGameStore(config: ServerConfig) {
     insert into card_proposals (
       id, creator_user_id, creator_name, rarity, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
-      visual_effect_placement, visual_pattern_json, allowed_effects_json, max_effect_layers, effect_layers_json,
+      visual_effect_placement, visual_pattern_json, allowed_card_types_json,
+      allowed_effects_json, max_effect_layers, effect_layers_json,
       created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1768,6 +1827,8 @@ export function createGameStore(config: ServerConfig) {
     update card_proposals
     set
       rarity = @rarity,
+      visual_pattern_json = @visual_pattern_json,
+      allowed_card_types_json = @allowed_card_types_json,
       allowed_effects_json = @allowed_effects_json,
       max_effect_layers = @max_effect_layers,
       effect_layers_json = @effect_layers_json,
@@ -2089,8 +2150,12 @@ export function createGameStore(config: ServerConfig) {
 
     const now = new Date().toISOString();
     const rarity = weightedPick(getProposalRarityWeights(countItemsByRarity(getActiveCatalogDefinitions())));
-    const grant = buildProposalEffectGrant(rarity);
-    const visuals = getDefaultCardVisuals();
+    const cardTypeGrant = buildProposalCardTypeGrant(rarity);
+    const effectGrant = buildProposalEffectGrant(rarity);
+    const visuals = {
+      ...getDefaultCardVisuals(),
+      cardType: cardTypeGrant.defaultCardType,
+    };
     const defaultFinish =
       rarity === 'veryrare' ? 'prismatic' : rarity === 'rare' || rarity === 'epic' ? 'foil' : 'standard';
     const proposalId = randomUUID();
@@ -2110,8 +2175,9 @@ export function createGameStore(config: ServerConfig) {
       LEGACY_VISUAL_EFFECT_PATTERN,
       LEGACY_VISUAL_EFFECT_PLACEMENT,
       serializeStoredVisualPatternPayload(visuals),
-      JSON.stringify(grant.allowedEffects),
-      grant.maxEffectLayers,
+      JSON.stringify(cardTypeGrant.allowedCardTypes),
+      JSON.stringify(effectGrant.allowedEffects),
+      effectGrant.maxEffectLayers,
       JSON.stringify([]),
       now,
       now,
@@ -2169,9 +2235,19 @@ export function createGameStore(config: ServerConfig) {
       normalizeEffectLayers(parseJsonArray<CardEffectLayer>(existing.effect_layers_json, [])),
       allowedEffects,
     );
+    const nextCardTypeGrant = buildProposalCardTypeGrant(rarity);
+    const existingVisuals = normalizeVisuals(parseStoredVisualPatternPayload(existing.visual_pattern_json));
+    const nextVisuals = {
+      ...existingVisuals,
+      cardType: nextCardTypeGrant.allowedCardTypes.includes(existingVisuals.cardType)
+        ? existingVisuals.cardType
+        : nextCardTypeGrant.defaultCardType,
+    };
     const row = updateProposalAdminOverride.get({
       id: proposalId,
       rarity,
+      visual_pattern_json: serializeStoredVisualPatternPayload(nextVisuals),
+      allowed_card_types_json: JSON.stringify(nextCardTypeGrant.allowedCardTypes),
       allowed_effects_json: JSON.stringify(allowedEffects),
       max_effect_layers: allowedEffects.length,
       effect_layers_json: JSON.stringify(nextEffectLayers),

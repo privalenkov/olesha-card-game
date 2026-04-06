@@ -24,6 +24,7 @@ import { finishMeta, rarityMeta } from '../game/config';
 import {
   type CardEffectLayer,
   getDefaultCardVisuals,
+  type CardLayoutType,
   normalizeCardLayerFill,
   normalizeCardTreatmentEffect,
   type CardTreatmentEffect,
@@ -79,14 +80,19 @@ interface CardFrontBox {
 }
 
 interface CardFrontLayout {
+  cardType: CardLayoutType;
   titleBox: CardFrontBox & { paddingX: number };
-  numberBox: CardFrontBox;
+  numberBox: CardFrontBox & { paddingX?: number };
+  headerBox?: CardFrontBox;
+  heroBox?: CardFrontBox;
   artBox: CardFrontBox;
   rarityBox: CardFrontBox & { paddingX: number };
   descriptionBox: CardFrontBox;
   stars: {
     size: number;
     gap: number;
+    filledColor?: string;
+    emptyColor?: string;
   };
 }
 
@@ -94,46 +100,212 @@ const CARD_FRONT_SURFACE_COLOR = '#f5f0dc';
 const CARD_FRONT_TEXT_COLOR = '#080910';
 const CARD_FRONT_ART_PLACEHOLDER_COLOR = '#D2D0C6';
 const CARD_FRONT_DEFAULT_PATTERN_COLOR = '#9B998F';
-const CARD_FRONT_LAYOUT: CardFrontLayout = {
-  titleBox: {
-    x: 64,
-    y: 50,
-    width: 582,
-    height: 76,
-    paddingX: 30,
-    radius: 38,
+const CARD_FRONT_LAYOUTS: Record<CardLayoutType, CardFrontLayout> = {
+  type1: {
+    cardType: 'type1',
+    titleBox: {
+      x: 64,
+      y: 50,
+      width: 582,
+      height: 76,
+      paddingX: 30,
+      radius: 38,
+    },
+    numberBox: {
+      x: 718,
+      y: 50,
+      width: 264,
+      height: 76,
+      radius: 38,
+    },
+    artBox: {
+      x: 62,
+      y: 205,
+      width: 908,
+      height: 612,
+      radius: [74, 74, 38, 38],
+    },
+    heroBox: {
+      x: 62,
+      y: 205,
+      width: 908,
+      height: 612,
+      radius: [74, 74, 38, 38],
+    },
+    rarityBox: {
+      x: 62,
+      y: 863,
+      width: 908,
+      height: 106,
+      paddingX: 40,
+      radius: 38,
+    },
+    descriptionBox: {
+      x: 96,
+      y: 1035,
+      width: 800,
+      height: 262,
+    },
+    stars: {
+      size: 44,
+      gap: 22,
+      filledColor: '#EC0B43',
+      emptyColor: '#080910',
+    },
   },
-  numberBox: {
-    x: 718,
-    y: 50,
-    width: 264,
-    height: 76,
-    radius: 38,
+  type2: {
+    cardType: 'type2',
+    titleBox: {
+      x: 64,
+      y: 50,
+      width: 582,
+      height: 76,
+      paddingX: 30,
+      radius: 38,
+    },
+    numberBox: {
+      x: 718,
+      y: 50,
+      width: 264,
+      height: 76,
+      radius: 38,
+    },
+    artBox: {
+      x: 62,
+      y: 205,
+      width: 908,
+      height: 720,
+      radius: [74, 74, 0, 0],
+    },
+    heroBox: {
+      x: 62,
+      y: 205,
+      width: 908,
+      height: 828,
+      radius: [74, 74, 38, 38],
+    },
+    rarityBox: {
+      x: 62,
+      y: 925,
+      width: 908,
+      height: 108,
+      paddingX: 40,
+      radius: [0, 0, 38, 38],
+    },
+    descriptionBox: {
+      x: 104,
+      y: 1124,
+      width: 812,
+      height: 264,
+    },
+    stars: {
+      size: 44,
+      gap: 22,
+      filledColor: '#EC0B43',
+      emptyColor: '#080910',
+    },
   },
-  artBox: {
-    x: 62,
-    y: 205,
-    width: 908,
-    height: 612,
-    radius: [74, 74, 38, 38],
+  type3: {
+    cardType: 'type3',
+    titleBox: {
+      x: 64,
+      y: 50,
+      width: 582,
+      height: 76,
+      paddingX: 30,
+      radius: 38,
+    },
+    numberBox: {
+      x: 718,
+      y: 50,
+      width: 264,
+      height: 76,
+      radius: 38,
+    },
+    artBox: {
+      x: 44,
+      y: 183,
+      width: 936,
+      height: 1257,
+      radius: 46,
+    },
+    heroBox: {
+      x: 44,
+      y: 183,
+      width: 936,
+      height: 1257,
+      radius: 46,
+    },
+    rarityBox: {
+      x: 104,
+      y: 1064,
+      width: 816,
+      height: 62,
+      paddingX: 0,
+    },
+    descriptionBox: {
+      x: 104,
+      y: 1182,
+      width: 820,
+      height: 238,
+    },
+    stars: {
+      size: 44,
+      gap: 22,
+      filledColor: '#EC0B43',
+      emptyColor: '#F5F0DC',
+    },
   },
-  rarityBox: {
-    x: 62,
-    y: 863,
-    width: 908,
-    height: 106,
-    paddingX: 40,
-    radius: 38,
-  },
-  descriptionBox: {
-    x: 96,
-    y: 1035,
-    width: 800,
-    height: 262,
-  },
-  stars: {
-    size: 44,
-    gap: 22,
+  type4: {
+    cardType: 'type4',
+    titleBox: {
+      x: 64,
+      y: 50,
+      width: 582,
+      height: 76,
+      paddingX: 30,
+      radius: 38,
+    },
+    numberBox: {
+      x: 718,
+      y: 50,
+      width: 264,
+      height: 76,
+      radius: 38,
+    },
+    artBox: {
+      x: 44,
+      y: 150,
+      width: 936,
+      height: 1290,
+      radius: 46,
+    },
+    heroBox: {
+      x: 44,
+      y: 150,
+      width: 936,
+      height: 1290,
+      radius: 46,
+    },
+    rarityBox: {
+      x: 104,
+      y: 1062,
+      width: 816,
+      height: 62,
+      paddingX: 0,
+    },
+    descriptionBox: {
+      x: 104,
+      y: 1180,
+      width: 820,
+      height: 246,
+    },
+    stars: {
+      size: 44,
+      gap: 22,
+      filledColor: '#EC0B43',
+      emptyColor: '#F5F0DC',
+    },
   },
 };
 
@@ -764,6 +936,9 @@ function drawSingleLineTextInBox(
     color?: string;
     align?: CanvasTextAlign;
     paddingX?: number;
+    shadowColor?: string;
+    shadowBlur?: number;
+    shadowOffsetY?: number;
   },
 ) {
   const fontFamily = options.fontFamily ?? 'Space Grotesk, sans-serif';
@@ -784,6 +959,10 @@ function drawSingleLineTextInBox(
   ctx.fillStyle = options.color ?? CARD_FRONT_TEXT_COLOR;
   ctx.textBaseline = 'middle';
   ctx.textAlign = options.align ?? 'left';
+  ctx.shadowColor = options.shadowColor ?? 'rgba(0,0,0,0)';
+  ctx.shadowBlur = options.shadowBlur ?? 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = options.shadowOffsetY ?? 0;
 
   const centerY = box.y + box.height / 2;
   if ((options.align ?? 'left') === 'center') {
@@ -810,6 +989,9 @@ function drawParagraphTextInBox(
     fontWeight?: string;
     fontFamily?: string;
     color?: string;
+    shadowColor?: string;
+    shadowBlur?: number;
+    shadowOffsetY?: number;
   },
 ) {
   const fontFamily = options.fontFamily ?? 'Sora, sans-serif';
@@ -836,10 +1018,39 @@ function drawParagraphTextInBox(
   ctx.fillStyle = options.color ?? CARD_FRONT_TEXT_COLOR;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
+  ctx.shadowColor = options.shadowColor ?? 'rgba(0,0,0,0)';
+  ctx.shadowBlur = options.shadowBlur ?? 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = options.shadowOffsetY ?? 0;
 
   lines.forEach((line, index) => {
     ctx.fillText(line, box.x, box.y + index * lineHeight);
   });
+}
+
+function drawStarShape(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  outerRadius: number,
+  innerRadius: number,
+) {
+  ctx.beginPath();
+
+  for (let index = 0; index < 10; index += 1) {
+    const angle = -Math.PI / 2 + index * (Math.PI / 5);
+    const radius = index % 2 === 0 ? outerRadius : innerRadius;
+    const x = centerX + Math.cos(angle) * radius;
+    const y = centerY + Math.sin(angle) * radius;
+
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+
+  ctx.closePath();
 }
 
 function drawRarityStars(
@@ -855,24 +1066,30 @@ function drawRarityStars(
   const totalWidth = totalStars * starConfig.size + (totalStars - 1) * starConfig.gap;
   const startX = box.x + box.width - box.paddingX - totalWidth;
   const startY = box.y + (box.height - starConfig.size) / 2;
+  const filledColor = starConfig.filledColor ?? '#EC0B43';
+  const emptyColor = starConfig.emptyColor ?? '#080910';
 
   for (let index = 0; index < totalStars; index += 1) {
     const x = startX + index * (starConfig.size + starConfig.gap);
-    const starImage = index < filledStars ? fillStarImage : emptyStarImage;
+    const starImage =
+      starConfig.filledColor || starConfig.emptyColor
+        ? null
+        : index < filledStars
+          ? fillStarImage
+          : emptyStarImage;
 
     if (starImage) {
       ctx.drawImage(starImage, x, startY, starConfig.size, starConfig.size);
       continue;
     }
 
-    ctx.fillStyle = index < filledStars ? '#EC0B43' : '#080910';
-    ctx.beginPath();
-    ctx.arc(
+    ctx.fillStyle = index < filledStars ? filledColor : emptyColor;
+    drawStarShape(
+      ctx,
       x + starConfig.size / 2,
       startY + starConfig.size / 2,
-      starConfig.size / 2.8,
-      0,
-      Math.PI * 2,
+      starConfig.size / 2,
+      starConfig.size * 0.22,
     );
     ctx.fill();
   }
@@ -1091,6 +1308,10 @@ function getCardVisuals(card: OwnedCard): CardVisuals {
   return card.visuals ?? getDefaultCardVisuals();
 }
 
+function getCardFrontLayout(card: OwnedCard): CardFrontLayout {
+  return CARD_FRONT_LAYOUTS[getCardVisuals(card).cardType];
+}
+
 function getCardEffectLayers(card: OwnedCard): CardEffectLayer[] {
   const layers = card.effectLayers ?? [];
   const seenTypes = new Set<CardTreatmentEffect>();
@@ -1161,6 +1382,162 @@ function drawDecorativePattern(
   ctx.restore();
 }
 
+function fillRoundedPanelWithVisualFill(
+  ctx: CanvasRenderingContext2D,
+  fillValue: string,
+  box: CardFrontBox,
+  fallbackValue: string,
+) {
+  ctx.save();
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.clip();
+  ctx.fillStyle = createCanvasFillStyle(
+    ctx,
+    fillValue,
+    box.x,
+    box.y,
+    box.width,
+    box.height,
+    fallbackValue,
+  );
+  ctx.fillRect(box.x, box.y, box.width, box.height);
+  ctx.restore();
+}
+
+function fillRoundedPanelWithTemplateLayer(
+  ctx: CanvasRenderingContext2D,
+  box: CardFrontBox,
+  layerImage: HTMLImageElement | null,
+  fillValue: string,
+  fallbackValue: string,
+  detailAlpha = 0.66,
+) {
+  if (!layerImage) {
+    fillRoundedPanelWithVisualFill(ctx, fillValue, box, fallbackValue);
+    return;
+  }
+
+  const baseCanvas = createCanvas(ctx.canvas.width, ctx.canvas.height);
+  const baseContext = baseCanvas.getContext('2d');
+
+  if (!baseContext) {
+    fillRoundedPanelWithVisualFill(ctx, fillValue, box, fallbackValue);
+    return;
+  }
+
+  baseContext.fillStyle = createCanvasFillStyle(
+    baseContext,
+    fillValue,
+    0,
+    0,
+    baseCanvas.width,
+    baseCanvas.height,
+    fallbackValue,
+  );
+  baseContext.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+  baseContext.globalCompositeOperation = 'destination-in';
+  baseContext.drawImage(layerImage, 0, 0, baseCanvas.width, baseCanvas.height);
+
+  ctx.save();
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.clip();
+  ctx.drawImage(baseCanvas, 0, 0);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = detailAlpha;
+  ctx.drawImage(layerImage, 0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+}
+
+function fillRoundedPanelWithColor(
+  ctx: CanvasRenderingContext2D,
+  box: CardFrontBox,
+  color: string | CanvasGradient,
+) {
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function strokeRoundedPanel(
+  ctx: CanvasRenderingContext2D,
+  box: CardFrontBox,
+  color: string,
+  width: number,
+) {
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function drawArtImageInBox(
+  ctx: CanvasRenderingContext2D,
+  box: CardFrontBox,
+  artImage: HTMLImageElement | null,
+  defaultPatternImage: HTMLImageElement | null,
+  options: {
+    placeholderColor?: string;
+    borderColor?: string;
+    borderWidth?: number;
+    imageFilter?: string;
+  } = {},
+) {
+  const placeholderColor = options.placeholderColor ?? CARD_FRONT_ART_PLACEHOLDER_COLOR;
+
+  ctx.save();
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.clip();
+  ctx.fillStyle = placeholderColor;
+  ctx.fillRect(box.x, box.y, box.width, box.height);
+
+  if (artImage) {
+    ctx.save();
+    ctx.filter = options.imageFilter ?? 'saturate(1.04) contrast(1.03)';
+    drawImageCover(ctx, artImage, box.x, box.y, box.width, box.height);
+    ctx.restore();
+  } else {
+    drawTintedPatternImage(
+      ctx,
+      defaultPatternImage,
+      box.x,
+      box.y,
+      box.width,
+      box.height,
+      CARD_FRONT_DEFAULT_PATTERN_COLOR,
+      {
+        opacity: 0.92,
+        clipRadius: box.radius ?? 0,
+      },
+    );
+  }
+
+  ctx.restore();
+
+  if (options.borderColor && options.borderWidth) {
+    strokeRoundedPanel(ctx, box, options.borderColor, options.borderWidth);
+  }
+}
+
+function drawBottomReadabilityShade(
+  ctx: CanvasRenderingContext2D,
+  box: CardFrontBox,
+  options: {
+    startY: number;
+    topAlpha: number;
+    bottomAlpha: number;
+  },
+) {
+  const gradient = ctx.createLinearGradient(0, options.startY, 0, box.y + box.height);
+  gradient.addColorStop(0, `rgba(5, 7, 11, ${options.topAlpha})`);
+  gradient.addColorStop(1, `rgba(5, 7, 11, ${options.bottomAlpha})`);
+  ctx.save();
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.clip();
+  ctx.fillStyle = gradient;
+  ctx.fillRect(box.x, options.startY, box.width, box.y + box.height - options.startY);
+  ctx.restore();
+}
+
 function drawDecorativePatternMask(
   card: OwnedCard,
   decorativePatternImage: HTMLImageElement | null,
@@ -1175,17 +1552,37 @@ function drawDecorativePatternMask(
   }
 
   const visuals = getCardVisuals(card);
+  const layout = getCardFrontLayout(card);
   drawDecorativePatternAcrossCanvas(ctx, decorativePatternImage, visuals.decorativePattern);
 
-  if (layerOneImage) {
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(layerOneImage, 0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = 'source-over';
-  }
+  if (layout.cardType === 'type1') {
+    if (layerOneImage) {
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(layerOneImage, 0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
 
-  if (layerTwoImage) {
+    if (layerTwoImage) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.drawImage(layerTwoImage, 0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  } else {
+    ctx.globalCompositeOperation = 'destination-in';
+    drawRoundedPanel(ctx, 0, 0, canvas.width, canvas.height, 56);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.drawImage(layerTwoImage, 0, 0, canvas.width, canvas.height);
+    drawRoundedPanel(
+      ctx,
+      (layout.heroBox ?? layout.artBox).x,
+      (layout.heroBox ?? layout.artBox).y,
+      (layout.heroBox ?? layout.artBox).width,
+      (layout.heroBox ?? layout.artBox).height,
+      (layout.heroBox ?? layout.artBox).radius ?? 0,
+    );
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
   }
 
@@ -2344,16 +2741,17 @@ function drawCardFront(
     return canvas;
   }
 
-  const layout = CARD_FRONT_LAYOUT;
+  const layout = getCardFrontLayout(card);
   const meta = rarityMeta[card.rarity];
   const visuals = getCardVisuals(card);
   const accent = visuals.accentColor;
   const detailBorderColor = accent;
+  const defaults = getDefaultCardVisuals();
 
   drawTintedTemplateLayer(ctx, layerOneImage, visuals.layerOneFill, {
     detailAlpha: 0.72,
     fallbackRadius: 56,
-    fallbackValue: getDefaultCardVisuals().layerOneFill,
+    fallbackValue: defaults.layerOneFill,
   });
 
   if (layerTwoImage) {
@@ -2364,153 +2762,381 @@ function drawCardFront(
     });
   }
 
-  const artClip = new Path2D();
-  artClip.roundRect(
-    layout.artBox.x,
-    layout.artBox.y,
-    layout.artBox.width,
-    layout.artBox.height,
-    layout.artBox.radius ?? 0,
-  );
+  if (layout.cardType === 'type1') {
+    drawArtImageInBox(ctx, layout.artBox, artImage, defaultPatternImage, {
+      borderColor: detailBorderColor,
+      borderWidth: 5,
+    });
 
-  ctx.save();
-  ctx.clip(artClip);
-  ctx.fillStyle = CARD_FRONT_ART_PLACEHOLDER_COLOR;
-  ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
-
-  if (artImage) {
-    ctx.save();
-    ctx.filter = 'saturate(1.04) contrast(1.03)';
-    drawImageCover(
+    drawSingleLineTextInBox(
       ctx,
-      artImage,
-      layout.artBox.x,
-      layout.artBox.y,
-      layout.artBox.width,
-      layout.artBox.height,
-    );
-    ctx.restore();
-
-    const artShade = ctx.createLinearGradient(
-      layout.artBox.x,
-      layout.artBox.y,
-      layout.artBox.x,
-      layout.artBox.y + layout.artBox.height,
-    );
-    artShade.addColorStop(0, 'rgba(5, 7, 11, 0.08)');
-    artShade.addColorStop(0.56, 'rgba(5, 7, 11, 0)');
-    artShade.addColorStop(1, 'rgba(5, 7, 11, 0.12)');
-    ctx.fillStyle = artShade;
-    ctx.fillRect(layout.artBox.x, layout.artBox.y, layout.artBox.width, layout.artBox.height);
-  } else {
-    drawTintedPatternImage(
-      ctx,
-      defaultPatternImage,
-      layout.artBox.x,
-      layout.artBox.y,
-      layout.artBox.width,
-      layout.artBox.height,
-      CARD_FRONT_DEFAULT_PATTERN_COLOR,
+      card.title.toLocaleUpperCase(),
+      layout.titleBox,
       {
-        opacity: 0.92,
-        highlightOpacity: 0.22,
+        maxFontSize: 30,
+        minFontSize: 24,
+        paddingX: layout.titleBox.paddingX,
       },
     );
+
+    drawSingleLineTextInBox(
+      ctx,
+      `NO. ${formatCardSerial(card)}`,
+      layout.numberBox,
+      {
+        maxFontSize: 30,
+        minFontSize: 22,
+        align: 'center',
+      },
+    );
+
+    strokeRoundedPanel(ctx, layout.rarityBox, detailBorderColor, 4);
+
+    drawSingleLineTextInBox(
+      ctx,
+      'РЕДКОСТЬ',
+      {
+        x: layout.rarityBox.x + layout.rarityBox.paddingX,
+        y: layout.rarityBox.y,
+        width: 250,
+        height: layout.rarityBox.height,
+      },
+      {
+        maxFontSize: 30,
+        minFontSize: 24,
+        fontWeight: '700',
+      },
+    );
+
+    drawRarityStars(
+      ctx,
+      card,
+      layout.rarityBox,
+      fillStarImage,
+      emptyStarImage,
+      layout.stars,
+    );
+
+    drawParagraphTextInBox(
+      ctx,
+      card.description,
+      layout.descriptionBox,
+      {
+        maxFontSize: 37,
+        minFontSize: 24,
+        lineHeightMultiplier: 1.24,
+        color: CARD_FRONT_TEXT_COLOR,
+      },
+    );
+
+    drawDecorativePattern(
+      ctx,
+      decorativePatternImage,
+      visuals.decorativePattern,
+      layout.artBox.x,
+      layout.artBox.y,
+      layout.artBox.width,
+      layout.artBox.height,
+    );
+  } else {
+    const cardBox: CardFrontBox = {
+      x: 0,
+      y: 0,
+      width: canvas.width,
+      height: canvas.height,
+      radius: 56,
+    };
+
+    ctx.save();
+    drawRoundedPanel(ctx, cardBox.x, cardBox.y, cardBox.width, cardBox.height, cardBox.radius ?? 0);
+    ctx.clip();
+
+    if (layout.cardType === 'type2') {
+      const contentBox: CardFrontBox = {
+        x: 42,
+        y: 150,
+        width: 940,
+        height: 1310,
+        radius: 50,
+      };
+
+      fillRoundedPanelWithTemplateLayer(
+        ctx,
+        contentBox,
+        layerTwoImage,
+        visuals.layerTwoFill,
+        CARD_FRONT_SURFACE_COLOR,
+      );
+
+      drawArtImageInBox(ctx, layout.artBox, artImage, defaultPatternImage, {
+        borderColor: 'transparent',
+      });
+
+      fillRoundedPanelWithTemplateLayer(
+        ctx,
+        layout.rarityBox,
+        layerTwoImage,
+        visuals.layerTwoFill,
+        CARD_FRONT_SURFACE_COLOR,
+      );
+      drawDecorativePattern(
+        ctx,
+        decorativePatternImage,
+        visuals.decorativePattern,
+        layout.artBox.x,
+        layout.artBox.y,
+        layout.artBox.width,
+        layout.artBox.height,
+      );
+
+      if (layout.heroBox) {
+        strokeRoundedPanel(ctx, layout.heroBox, detailBorderColor, 4);
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(layout.rarityBox.x, layout.rarityBox.y);
+      ctx.lineTo(layout.rarityBox.x + layout.rarityBox.width, layout.rarityBox.y);
+      ctx.strokeStyle = detailBorderColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      drawSingleLineTextInBox(
+        ctx,
+        card.title.toLocaleUpperCase(),
+        layout.titleBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          paddingX: layout.titleBox.paddingX,
+        },
+      );
+
+      drawSingleLineTextInBox(
+        ctx,
+        `NO. ${formatCardSerial(card)}`,
+        layout.numberBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 22,
+          align: 'center',
+        },
+      );
+
+      drawSingleLineTextInBox(
+        ctx,
+        'РЕДКОСТЬ',
+        {
+          x: layout.rarityBox.x + 40,
+          y: layout.rarityBox.y,
+          width: 250,
+          height: layout.rarityBox.height,
+        },
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          fontWeight: '700',
+        },
+      );
+
+      drawRarityStars(
+        ctx,
+        card,
+        layout.rarityBox,
+        fillStarImage,
+        emptyStarImage,
+        layout.stars,
+      );
+
+      drawParagraphTextInBox(
+        ctx,
+        card.description,
+        layout.descriptionBox,
+        {
+          maxFontSize: 36,
+          minFontSize: 24,
+          lineHeightMultiplier: 1.22,
+          color: CARD_FRONT_TEXT_COLOR,
+        },
+      );
+    } else if (layout.cardType === 'type3') {
+      drawArtImageInBox(ctx, layout.artBox, artImage, defaultPatternImage, {
+        borderColor: detailBorderColor,
+        borderWidth: 3,
+        imageFilter: 'saturate(1.06) contrast(1.04)',
+      });
+      drawDecorativePattern(
+        ctx,
+        decorativePatternImage,
+        visuals.decorativePattern,
+        layout.artBox.x,
+        layout.artBox.y,
+        layout.artBox.width,
+        layout.artBox.height,
+      );
+      drawBottomReadabilityShade(ctx, layout.artBox, {
+        startY: layout.descriptionBox.y - 180,
+        topAlpha: 0,
+        bottomAlpha: 0.68,
+      });
+
+      drawSingleLineTextInBox(
+        ctx,
+        card.title.toLocaleUpperCase(),
+        layout.titleBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          paddingX: layout.titleBox.paddingX,
+        },
+      );
+      drawSingleLineTextInBox(
+        ctx,
+        `NO. ${formatCardSerial(card)}`,
+        layout.numberBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 22,
+          align: 'center',
+        },
+      );
+      drawSingleLineTextInBox(
+        ctx,
+        'РЕДКОСТЬ',
+        {
+          x: layout.rarityBox.x,
+          y: layout.rarityBox.y,
+          width: 250,
+          height: layout.rarityBox.height,
+        },
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          fontWeight: '700',
+          color: '#F5F0DC',
+          shadowColor: 'rgba(0,0,0,0.32)',
+          shadowBlur: 16,
+          shadowOffsetY: 2,
+        },
+      );
+      drawRarityStars(
+        ctx,
+        card,
+        {
+          ...layout.rarityBox,
+          paddingX: 0,
+        },
+        fillStarImage,
+        emptyStarImage,
+        layout.stars,
+      );
+      drawParagraphTextInBox(
+        ctx,
+        card.description,
+        layout.descriptionBox,
+        {
+          maxFontSize: 34,
+          minFontSize: 24,
+          lineHeightMultiplier: 1.26,
+          color: '#F5F0DC',
+          shadowColor: 'rgba(0,0,0,0.4)',
+          shadowBlur: 18,
+          shadowOffsetY: 3,
+        },
+      );
+    } else {
+      drawArtImageInBox(ctx, layout.artBox, artImage, defaultPatternImage, {
+        borderColor: 'transparent',
+        imageFilter: 'saturate(1.06) contrast(1.04)',
+      });
+
+      drawDecorativePattern(
+        ctx,
+        decorativePatternImage,
+        visuals.decorativePattern,
+        (layout.heroBox ?? layout.artBox).x,
+        (layout.heroBox ?? layout.artBox).y,
+        (layout.heroBox ?? layout.artBox).width,
+        (layout.heroBox ?? layout.artBox).height,
+      );
+      drawBottomReadabilityShade(ctx, layout.artBox, {
+        startY: layout.descriptionBox.y - 190,
+        topAlpha: 0,
+        bottomAlpha: 0.68,
+      });
+
+      if (layout.heroBox) {
+        strokeRoundedPanel(ctx, layout.heroBox, detailBorderColor, 3);
+      }
+
+      drawSingleLineTextInBox(
+        ctx,
+        card.title.toLocaleUpperCase(),
+        layout.titleBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          paddingX: layout.titleBox.paddingX,
+        },
+      );
+      drawSingleLineTextInBox(
+        ctx,
+        `NO. ${formatCardSerial(card)}`,
+        layout.numberBox,
+        {
+          maxFontSize: 30,
+          minFontSize: 22,
+          align: 'center',
+          color: CARD_FRONT_TEXT_COLOR,
+        },
+      );
+      drawSingleLineTextInBox(
+        ctx,
+        'РЕДКОСТЬ',
+        {
+          x: layout.rarityBox.x,
+          y: layout.rarityBox.y,
+          width: 250,
+          height: layout.rarityBox.height,
+        },
+        {
+          maxFontSize: 30,
+          minFontSize: 24,
+          fontWeight: '700',
+          color: '#F5F0DC',
+          shadowColor: 'rgba(0,0,0,0.32)',
+          shadowBlur: 16,
+          shadowOffsetY: 2,
+        },
+      );
+      drawRarityStars(
+        ctx,
+        card,
+        {
+          ...layout.rarityBox,
+          paddingX: 0,
+        },
+        fillStarImage,
+        emptyStarImage,
+        layout.stars,
+      );
+      drawParagraphTextInBox(
+        ctx,
+        card.description,
+        layout.descriptionBox,
+        {
+          maxFontSize: 34,
+          minFontSize: 24,
+          lineHeightMultiplier: 1.26,
+          color: '#F5F0DC',
+          shadowColor: 'rgba(0,0,0,0.42)',
+          shadowBlur: 18,
+          shadowOffsetY: 3,
+        },
+      );
+    }
+
+    ctx.restore();
   }
-  ctx.restore();
-
-  drawRoundedPanel(
-    ctx,
-    layout.artBox.x,
-    layout.artBox.y,
-    layout.artBox.width,
-    layout.artBox.height,
-    layout.artBox.radius ?? 0,
-  );
-  ctx.strokeStyle = detailBorderColor;
-  ctx.lineWidth = 5;
-  ctx.stroke();
-
-  drawSingleLineTextInBox(
-    ctx,
-    card.title.toLocaleUpperCase(),
-    layout.titleBox,
-    {
-      maxFontSize: 30,
-      minFontSize: 24,
-      paddingX: layout.titleBox.paddingX,
-    },
-  );
-
-  drawSingleLineTextInBox(
-    ctx,
-    `NO. ${formatCardSerial(card)}`,
-    layout.numberBox,
-    {
-      maxFontSize: 30,
-      minFontSize: 22,
-      align: 'center',
-    },
-  );
-
-  drawRoundedPanel(
-    ctx,
-    layout.rarityBox.x,
-    layout.rarityBox.y,
-    layout.rarityBox.width,
-    layout.rarityBox.height,
-    layout.rarityBox.radius ?? 0,
-  );
-  ctx.strokeStyle = detailBorderColor;
-  ctx.lineWidth = 4;
-  ctx.stroke();
-
-  drawSingleLineTextInBox(
-    ctx,
-    'РЕДКОСТЬ',
-    {
-      x: layout.rarityBox.x + layout.rarityBox.paddingX,
-      y: layout.rarityBox.y,
-      width: 250,
-      height: layout.rarityBox.height,
-    },
-    {
-      maxFontSize: 30,
-      minFontSize: 24,
-      fontWeight: '700',
-    },
-  );
-
-  drawRarityStars(
-    ctx,
-    card,
-    layout.rarityBox,
-    fillStarImage,
-    emptyStarImage,
-    layout.stars,
-  );
-
-  drawParagraphTextInBox(
-    ctx,
-    card.description,
-    layout.descriptionBox,
-    {
-      maxFontSize: 37,
-      minFontSize: 24,
-      lineHeightMultiplier: 1.24,
-      color: CARD_FRONT_TEXT_COLOR,
-    },
-  );
-
-  drawDecorativePattern(
-    ctx,
-    decorativePatternImage,
-    visuals.decorativePattern,
-    layout.artBox.x,
-    layout.artBox.y,
-    layout.artBox.width,
-    layout.artBox.height,
-  );
 
   if (options.includeTreatmentLayers ?? true) {
     drawTreatmentLayers(
@@ -2623,7 +3249,7 @@ function drawHoloZoneMask(
     return canvas;
   }
 
-  const layout = CARD_FRONT_LAYOUT;
+  const layout = getCardFrontLayout(card);
   const finish = finishMeta[card.finish];
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2652,57 +3278,104 @@ function drawHoloZoneMask(
     );
   }
 
-  drawRoundedPanel(
-    ctx,
-    layout.titleBox.x,
-    layout.titleBox.y,
-    layout.titleBox.width,
-    layout.titleBox.height,
-    layout.titleBox.radius ?? 0,
-  );
-  ctx.fillStyle = zone(0.22 + finish.opacity * 0.08);
-  ctx.fill();
+  if (layout.cardType === 'type1') {
+    fillRoundedPanelWithColor(ctx, layout.titleBox, zone(0.22 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(ctx, layout.numberBox, zone(0.18 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(ctx, layout.rarityBox, zone(0.22 + finish.opacity * 0.1));
 
-  drawRoundedPanel(
-    ctx,
-    layout.numberBox.x,
-    layout.numberBox.y,
-    layout.numberBox.width,
-    layout.numberBox.height,
-    layout.numberBox.radius ?? 0,
-  );
-  ctx.fillStyle = zone(0.18 + finish.opacity * 0.08);
-  ctx.fill();
+    const descriptionGradient = ctx.createLinearGradient(
+      0,
+      layout.descriptionBox.y,
+      0,
+      layout.descriptionBox.y + layout.descriptionBox.height,
+    );
+    descriptionGradient.addColorStop(0, zone(0.08 + finish.opacity * 0.05));
+    descriptionGradient.addColorStop(1, zone(0.16 + finish.opacity * 0.07));
+    fillRoundedPanelWithColor(
+      ctx,
+      {
+        x: layout.descriptionBox.x - 14,
+        y: layout.descriptionBox.y - 8,
+        width: layout.descriptionBox.width + 28,
+        height: layout.descriptionBox.height + 24,
+        radius: 32,
+      },
+      descriptionGradient,
+    );
+  } else if (layout.cardType === 'type2') {
+    fillRoundedPanelWithColor(ctx, layout.titleBox, zone(0.22 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(ctx, layout.numberBox, zone(0.18 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(
+      ctx,
+      layout.heroBox ?? layout.artBox,
+      zone(0.18 + finish.opacity * 0.08),
+    );
 
-  drawRoundedPanel(
-    ctx,
-    layout.rarityBox.x,
-    layout.rarityBox.y,
-    layout.rarityBox.width,
-    layout.rarityBox.height,
-    layout.rarityBox.radius ?? 0,
-  );
-  ctx.fillStyle = zone(0.22 + finish.opacity * 0.1);
-  ctx.fill();
+    const descriptionGradient = ctx.createLinearGradient(
+      0,
+      layout.descriptionBox.y,
+      0,
+      layout.descriptionBox.y + layout.descriptionBox.height,
+    );
+    descriptionGradient.addColorStop(0, zone(0.08 + finish.opacity * 0.05));
+    descriptionGradient.addColorStop(1, zone(0.15 + finish.opacity * 0.06));
+    fillRoundedPanelWithColor(
+      ctx,
+      {
+        x: layout.descriptionBox.x - 12,
+        y: layout.descriptionBox.y - 6,
+        width: layout.descriptionBox.width + 24,
+        height: layout.descriptionBox.height + 18,
+        radius: 28,
+      },
+      descriptionGradient,
+    );
+  } else if (layout.cardType === 'type3') {
+    fillRoundedPanelWithColor(ctx, layout.titleBox, zone(0.22 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(ctx, layout.numberBox, zone(0.18 + finish.opacity * 0.08));
+    const overlayGradient = ctx.createLinearGradient(
+      0,
+      layout.descriptionBox.y - 190,
+      0,
+      layout.descriptionBox.y + layout.descriptionBox.height,
+    );
+    overlayGradient.addColorStop(0, zone(0.02 + finish.opacity * 0.02));
+    overlayGradient.addColorStop(1, zone(0.28 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(
+      ctx,
+      {
+        x: layout.descriptionBox.x - 30,
+        y: layout.descriptionBox.y - 190,
+        width: layout.descriptionBox.width + 60,
+        height: layout.descriptionBox.height + 230,
+        radius: 34,
+      },
+      overlayGradient,
+    );
+  } else {
+    fillRoundedPanelWithColor(ctx, layout.titleBox, zone(0.22 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(ctx, layout.numberBox, zone(0.18 + finish.opacity * 0.08));
 
-  const descriptionGradient = ctx.createLinearGradient(
-    0,
-    layout.descriptionBox.y,
-    0,
-    layout.descriptionBox.y + layout.descriptionBox.height,
-  );
-  descriptionGradient.addColorStop(0, zone(0.08 + finish.opacity * 0.05));
-  descriptionGradient.addColorStop(1, zone(0.16 + finish.opacity * 0.07));
-  drawRoundedPanel(
-    ctx,
-    layout.descriptionBox.x - 14,
-    layout.descriptionBox.y - 8,
-    layout.descriptionBox.width + 28,
-    layout.descriptionBox.height + 24,
-    32,
-  );
-  ctx.fillStyle = descriptionGradient;
-  ctx.fill();
+    const overlayGradient = ctx.createLinearGradient(
+      0,
+      layout.descriptionBox.y - 190,
+      0,
+      layout.descriptionBox.y + layout.descriptionBox.height,
+    );
+    overlayGradient.addColorStop(0, zone(0.02 + finish.opacity * 0.02));
+    overlayGradient.addColorStop(1, zone(0.28 + finish.opacity * 0.08));
+    fillRoundedPanelWithColor(
+      ctx,
+      {
+        x: layout.descriptionBox.x - 30,
+        y: layout.descriptionBox.y - 190,
+        width: layout.descriptionBox.width + 60,
+        height: layout.descriptionBox.height + 230,
+        radius: 34,
+      },
+      overlayGradient,
+    );
+  }
 
   if (card.rarity === 'epic' || card.rarity === 'veryrare') {
     ctx.fillStyle = zone(card.rarity === 'veryrare' ? 0.44 : 0.28);

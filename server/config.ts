@@ -62,6 +62,24 @@ function splitOrigins(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
 function resolvePersistenceRoot() {
   const configuredRoot = process.env.PERSISTENCE_ROOT?.trim();
 
@@ -140,6 +158,7 @@ export const serverConfig = {
     process.env.COOKIE_SECURE === 'true' ||
     appBaseUrl.protocol === 'https:' ||
     process.env.NODE_ENV === 'production',
+  trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
   allowedOrigins,
 } as const;
 

@@ -27,9 +27,9 @@ import {
   CARD_TEXTURE_WIDTH,
 } from '../game/cardDimensions';
 import { rarityMeta } from '../game/config';
-import { rarityOrder } from '../game/rarityBalance';
 import {
   CARD_ACCENT_SWATCHES,
+  CARD_LAYOUT_TYPE_LABELS,
   CARD_LAYER_ONE_FILL_PRESETS,
   CARD_LAYER_TWO_FILL_PRESETS,
   CARD_TREATMENT_EFFECT_OPTIONS,
@@ -44,6 +44,7 @@ import {
   type ProposalEditorPayload,
   type Rarity,
   type RarityBalanceSnapshot,
+  rarityOrder,
 } from '../game/types';
 import { useCardPreviewImage, useDecorativePatternMaskImage } from '../three/textures';
 
@@ -268,6 +269,7 @@ export function CardCreatorPage() {
   const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
   const isLocked = proposal?.status !== 'draft';
   const patternAvailable = proposal?.editorCapabilities.decorativePattern ?? false;
+  const availableCardTypes = proposal?.allowedCardTypes ?? [];
   const lastRejectionNoticeRef = useRef<string | null>(null);
   const imageUploadRequestIdRef = useRef(0);
   const decorativePatternUploadRequestIdRef = useRef(0);
@@ -449,6 +451,7 @@ export function CardCreatorPage() {
       visuals.accentColor,
       visuals.layerOneFill,
       visuals.layerTwoFill,
+      visuals.cardType,
       visuals.decorativePattern.svgUrl.length,
       visuals.decorativePattern.svgUrl.slice(-48),
       visuals.decorativePattern.size,
@@ -1112,7 +1115,7 @@ export function CardCreatorPage() {
       notify({
         kind: 'success',
         title: 'Override применен',
-        message: 'Редкость и доступные эффекты обновлены для этого черновика.',
+        message: 'Редкость, доступные типы карточки и эффекты обновлены для этого черновика.',
       });
     } catch (error) {
       showCreatorRequestError(error, 'Не удалось применить админский override.', 'Ошибка override');
@@ -1215,6 +1218,29 @@ export function CardCreatorPage() {
             <div className="creator-section__head">
               <strong>Базовые настройки</strong>
             </div>
+
+            <label className="creator-field">
+              <span>Тип карточки</span>
+              <select
+                disabled={isLocked}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    visuals: {
+                      ...current.visuals,
+                      cardType: event.target.value as ProposalEditorPayload['visuals']['cardType'],
+                    },
+                  }))
+                }
+                value={draft.visuals.cardType}
+              >
+                {availableCardTypes.map((cardType) => (
+                  <option key={cardType} value={cardType}>
+                    {CARD_LAYOUT_TYPE_LABELS[cardType]}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <label className="creator-field">
               <TextInput

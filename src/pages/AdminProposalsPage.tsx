@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { TextArea } from '../components/ui/TextArea';
 import { rarityMeta } from '../game/config';
-import { rarityOrder } from '../game/rarityBalance';
 import {
   approveProposal,
   deleteProposal,
@@ -23,6 +22,7 @@ import type {
   OwnedCard,
   RarityBalanceSnapshot,
 } from '../game/types';
+import { rarityOrder } from '../game/types';
 import { useCardPreviewImage } from '../three/textures';
 
 type AdminTab = 'proposals' | 'cards' | 'users';

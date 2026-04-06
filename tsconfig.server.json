@@ -18,7 +18,6 @@
     "server/**/*.ts",
     "shared/**/*.ts",
     "src/game/config.ts",
-    "src/game/types.ts",
-    "src/game/rarityBalance.ts"
+    "src/game/types.ts"
   ]
 }

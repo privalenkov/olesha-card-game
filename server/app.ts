@@ -12,6 +12,7 @@ import {
 import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
+  normalizeCardLayoutType,
   clampEffectShimmer,
   getDefaultCardVisuals,
   normalizeCardLayerFill,
@@ -21,6 +22,7 @@ import {
   type ApiErrorResponse,
   type AuthUser,
   type CardEffectLayer,
+  type CardVisuals,
   type CollectionFilter,
   type CardTreatmentEffect,
   type ProposalEditorPayload,
@@ -414,7 +416,11 @@ function isStoredAssetUrl(value: string) {
 
 function normalizeProposalPayload(
   value: unknown,
-  effectBudget: { allowedEffects: CardEffectLayer['type'][]; maxEffectLayers: number },
+  effectBudget: {
+    allowedCardTypes: CardVisuals['cardType'][];
+    allowedEffects: CardEffectLayer['type'][];
+    maxEffectLayers: number;
+  },
   editorCapabilities: ProposalEditorCapabilities,
 ): ProposalEditorPayload | null {
   if (typeof value !== 'object' || value === null) {
@@ -440,6 +446,10 @@ function normalizeProposalPayload(
     CARD_FRAME_STYLE_OPTIONS.includes(visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
       ? (visuals.frameStyle as (typeof CARD_FRAME_STYLE_OPTIONS)[number])
       : defaults.frameStyle;
+  const cardType =
+    typeof visuals?.cardType === 'string'
+      ? normalizeCardLayoutType(visuals.cardType) ?? defaults.cardType
+      : defaults.cardType;
   const accentColor =
     typeof visuals?.accentColor === 'string' &&
     /^#[0-9a-fA-F]{6}$/u.test(visuals.accentColor.trim())
@@ -483,6 +493,14 @@ function normalizeProposalPayload(
   const rawEffectLayers = Array.isArray(payload.effectLayers) ? payload.effectLayers : null;
 
   if (title.length < 2 || title.length > 80) {
+    return null;
+  }
+
+  if (!effectBudget.allowedCardTypes.includes(cardType)) {
+    return null;
+  }
+
+  if ((!isStoredAssetUrl(urlImage) && urlImage !== '')) {
     return null;
   }
 
@@ -569,6 +587,7 @@ function normalizeProposalPayload(
     urlImage,
     defaultFinish,
     visuals: {
+      cardType,
       frameStyle,
       accentColor,
       layerOneFill,
@@ -732,6 +751,11 @@ function sessionCookieOptions(expiresAt?: string) {
     path: '/',
     ...(expiresAt ? { expires: new Date(expiresAt) } : {}),
   };
+}
+
+function isPathInside(basePath: string, candidatePath: string) {
+  const relative = path.relative(basePath, candidatePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function setNoStore(reply: FastifyReply) {
@@ -908,7 +932,7 @@ async function serveClientFile(request: FastifyRequest, reply: FastifyReply) {
   const pathname = requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname;
   const candidatePath = path.resolve(serverConfig.clientDistDir, `.${pathname}`);
 
-  if (!candidatePath.startsWith(serverConfig.clientDistDir)) {
+  if (!isPathInside(serverConfig.clientDistDir, candidatePath)) {
     reply.code(403).send('Forbidden');
     return;
   }
@@ -940,7 +964,7 @@ async function serveUploadFile(request: FastifyRequest, reply: FastifyReply) {
   const pathname = requestUrl.pathname.replace(/^\/uploads/u, '');
   const candidatePath = path.resolve(serverConfig.uploadsDir, `.${pathname}`);
 
-  if (!candidatePath.startsWith(serverConfig.uploadsDir)) {
+  if (!isPathInside(serverConfig.uploadsDir, candidatePath)) {
     reply.code(403).send('Forbidden');
     return;
   }
@@ -988,7 +1012,7 @@ export async function buildApp() {
   const app = Fastify({
     bodyLimit: 8 * 1024 * 1024,
     logger: true,
-    trustProxy: true,
+    trustProxy: serverConfig.trustProxy,
   });
   const store = createGameStore(serverConfig);
   const enforceRateLimit = createRateLimiter();
@@ -1474,6 +1498,7 @@ export async function buildApp() {
     }
 
     const payload = normalizeProposalPayload(request.body, {
+      allowedCardTypes: proposal.allowedCardTypes,
       allowedEffects: proposal.allowedEffects,
       maxEffectLayers: proposal.maxEffectLayers,
     }, proposal.editorCapabilities);

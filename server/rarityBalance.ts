@@ -1,7 +1,7 @@
-import { CARDS_PER_PACK, rarityWeights } from './config.js';
-import type { Rarity, RarityBalanceSnapshot } from './types.js';
-
-export const rarityOrder: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'veryrare'];
+import { CARDS_PER_PACK } from '../src/game/config.js';
+import type { Rarity, RarityBalanceSnapshot } from '../src/game/types.js';
+import { rarityOrder } from '../src/game/types.js';
+import { rarityWeights } from './packConfig.js';
 
 const PROPOSAL_REBALANCE_STRENGTH = 1.6;
 const PROPOSAL_REBALANCE_MIN_MULTIPLIER = 0.35;

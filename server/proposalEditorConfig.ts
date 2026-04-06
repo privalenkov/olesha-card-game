@@ -1,4 +1,5 @@
 import type {
+  CardLayoutType,
   CardTreatmentEffect,
   ProposalEditorCapabilities,
   Rarity,
@@ -13,6 +14,10 @@ export interface ProposalEditorRarityConfig {
   // Пары вида [effectId, вес]. Чем больше вес, тем чаще конкретный эффект
   // выпадает относительно остальных эффектов в пуле этой редкости.
   effectPool: Array<[CardTreatmentEffect, number]>;
+  // Сколько разных типов карточки может выпасть этому драфту.
+  cardTypeGrantCountWeights: Array<[number, number]>;
+  // Какие типы карточек вообще могут выпасть и с каким относительным весом.
+  cardTypePool: Array<[CardLayoutType, number]>;
 }
 
 /**
@@ -25,6 +30,8 @@ export interface ProposalEditorRarityConfig {
  *   Сколько спецэффектов сервер может выдать предложению этой редкости.
  * - `effectPool`
  *   Какие спецэффекты вообще могут выпасть для этой редкости и с каким весом.
+ * - `cardTypeGrantCountWeights` и `cardTypePool`
+ *   Какие `Типы карточки` сервер выдает новому драфту и сколько их может выпасть сразу.
  *
  * Что сейчас НЕ настраивается по редкости в этом файле:
  * - заголовок и описание
@@ -47,6 +54,8 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     },
     effectGrantCountWeights: [[0, 1]],
     effectPool: [],
+    cardTypeGrantCountWeights: [[1, 1]],
+    cardTypePool: [['type1', 1]],
   },
   uncommon: {
     settings: {
@@ -59,6 +68,14 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       ['spot_gloss', 48],
       ['texture_sugar', 34],
       ['spot_holo', 18],
+    ],
+    cardTypeGrantCountWeights: [
+      [1, 82],
+      [2, 18],
+    ],
+    cardTypePool: [
+      ['type1', 84],
+      ['type2', 16],
     ],
   },
   rare: {
@@ -78,6 +95,16 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       ['sparkle_foil', 16],
       ['emboss', 8],
       ['dimensional_lamination', 6],
+    ],
+    cardTypeGrantCountWeights: [
+      [1, 16],
+      [2, 56],
+      [3, 28],
+    ],
+    cardTypePool: [
+      ['type1', 12],
+      ['type2', 58],
+      ['type3', 30],
     ],
   },
   epic: {
@@ -99,6 +126,16 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       ['prismatic_edge', 10],
       ['dimensional_lamination', 12],
     ],
+    cardTypeGrantCountWeights: [
+      [1, 34],
+      [2, 66],
+    ],
+    cardTypePool: [
+      ['type1', 4],
+      ['type2', 6],
+      ['type3', 78],
+      ['type4', 12],
+    ],
   },
   veryrare: {
     settings: {
@@ -119,6 +156,16 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       ['prismatic_edge', 28],
       ['dimensional_lamination', 18],
     ],
+    cardTypeGrantCountWeights: [
+      [1, 22],
+      [2, 78],
+    ],
+    cardTypePool: [
+      ['type1', 4],
+      ['type2', 6],
+      ['type3', 48],
+      ['type4', 42],
+    ],
   },
 };
 
@@ -131,5 +178,13 @@ export function getProposalEffectGrantConfig(rarity: Rarity) {
   return {
     grantCountWeights: config.effectGrantCountWeights,
     pool: config.effectPool,
+  };
+}
+
+export function getProposalCardTypeGrantConfig(rarity: Rarity) {
+  const config = proposalEditorRarityConfig[rarity];
+  return {
+    grantCountWeights: config.cardTypeGrantCountWeights,
+    pool: config.cardTypePool,
   };
 }
