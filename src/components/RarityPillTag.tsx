@@ -10,6 +10,39 @@ interface RarityPillTagProps {
   className?: string;
 }
 
+function parseHexColor(value: string) {
+  const normalized = value.trim();
+  const match = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/iu);
+
+  if (!match) {
+    return null;
+  }
+
+  const hex = match[1].length === 3
+    ? match[1]
+        .split('')
+        .map((char) => char + char)
+        .join('')
+    : match[1];
+
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function getRarityPillTextColor(backgroundColor: string) {
+  const rgb = parseHexColor(backgroundColor);
+
+  if (!rgb) {
+    return '#F4F1DE';
+  }
+
+  const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+  return brightness >= 160 ? '#080910' : '#F4F1DE';
+}
+
 const rarityPillParticleCount: Record<Rarity, number> = {
   common: 6,
   uncommon: 6,
@@ -133,6 +166,7 @@ export function RarityPillTag({
     ['--rarity-shadow' as string]: meta.shadow,
     ['--rarity-surface-end' as string]: meta.gradient[0],
     ['--rarity-surface-start' as string]: meta.gradient[1],
+    ['--rarity-text-color' as string]: getRarityPillTextColor(meta.hue),
   } as CSSProperties;
   const classes = ['rarity-pill-tag', compact ? 'rarity-pill-tag--compact' : null, className]
     .filter(Boolean)

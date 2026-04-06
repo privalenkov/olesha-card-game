@@ -1,9 +1,12 @@
 .rarity-pill-tag {
   position: relative;
   z-index: 0;
-  display: inline-grid;
-  place-items: center;
-  width: 90px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 90px;
+  max-width: 100%;
   height: 23px;
   isolation: isolate;
 }
@@ -14,8 +17,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
+  min-width: 100%;
   height: 100%;
+  box-sizing: border-box;
+  padding: 0 12px;
   border-radius: 8px;
   background: var(--rarity-color);
 }
@@ -29,21 +34,22 @@
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #F4F1DE;
+  color: var(--rarity-text-color, #F4F1DE);
+  white-space: nowrap;
 }
 
 .rarity-pill-tag__particles {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 224px;
+  width: max(224px, calc(100% + 64px));
   height: 132px;
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
 .rarity-pill-tag--compact .rarity-pill-tag__particles {
-  width: 144px;
+  width: max(144px, calc(100% + 44px));
   height: 74px;
 }
 
