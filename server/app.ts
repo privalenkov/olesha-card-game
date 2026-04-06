@@ -13,6 +13,7 @@ import {
   CARD_FINISH_OPTIONS,
   CARD_FRAME_STYLE_OPTIONS,
   normalizeCardLayoutType,
+  normalizeCardLayoutTypes,
   clampEffectShimmer,
   getDefaultCardVisuals,
   normalizeCardLayerFill,
@@ -618,9 +619,22 @@ function normalizeAdminProposalOverridePayload(value: unknown): AdminProposalOve
     ['common', 'uncommon', 'rare', 'epic', 'veryrare'].includes(payload.rarity)
       ? (payload.rarity as Rarity)
       : null;
+  const rawAllowedCardTypes =
+    payload.allowedCardTypes === undefined
+      ? null
+      : Array.isArray(payload.allowedCardTypes)
+        ? payload.allowedCardTypes
+        : null;
   const rawAllowedEffects = Array.isArray(payload.allowedEffects) ? payload.allowedEffects : null;
 
-  if (!rarity || !rawAllowedEffects) {
+  if (!rarity || !rawAllowedEffects || (payload.allowedCardTypes !== undefined && !rawAllowedCardTypes)) {
+    return null;
+  }
+
+  const normalizedAllowedCardTypes =
+    rawAllowedCardTypes === null ? [] : normalizeCardLayoutTypes(rawAllowedCardTypes as string[]);
+
+  if (rawAllowedCardTypes !== null && normalizedAllowedCardTypes.length === 0) {
     return null;
   }
 
@@ -647,6 +661,8 @@ function normalizeAdminProposalOverridePayload(value: unknown): AdminProposalOve
 
   return {
     rarity,
+    allowedCardTypes:
+      rawAllowedCardTypes === null ? undefined : normalizedAllowedCardTypes,
     allowedEffects,
   };
 }
@@ -1704,6 +1720,7 @@ export async function buildApp() {
       (request.params as { proposalId: string }).proposalId,
       payload.rarity,
       payload.allowedEffects,
+      payload.allowedCardTypes,
     );
 
     if (!proposal) {

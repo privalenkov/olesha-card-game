@@ -481,6 +481,7 @@ export interface ProposalEditorPayload {
 
 export interface AdminProposalOverridePayload {
   rarity: Rarity;
+  allowedCardTypes?: CardLayoutType[];
   allowedEffects: CardTreatmentEffect[];
 }
 

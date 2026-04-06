@@ -2224,6 +2224,7 @@ export function createGameStore(config: ServerConfig) {
     proposalId: string,
     rarity: Rarity,
     allowedEffects: CardTreatmentEffect[],
+    allowedCardTypes?: CardLayoutType[],
   ): CardProposal | null {
     const existing = selectProposalById.get(proposalId) as ProposalRow | undefined;
 
@@ -2235,19 +2236,24 @@ export function createGameStore(config: ServerConfig) {
       normalizeEffectLayers(parseJsonArray<CardEffectLayer>(existing.effect_layers_json, [])),
       allowedEffects,
     );
-    const nextCardTypeGrant = buildProposalCardTypeGrant(rarity);
+    const grantedCardTypeConfig = buildProposalCardTypeGrant(rarity);
+    const nextAllowedCardTypes = normalizeCardLayoutTypes(
+      allowedCardTypes && allowedCardTypes.length > 0
+        ? allowedCardTypes
+        : grantedCardTypeConfig.allowedCardTypes,
+    );
     const existingVisuals = normalizeVisuals(parseStoredVisualPatternPayload(existing.visual_pattern_json));
     const nextVisuals = {
       ...existingVisuals,
-      cardType: nextCardTypeGrant.allowedCardTypes.includes(existingVisuals.cardType)
+      cardType: nextAllowedCardTypes.includes(existingVisuals.cardType)
         ? existingVisuals.cardType
-        : nextCardTypeGrant.defaultCardType,
+        : nextAllowedCardTypes[0] ?? grantedCardTypeConfig.defaultCardType,
     };
     const row = updateProposalAdminOverride.get({
       id: proposalId,
       rarity,
       visual_pattern_json: serializeStoredVisualPatternPayload(nextVisuals),
-      allowed_card_types_json: JSON.stringify(nextCardTypeGrant.allowedCardTypes),
+      allowed_card_types_json: JSON.stringify(nextAllowedCardTypes),
       allowed_effects_json: JSON.stringify(allowedEffects),
       max_effect_layers: allowedEffects.length,
       effect_layers_json: JSON.stringify(nextEffectLayers),

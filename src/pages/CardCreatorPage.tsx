@@ -29,12 +29,14 @@ import {
 import { rarityMeta } from '../game/config';
 import {
   CARD_ACCENT_SWATCHES,
+  CARD_LAYOUT_TYPE_OPTIONS,
   CARD_LAYOUT_TYPE_LABELS,
   CARD_LAYER_ONE_FILL_PRESETS,
   CARD_LAYER_TWO_FILL_PRESETS,
   CARD_TREATMENT_EFFECT_OPTIONS,
   CARD_TREATMENT_EFFECT_DESCRIPTIONS,
   CARD_TREATMENT_EFFECT_LABELS,
+  type CardLayoutType,
   getDefaultCardVisuals,
   getDefaultDecorativePattern,
   getDefaultEffectLayer,
@@ -260,6 +262,7 @@ export function CardCreatorPage() {
   const [brushSoftness, setBrushSoftness] = useState(0.5);
   const [previewTool, setPreviewTool] = useState<CardCreatorPreviewTool>('hand');
   const [adminRarity, setAdminRarity] = useState<Rarity>('common');
+  const [adminCardTypes, setAdminCardTypes] = useState<CardLayoutType[]>([]);
   const [adminEffects, setAdminEffects] = useState<CardTreatmentEffect[]>([]);
   const [grantedRarity, setGrantedRarity] = useState<Rarity | null>(null);
   const [rarityGrantOpen, setRarityGrantOpen] = useState(false);
@@ -343,6 +346,7 @@ export function CardCreatorPage() {
     }
 
     setAdminRarity(proposal.rarity);
+    setAdminCardTypes(proposal.allowedCardTypes);
     setAdminEffects(proposal.allowedEffects);
   }, [proposal]);
 
@@ -1108,6 +1112,7 @@ export function CardCreatorPage() {
     try {
       const response = await overrideProposalAsAdmin(proposal.id, {
         rarity: adminRarity,
+        allowedCardTypes: adminCardTypes,
         allowedEffects: adminEffects,
       });
       setProposal(response.proposal);
@@ -1533,7 +1538,7 @@ export function CardCreatorPage() {
               <div className="creator-admin-panel">
                 <div className="creator-section__head">
                   <strong>Тестовый override администратора</strong>
-                  <span>Только для тестов: вручную меняет редкость и доступные effects у этого черновика.</span>
+                  <span>Только для тестов: вручную меняет редкость, доступные типы карточки и effects у этого черновика.</span>
                 </div>
 
                 <div className="creator-row">
@@ -1551,6 +1556,32 @@ export function CardCreatorPage() {
                       <option value="veryrare">veryrare</option>
                     </select>
                   </label>
+                </div>
+
+                <div className="creator-field">
+                  <span>Доступные типы карточки</span>
+                  <div className="creator-effect-grants creator-effect-grants--admin">
+                    {CARD_LAYOUT_TYPE_OPTIONS.map((cardType) => {
+                      const active = adminCardTypes.includes(cardType);
+                      return (
+                        <button
+                          key={cardType}
+                          className={`creator-effect-grant ${active ? 'creator-effect-grant--active' : ''}`}
+                          disabled={saving || isLocked}
+                          onClick={() =>
+                            setAdminCardTypes((current) =>
+                              CARD_LAYOUT_TYPE_OPTIONS.filter((item) =>
+                                item === cardType ? !current.includes(item) : current.includes(item),
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          <strong>{CARD_LAYOUT_TYPE_LABELS[cardType]}</strong>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="creator-field">
@@ -1583,7 +1614,7 @@ export function CardCreatorPage() {
                 <div className="creator-tools">
                   <button
                     className="action-button"
-                    disabled={saving || isLocked}
+                    disabled={saving || isLocked || adminCardTypes.length === 0}
                     onClick={() => void applyAdminOverride()}
                     type="button"
                   >
