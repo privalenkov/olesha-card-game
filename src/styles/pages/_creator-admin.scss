@@ -438,6 +438,14 @@
   border: none;
 }
 
+.creator-effect-switch--selectable {
+  cursor: pointer;
+}
+
+.creator-effect-switch--selected {
+  box-shadow: inset 0 0 0 3px #574AE2;
+}
+
 .creator-effect-switch__header {
   display: flex;
   align-items: center;

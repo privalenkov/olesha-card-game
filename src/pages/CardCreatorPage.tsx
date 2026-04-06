@@ -1652,7 +1652,26 @@ export function CardCreatorPage() {
                       key={effect}
                       className={`creator-effect-switch creator-rarity-card ${
                         isActive ? 'creator-effect-switch--active' : ''
-                      } ${isSelected ? 'creator-effect-switch--selected' : ''}`.trim()}
+                      } ${isSelected ? 'creator-effect-switch--selected' : ''} ${
+                        layer ? 'creator-effect-switch--selectable' : ''
+                      }`.trim()}
+                      onClick={() => {
+                        if (layer) {
+                          selectEffectLayer(layer.id);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (!layer) {
+                          return;
+                        }
+
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectEffectLayer(layer.id);
+                        }
+                      }}
+                      role={layer ? 'button' : undefined}
+                      tabIndex={layer ? 0 : undefined}
                     >
                       <div className="creator-effect-switch__header">
                         <button
@@ -1683,6 +1702,7 @@ export function CardCreatorPage() {
                               removeEffectLayer(layer.id);
                             }
                           }}
+                          onClick={(event) => event.stopPropagation()}
                         />
                       </div>
 

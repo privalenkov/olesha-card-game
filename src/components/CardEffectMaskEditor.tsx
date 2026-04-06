@@ -21,6 +21,11 @@ interface CardEffectMaskEditorProps {
   showHint?: boolean;
 }
 
+interface MaskHistoryState {
+  stack: string[];
+  index: number;
+}
+
 function createMaskCanvas() {
   const canvas = document.createElement('canvas');
   canvas.width = CARD_MASK_EDITOR_WIDTH;
@@ -65,12 +70,165 @@ export function CardEffectMaskEditor({
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const anchorPointRef = useRef<{ x: number; y: number } | null>(null);
   const dirtyRef = useRef(false);
   const syncedMaskUrlRef = useRef<string | null>(null);
+  const historyByLayerRef = useRef<Record<string, MaskHistoryState>>({});
+  const historyApplyRequestIdRef = useRef(0);
 
   if (!sourceCanvasRef.current) {
     sourceCanvasRef.current = createMaskCanvas();
   }
+
+  const normalizeMaskUrl = (value: string | null | undefined) => value?.trim() ?? '';
+
+  const getHistoryState = (layerId: string, fallbackValue: string) => {
+    const existing = historyByLayerRef.current[layerId];
+
+    if (existing) {
+      if (existing.stack.length === 0) {
+        existing.stack = [fallbackValue];
+        existing.index = 0;
+      }
+
+      return existing;
+    }
+
+    const nextState: MaskHistoryState = {
+      stack: [fallbackValue],
+      index: 0,
+    };
+    historyByLayerRef.current[layerId] = nextState;
+    return nextState;
+  };
+
+  const pushHistoryValue = (layerId: string, nextValue: string) => {
+    const historyState = getHistoryState(layerId, nextValue);
+    const currentValue = historyState.stack[historyState.index] ?? '';
+
+    if (currentValue === nextValue) {
+      return;
+    }
+
+    historyState.stack = historyState.stack.slice(0, historyState.index + 1);
+    historyState.stack.push(nextValue);
+    historyState.index = historyState.stack.length - 1;
+  };
+
+  const redrawOverlayFromSource = () => {
+    const source = sourceCanvasRef.current;
+    const overlay = overlayRef.current;
+
+    if (!source || !overlay) {
+      return;
+    }
+
+    drawOverlay(overlay, source);
+  };
+
+  const loadMaskIntoCanvas = (maskUrl: string) => {
+    const source = sourceCanvasRef.current;
+    const overlay = overlayRef.current;
+
+    if (!source || !overlay) {
+      return;
+    }
+
+    const sourceContext = getMaskContext(source);
+
+    if (!sourceContext) {
+      return;
+    }
+
+    const requestId = historyApplyRequestIdRef.current + 1;
+    historyApplyRequestIdRef.current = requestId;
+
+    sourceContext.clearRect(0, 0, source.width, source.height);
+
+    if (!maskUrl) {
+      redrawOverlayFromSource();
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => {
+      if (historyApplyRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      sourceContext.clearRect(0, 0, source.width, source.height);
+      sourceContext.drawImage(image, 0, 0, source.width, source.height);
+      redrawOverlayFromSource();
+    };
+    image.src = maskUrl;
+  };
+
+  const applyHistoryStep = (direction: -1 | 1) => {
+    if (!layer || disabled || drawingRef.current) {
+      return;
+    }
+
+    const historyState = getHistoryState(layer.id, normalizeMaskUrl(layer.maskUrl));
+    const nextIndex = historyState.index + direction;
+
+    if (nextIndex < 0 || nextIndex >= historyState.stack.length) {
+      return;
+    }
+
+    historyState.index = nextIndex;
+    const nextMaskUrl = historyState.stack[nextIndex] ?? '';
+    syncedMaskUrlRef.current = nextMaskUrl || null;
+    dirtyRef.current = false;
+    anchorPointRef.current = null;
+    lastPointRef.current = null;
+    loadMaskIntoCanvas(nextMaskUrl);
+    onMaskChange(nextMaskUrl);
+  };
+
+  useEffect(() => {
+    anchorPointRef.current = null;
+    lastPointRef.current = null;
+    if (layer?.id) {
+      getHistoryState(layer.id, normalizeMaskUrl(layer.maskUrl));
+    }
+  }, [layer?.id]);
+
+  useEffect(() => {
+    if (disabled || !layer) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isModifierPressed = event.ctrlKey || event.metaKey;
+
+      if (!isModifierPressed || event.altKey || event.key.toLowerCase() !== 'z') {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (event.shiftKey) {
+        applyHistoryStep(1);
+        return;
+      }
+
+      applyHistoryStep(-1);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [applyHistoryStep, disabled, layer, onMaskChange]);
 
   useEffect(() => {
     const source = sourceCanvasRef.current;
@@ -99,14 +257,22 @@ export function CardEffectMaskEditor({
       return;
     }
 
+    const normalizedMaskUrl = normalizeMaskUrl(layer?.maskUrl);
+
     if (!layer?.maskUrl) {
       syncedMaskUrlRef.current = null;
+      anchorPointRef.current = null;
+      lastPointRef.current = null;
+      if (layer?.id) {
+        pushHistoryValue(layer.id, normalizedMaskUrl);
+      }
       sourceContext.clearRect(0, 0, source.width, source.height);
       drawOverlay(overlay, source);
       return;
     }
 
     if (!sourceResized && syncedMaskUrlRef.current === layer.maskUrl) {
+      pushHistoryValue(layer.id, normalizedMaskUrl);
       drawOverlay(overlay, source);
       return;
     }
@@ -121,6 +287,7 @@ export function CardEffectMaskEditor({
       sourceContext.clearRect(0, 0, source.width, source.height);
       sourceContext.drawImage(image, 0, 0, source.width, source.height);
       syncedMaskUrlRef.current = layer.maskUrl;
+      pushHistoryValue(layer.id, normalizedMaskUrl);
       drawOverlay(overlay, source);
     };
     image.src = layer.maskUrl;
@@ -246,6 +413,7 @@ export function CardEffectMaskEditor({
 
     dirtyRef.current = false;
     const nextMaskUrl = sourceCanvasRef.current.toDataURL('image/png');
+    pushHistoryValue(layer.id, nextMaskUrl);
     syncedMaskUrlRef.current = nextMaskUrl;
     onMaskChange(nextMaskUrl);
   };
@@ -255,9 +423,14 @@ export function CardEffectMaskEditor({
       return;
     }
 
+    const point = getPoint(event);
+    const previousPoint =
+      event.shiftKey && anchorPointRef.current ? anchorPointRef.current : null;
+
     drawingRef.current = true;
-    lastPointRef.current = getPoint(event);
-    paintAt(lastPointRef.current, null);
+    lastPointRef.current = point;
+    paintAt(point, previousPoint);
+    anchorPointRef.current = point;
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -269,11 +442,13 @@ export function CardEffectMaskEditor({
     const point = getPoint(event);
     paintAt(point, lastPointRef.current);
     lastPointRef.current = point;
+    anchorPointRef.current = point;
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (drawingRef.current) {
       drawingRef.current = false;
+      anchorPointRef.current = lastPointRef.current;
       lastPointRef.current = null;
       commitMask();
     }
