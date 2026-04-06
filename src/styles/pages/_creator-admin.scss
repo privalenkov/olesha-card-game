@@ -425,6 +425,12 @@
   color: var(--copy-faint);
 }
 
+.creator-effect-empty.creator-rarity-card {
+  padding: 21px;
+  background: #B3AF98;
+  color: #0D0E17;
+}
+
 .creator-effect-switches {
   display: flex;
   flex-direction: column;

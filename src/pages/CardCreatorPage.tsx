@@ -7,6 +7,7 @@ import { RarityGrantModal } from '../components/RarityGrantModal';
 import { ColorPickerPopover } from '../components/ui/ColorPickerPopover';
 import { FileUpload } from '../components/ui/FileUpload';
 import { RangeInput } from '../components/ui/RangeInput';
+import { Select, type SelectOption } from '../components/ui/Select';
 import { Switch } from '../components/ui/Switch';
 import { TextArea } from '../components/ui/TextArea';
 import { TextInput } from '../components/ui/TextInput';
@@ -128,6 +129,11 @@ function draftFromProposal(proposal: CardProposal): ProposalEditorPayload {
     effectLayers: proposal.effectLayers,
   };
 }
+
+const ADMIN_RARITY_SELECT_OPTIONS: SelectOption<Rarity>[] = rarityOrder.map((rarity) => ({
+  label: rarity,
+  value: rarity,
+}));
 
 type EffectLayerDraft = ProposalEditorPayload['effectLayers'][number];
 
@@ -273,6 +279,14 @@ export function CardCreatorPage() {
   const isLocked = proposal?.status !== 'draft';
   const patternAvailable = proposal?.editorCapabilities.decorativePattern ?? false;
   const availableCardTypes = proposal?.allowedCardTypes ?? [];
+  const availableCardTypeOptions = useMemo<SelectOption<CardLayoutType>[]>(
+    () =>
+      availableCardTypes.map((cardType) => ({
+        label: CARD_LAYOUT_TYPE_LABELS[cardType],
+        value: cardType,
+      })),
+    [availableCardTypes],
+  );
   const lastRejectionNoticeRef = useRef<string | null>(null);
   const imageUploadRequestIdRef = useRef(0);
   const decorativePatternUploadRequestIdRef = useRef(0);
@@ -1224,28 +1238,25 @@ export function CardCreatorPage() {
               <strong>Базовые настройки</strong>
             </div>
 
-            <label className="creator-field">
-              <span>Тип карточки</span>
-              <select
-                disabled={isLocked}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    visuals: {
-                      ...current.visuals,
-                      cardType: event.target.value as ProposalEditorPayload['visuals']['cardType'],
-                    },
-                  }))
-                }
-                value={draft.visuals.cardType}
-              >
-                {availableCardTypes.map((cardType) => (
-                  <option key={cardType} value={cardType}>
-                    {CARD_LAYOUT_TYPE_LABELS[cardType]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="creator-rarity-card">
+              <div className="creator-field">
+                <Select
+                  ariaLabel="Тип карточки"
+                  disabled={isLocked}
+                  onValueChange={(cardType) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visuals: {
+                        ...current.visuals,
+                        cardType,
+                      },
+                    }))
+                  }
+                  options={availableCardTypeOptions}
+                  value={draft.visuals.cardType}
+                />
+              </div>
+            </div>
 
             <label className="creator-field">
               <TextInput
@@ -1544,17 +1555,13 @@ export function CardCreatorPage() {
                 <div className="creator-row">
                   <label className="creator-field">
                     <span>Редкость</span>
-                    <select
+                    <Select
+                      ariaLabel="Редкость"
                       disabled={saving || isLocked}
-                      onChange={(event) => setAdminRarity(event.target.value as Rarity)}
+                      onValueChange={setAdminRarity}
+                      options={ADMIN_RARITY_SELECT_OPTIONS}
                       value={adminRarity}
-                    >
-                      <option value="common">common</option>
-                      <option value="uncommon">uncommon</option>
-                      <option value="rare">rare</option>
-                      <option value="epic">epic</option>
-                      <option value="veryrare">veryrare</option>
-                    </select>
+                    />
                   </label>
                 </div>
 
@@ -1693,7 +1700,7 @@ export function CardCreatorPage() {
                 })}
               </div>
             ) : (
-              <div className="creator-effect-empty">
+              <div className="creator-effect-empty creator-rarity-card">
                 Для этой карточки сейчас нет доступных специальных эффектов.
               </div>
             )}
