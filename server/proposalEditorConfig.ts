@@ -1,12 +1,11 @@
 import type {
   CardLayoutType,
   CardTreatmentEffect,
-  ProposalEditorCapabilities,
   Rarity,
 } from '../src/game/types.js';
 
 export interface ProposalEditorRarityConfig {
-  settings: ProposalEditorCapabilities;
+  decorativePatternGrantWeights: Array<[boolean, number]>;
   // Пары вида [количество эффектов, вес]. Вес не обязан быть равен 100:
   // сервер выбирает вариант пропорционально весу.
   // Пример: [[1, 54], [2, 46]] ~= 54% на 1 эффект и 46% на 2 эффекта.
@@ -24,8 +23,8 @@ export interface ProposalEditorRarityConfig {
  * Централизованная backend-настройка редактора карточек по редкостям.
  *
  * Какие rarity-зависимые настройки существуют сейчас:
- * - `settings.decorativePattern`
- *   Блок "Паттерн" в редакторе: свитч, загрузка SVG и все слайдеры паттерна.
+ * - `decorativePatternGrantWeights`
+ *   Шанс получить блок "Паттерн" в редакторе: свитч, загрузка SVG и все слайдеры паттерна.
  * - `effectGrantCountWeights`
  *   Сколько спецэффектов сервер может выдать предложению этой редкости.
  * - `effectPool`
@@ -49,18 +48,17 @@ export interface ProposalEditorRarityConfig {
  */
 export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConfig> = {
   common: {
-    settings: {
-      decorativePattern: false,
-    },
+    decorativePatternGrantWeights: [[false, 1]],
     effectGrantCountWeights: [[0, 1]],
     effectPool: [],
     cardTypeGrantCountWeights: [[1, 1]],
     cardTypePool: [['type1', 1]],
   },
   uncommon: {
-    settings: {
-      decorativePattern: false,
-    },
+    decorativePatternGrantWeights: [
+      [false, 95],
+      [true, 5],
+    ],
     // Всегда выдается ровно 1 эффект.
     effectGrantCountWeights: [[1, 1]],
     // Сумма весов тут 100, поэтому можно читать почти как проценты.
@@ -79,9 +77,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     ],
   },
   rare: {
-    settings: {
-      decorativePattern: true,
-    },
+    decorativePatternGrantWeights: [
+      [false, 78],
+      [true, 22],
+    ],
     // 1 эффект ~= 54%, 2 эффекта ~= 46%.
     effectGrantCountWeights: [
       [1, 54],
@@ -108,9 +107,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     ],
   },
   epic: {
-    settings: {
-      decorativePattern: true,
-    },
+    decorativePatternGrantWeights: [
+      [false, 52],
+      [true, 48],
+    ],
     // 2 эффекта ~= 58%, 3 эффекта ~= 42%.
     effectGrantCountWeights: [
       [2, 58],
@@ -138,9 +138,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     ],
   },
   veryrare: {
-    settings: {
-      decorativePattern: true,
-    },
+    decorativePatternGrantWeights: [
+      [false, 28],
+      [true, 72],
+    ],
     // 3 эффекта ~= 62%, 4 эффекта ~= 38%.
     effectGrantCountWeights: [
       [3, 62],
@@ -169,8 +170,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
   },
 };
 
-export function getProposalEditorCapabilities(rarity: Rarity): ProposalEditorCapabilities {
-  return proposalEditorRarityConfig[rarity].settings;
+export function getProposalEditorCapabilityGrantConfig(rarity: Rarity) {
+  return {
+    decorativePatternGrantWeights: proposalEditorRarityConfig[rarity].decorativePatternGrantWeights,
+  };
 }
 
 export function getProposalEffectGrantConfig(rarity: Rarity) {

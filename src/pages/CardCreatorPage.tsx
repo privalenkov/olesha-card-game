@@ -27,6 +27,10 @@ import {
   CARD_TEXTURE_HEIGHT,
   CARD_TEXTURE_WIDTH,
 } from '../game/cardDimensions';
+import wireframeType1Url from '../assets/wareframes/wareframe-type1.png';
+import wireframeType2Url from '../assets/wareframes/wareframe-type2.png';
+import wireframeType3Url from '../assets/wareframes/wareframe-type3.png';
+import wireframeType4Url from '../assets/wareframes/wareframe-type4.png';
 import { rarityMeta } from '../game/config';
 import {
   CARD_ACCENT_SWATCHES,
@@ -50,6 +54,25 @@ import {
   rarityOrder,
 } from '../game/types';
 import { useCardPreviewImage, useDecorativePatternMaskImage } from '../three/textures';
+
+const CARD_TYPE_WIREFRAME_ASSETS: Record<CardLayoutType, { url: string; fileName: string }> = {
+  type1: {
+    url: wireframeType1Url,
+    fileName: 'wareframe-type1.png',
+  },
+  type2: {
+    url: wireframeType2Url,
+    fileName: 'wareframe-type2.png',
+  },
+  type3: {
+    url: wireframeType3Url,
+    fileName: 'wareframe-type3.png',
+  },
+  type4: {
+    url: wireframeType4Url,
+    fileName: 'wareframe-type4.png',
+  },
+};
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1229,10 +1252,22 @@ export function CardCreatorPage() {
           />
 
           <div className="creator-form">
-          <p className="creator-form__notice">
-            * В зависимости от редкости карточки, вам выдаются разные настройки. Чем реже
-            карточка, тем более уникальную карточку можно создать
-          </p>
+            <div className="creator-form__notice-block">
+              <p className="creator-form__notice">
+                * В зависимости от редкости карточки, вам выдаются разные настройки. Чем реже
+                карточка, тем более уникальную карточку можно создать
+              </p>
+              <button
+                className="creator-form__template-download"
+                onClick={() => {
+                  const wireframe = CARD_TYPE_WIREFRAME_ASSETS[draft.visuals.cardType];
+                  triggerAssetDownload(wireframe.url, wireframe.fileName);
+                }}
+                type="button"
+              >
+                Скачать шаблон карточки
+              </button>
+            </div>
           <div className="creator-section">
             <div className="creator-section__head">
               <strong>Базовые настройки</strong>

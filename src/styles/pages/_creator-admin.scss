@@ -151,6 +151,27 @@
   color: #B3AF98;
 }
 
+.creator-form__notice-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.creator-form__template-download {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #EC0B43;
+  text-align: left;
+  cursor: pointer;
+}
+
 .creator-section {
   display: flex;
   flex-direction: column;

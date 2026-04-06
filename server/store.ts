@@ -31,6 +31,7 @@ import type {
   CardVisuals,
   OpenPackResult,
   OwnedCard,
+  ProposalEditorCapabilities,
   ProposalEditorPayload,
   PublicPlayerProfile,
   Rarity,
@@ -48,7 +49,7 @@ import {
 } from '../src/game/types.js';
 import type { ServerConfig } from './config.js';
 import {
-  getProposalEditorCapabilities,
+  getProposalEditorCapabilityGrantConfig,
   getProposalCardTypeGrantConfig,
   getProposalEffectGrantConfig,
 } from './proposalEditorConfig.js';
@@ -110,6 +111,7 @@ interface ProposalRow {
   creator_user_id: string;
   creator_name: string;
   rarity: Rarity;
+  editor_decorative_pattern: number;
   status: CardProposal['status'];
   title: string;
   description: string;
@@ -667,6 +669,14 @@ function buildProposalEffectGrant(rarity: Rarity): ProposalEffectGrant {
   };
 }
 
+function buildProposalEditorCapabilities(rarity: Rarity): ProposalEditorCapabilities {
+  const config = getProposalEditorCapabilityGrantConfig(rarity);
+
+  return {
+    decorativePattern: weightedPickValue(config.decorativePatternGrantWeights),
+  };
+}
+
 function buildProposalCardTypeGrant(rarity: Rarity): ProposalCardTypeGrant {
   const config = getProposalCardTypeGrantConfig(rarity);
   const grantedCardTypes = pickDistinctWeightedValues(
@@ -874,7 +884,9 @@ function toOwnedCard(row: OwnedCardRow): OwnedCard {
 
 function toCardProposal(row: ProposalRow): CardProposal {
   const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
-  const editorCapabilities = getProposalEditorCapabilities(row.rarity);
+  const editorCapabilities = {
+    decorativePattern: row.editor_decorative_pattern === 1,
+  };
   const baseVisuals = normalizeVisuals({
     cardType: storedVisuals.cardType,
     frameStyle: row.visual_frame_style,
@@ -1110,6 +1122,7 @@ export function createGameStore(config: ServerConfig) {
       creator_user_id text not null references users(id) on delete cascade,
       creator_name text not null,
       rarity text not null,
+      editor_decorative_pattern integer not null default 0,
       status text not null,
       title text not null,
       description text not null,
@@ -1292,7 +1305,11 @@ export function createGameStore(config: ServerConfig) {
   const proposalColumns = db
     .prepare(`pragma table_info(card_proposals)`)
     .all() as Array<{ name: string }>;
+  const hadProposalDecorativePatternColumn = proposalColumns.some(
+    (column) => column.name === 'editor_decorative_pattern',
+  );
   const requiredProposalColumns = [
+    ['editor_decorative_pattern', 'integer not null default 0'],
     ['visual_pattern_json', "text not null default '{}'"],
     ['allowed_card_types_json', "text not null default '[]'"],
     ['allowed_effects_json', "text not null default '[]'"],
@@ -1322,6 +1339,15 @@ export function createGameStore(config: ServerConfig) {
     set allowed_effects_json = '[]'
     where allowed_effects_json is null or trim(allowed_effects_json) = ''
   `);
+  if (!hadProposalDecorativePatternColumn) {
+    db.exec(`
+      update card_proposals
+      set editor_decorative_pattern = case
+        when rarity in ('rare', 'epic', 'veryrare') then 1
+        else 0
+      end
+    `);
+  }
   db.exec(`
     update card_proposals
     set effect_layers_json = '[]'
@@ -1691,12 +1717,12 @@ export function createGameStore(config: ServerConfig) {
   `);
   const insertProposal = db.prepare(`
     insert into card_proposals (
-      id, creator_user_id, creator_name, rarity, status, title, description, url_image,
+      id, creator_user_id, creator_name, rarity, editor_decorative_pattern, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
       visual_effect_placement, visual_pattern_json, allowed_card_types_json,
       allowed_effects_json, max_effect_layers, effect_layers_json,
       created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -2169,6 +2195,7 @@ export function createGameStore(config: ServerConfig) {
 
     const now = new Date().toISOString();
     const rarity = weightedPick(getProposalRarityWeights(countItemsByRarity(getActiveCatalogDefinitions())));
+    const editorCapabilities = buildProposalEditorCapabilities(rarity);
     const cardTypeGrant = buildProposalCardTypeGrant(rarity);
     const effectGrant = buildProposalEffectGrant(rarity);
     const visuals = {
@@ -2184,6 +2211,7 @@ export function createGameStore(config: ServerConfig) {
       user.id,
       user.name,
       rarity,
+      editorCapabilities.decorativePattern ? 1 : 0,
       'draft',
       'Новая карточка',
       'Опиши, чем эта карточка должна запомниться.',
