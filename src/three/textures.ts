@@ -67,6 +67,7 @@ function getCardRemoteAssetUrls(card: OwnedCard | null) {
     cardLayerTwoFrontUrl,
     rarityStarUrl,
     card.urlImage,
+    card.visuals?.lenticularImageUrl ?? '',
     card.visuals?.decorativePattern.svgUrl ?? '',
     ...getCardEffectLayers(card).map((layer) => layer.maskUrl),
   ].filter(Boolean);
@@ -1638,6 +1639,29 @@ function drawArtImageInBox(
   if (options.borderColor && options.borderWidth) {
     strokeRoundedPanel(ctx, box, options.borderColor, options.borderWidth);
   }
+}
+
+function drawLenticularArtOverlay(
+  card: OwnedCard,
+  lenticularImage: HTMLImageElement | null,
+) {
+  const canvas = createCanvas(CARD_TEXTURE_WIDTH, CARD_TEXTURE_HEIGHT);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx || !lenticularImage || !getCardVisuals(card).lenticularImageUrl) {
+    return canvas;
+  }
+
+  const box = getCardFrontLayout(card).artBox;
+
+  ctx.save();
+  drawRoundedPanel(ctx, box.x, box.y, box.width, box.height, box.radius ?? 0);
+  ctx.clip();
+  ctx.filter = 'saturate(1.06) contrast(1.04)';
+  drawImageCover(ctx, lenticularImage, box.x, box.y, box.width, box.height);
+  ctx.restore();
+
+  return canvas;
 }
 
 function drawBottomReadabilityShade(
@@ -3584,6 +3608,7 @@ export function useStackCardBackTexture() {
 
 export function useCardTextures(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const lenticularImage = useRemoteImage(card?.visuals?.lenticularImageUrl ?? null);
   const backImage = useRemoteImage(cardBackTextureUrl);
   const defaultPatternImage = useRemoteImage(defaultPatternUrl);
   const defaultReflectPatternImage = useRemoteImage(defaultReflectPatternUrl);
@@ -3626,6 +3651,9 @@ export function useCardTextures(card: OwnedCard | null) {
             },
           ),
         ),
+      ),
+      lenticularOverlay: setupTexture(
+        finalizeCardTextureCanvas(drawLenticularArtOverlay(card, lenticularImage)),
       ),
       back: setupTexture(
         finalizeCardTextureCanvas(backImage ? drawCardBackTexture(backImage) : drawFallbackCardBack()),
@@ -3685,12 +3713,14 @@ export function useCardTextures(card: OwnedCard | null) {
     effectMaskImages,
     layerOneImage,
     layerTwoImage,
+    lenticularImage,
     rarityStarImage,
   ]);
 }
 
 export function useCardPreviewImage(card: OwnedCard | null) {
   const artImage = useRemoteImage(card?.urlImage ?? null);
+  const lenticularImage = useRemoteImage(card?.visuals?.lenticularImageUrl ?? null);
   const defaultPatternImage = useRemoteImage(defaultPatternUrl);
   const layerOneImage = useRemoteImage(cardLayerOneFrontUrl);
   const layerTwoImage = useRemoteImage(cardLayerTwoFrontUrl);
@@ -3722,6 +3752,15 @@ export function useCardPreviewImage(card: OwnedCard | null) {
         },
       ),
     );
+    if (card.visuals?.lenticularImageUrl && lenticularImage) {
+      const ctx = sourceCanvas.getContext('2d');
+      if (ctx) {
+        ctx.save();
+        ctx.globalAlpha = 0.32;
+        ctx.drawImage(drawLenticularArtOverlay(card, lenticularImage), 0, 0);
+        ctx.restore();
+      }
+    }
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = CARD_PREVIEW_WIDTH;
     previewCanvas.height = CARD_PREVIEW_HEIGHT;
@@ -3745,6 +3784,7 @@ export function useCardPreviewImage(card: OwnedCard | null) {
     effectMaskImages,
     layerOneImage,
     layerTwoImage,
+    lenticularImage,
     rarityStarImage,
   ]);
 }

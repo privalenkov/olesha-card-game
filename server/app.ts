@@ -466,6 +466,8 @@ function normalizeProposalPayload(
     typeof visuals?.layerTwoFill === 'string' ? visuals.layerTwoFill : null,
     defaults.layerTwoFill,
   );
+  const lenticularImageUrl =
+    typeof visuals?.lenticularImageUrl === 'string' ? visuals.lenticularImageUrl.trim() : '';
   const decorativePattern =
     typeof visuals?.decorativePattern === 'object' && visuals.decorativePattern !== null
       ? (visuals.decorativePattern as Record<string, unknown>)
@@ -504,6 +506,14 @@ function normalizeProposalPayload(
   }
 
   if ((!isStoredAssetUrl(urlImage) && urlImage !== '')) {
+    return null;
+  }
+
+  if (
+    editorCapabilities.lenticularImage &&
+    !isStoredAssetUrl(lenticularImageUrl) &&
+    lenticularImageUrl !== ''
+  ) {
     return null;
   }
 
@@ -609,6 +619,7 @@ function normalizeProposalPayload(
         defaults.layerTwoFill,
         editorCapabilities.gradientFill,
       ),
+      lenticularImageUrl: editorCapabilities.lenticularImage ? lenticularImageUrl : '',
       decorativePattern: editorCapabilities.decorativePattern
         ? ({
             svgUrl: decorativePatternSvgUrl,

@@ -265,6 +265,32 @@ const cardSurfaceVertexShader = `
   }
 `;
 
+const lenticularImageFragmentShader = `
+  uniform sampler2D uMap;
+  uniform sampler2D uBaseMap;
+  uniform float uBlend;
+  uniform float uShift;
+
+  varying vec2 vUv;
+
+  void main() {
+    vec4 lenticularTexel = texture2D(uMap, vUv);
+
+    if (lenticularTexel.a < 0.01) {
+      discard;
+    }
+
+    vec4 baseTexel = texture2D(uBaseMap, vUv);
+    float stripe = fract((vUv.x + uShift) * 96.0);
+    float stripeSoftness = 0.08;
+    float lenticularMask =
+      1.0 - smoothstep(uBlend - stripeSoftness, uBlend + stripeSoftness, stripe);
+    vec3 color = mix(baseTexel.rgb, lenticularTexel.rgb, lenticularMask);
+
+    gl_FragColor = vec4(color, lenticularTexel.a);
+  }
+`;
+
 const cardSurfaceNormalSamplingShader = `
   uniform sampler2D uSurfaceNormalMap;
 
@@ -1463,6 +1489,7 @@ function CardRig({
   const liftedSparkleFinishShaderRef = useRef<ShaderMaterial>(null);
   const prismFinishShaderRef = useRef<ShaderMaterial>(null);
   const liftedPrismFinishShaderRef = useRef<ShaderMaterial>(null);
+  const lenticularImageShaderRef = useRef<ShaderMaterial>(null);
   const waveHoloShaderRef = useRef<ShaderMaterial>(null);
   const liftedWaveHoloShaderRef = useRef<ShaderMaterial>(null);
   const crackedHoloShaderRef = useRef<ShaderMaterial>(null);
@@ -1490,6 +1517,7 @@ function CardRig({
   const meta = rarityMeta[card.rarity];
   const finish = finishMeta[card.finish];
   const hasArtImage = Boolean(card.urlImage?.trim());
+  const hasLenticularImage = Boolean(card.visuals?.lenticularImageUrl?.trim());
   const tuning = holoTuning[card.rarity];
   const viewerLighting = useMemo(
     () => createViewerLightingPalette(card.rarity, meta.hue, meta.accent),
@@ -1618,6 +1646,7 @@ function CardRig({
   useEffect(() => {
     if (textures) {
       textures.front.needsUpdate = true;
+      textures.lenticularOverlay.needsUpdate = true;
       textures.back.needsUpdate = true;
       textures.foil.needsUpdate = true;
       textures.foilZone.needsUpdate = true;
@@ -1672,6 +1701,15 @@ function CardRig({
         material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
         material.uniforms.uGlareColor.value.copy(highlightPalette.glare);
         material.uniforms.uGlossiness.value = glossiness;
+        material.uniformsNeedUpdate = true;
+        material.needsUpdate = true;
+      });
+
+    [lenticularImageShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uMap.value = textures.lenticularOverlay;
+        material.uniforms.uBaseMap.value = textures.front;
         material.uniformsNeedUpdate = true;
         material.needsUpdate = true;
       });
@@ -1925,8 +1963,19 @@ function CardRig({
       1,
       Math.abs(outerGroupRef.current.rotation.x) * 2.6 +
         Math.abs(yawTilt) * 1.45 +
-        Math.abs(hoverPointerX) * 0.35,
+      Math.abs(hoverPointerX) * 0.35,
     );
+
+    if (lenticularImageShaderRef.current?.uniforms) {
+      const lenticularBlend = MathUtils.smootherstep(
+        0.5 + yawTilt * 0.42 + hoverPointerX * 0.28,
+        0.18,
+        0.82,
+      );
+      lenticularImageShaderRef.current.uniforms.uBlend.value = lenticularBlend;
+      lenticularImageShaderRef.current.uniforms.uShift.value =
+        lenticularBlend * 0.08 + Math.sin(state.clock.elapsedTime * 0.22) * 0.006;
+    }
 
     if (showDecorativeEffects && ringRef.current) {
       ringRef.current.rotation.z += delta * (0.24 + finish.shimmerBoost * 0.18);
@@ -2319,6 +2368,26 @@ function CardRig({
                       clearcoatNormalScale={surfaceClearcoatScale}
                     />
                   </mesh>
+
+                  {hasLenticularImage ? (
+                    <mesh position={[0, 0, faceOffset + 0.0032]} scale={[1.0008, 1.0008, 1]}>
+                      <primitive attach="geometry" object={faceGeometry} />
+                      <shaderMaterial
+                        ref={lenticularImageShaderRef}
+                        transparent
+                        depthWrite={false}
+                        toneMapped={false}
+                        uniforms={{
+                          uMap: { value: textures.lenticularOverlay },
+                          uBaseMap: { value: textures.front },
+                          uBlend: { value: 0.5 },
+                          uShift: { value: 0 },
+                        }}
+                        vertexShader={cardSurfaceVertexShader}
+                        fragmentShader={lenticularImageFragmentShader}
+                      />
+                    </mesh>
+                  ) : null}
 
                   {dimensionalLayer ? (
                     <mesh

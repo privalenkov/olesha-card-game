@@ -116,6 +116,7 @@ interface ProposalRow {
   rarity: Rarity;
   editor_decorative_pattern: number;
   editor_gradient_fill: number;
+  editor_lenticular_image: number;
   status: CardProposal['status'];
   title: string;
   description: string;
@@ -422,6 +423,7 @@ interface StoredVisualPatternPayload {
   decorativePattern?: Partial<CardDecorativePattern>;
   layerOneFill?: string;
   layerTwoFill?: string;
+  lenticularImageUrl?: string;
 }
 
 type PartialCardVisualsInput = Omit<Partial<CardVisuals>, 'decorativePattern'> & {
@@ -444,6 +446,8 @@ function parseStoredVisualPatternPayload(
     decorativePattern,
     layerOneFill: typeof parsed.layerOneFill === 'string' ? parsed.layerOneFill : undefined,
     layerTwoFill: typeof parsed.layerTwoFill === 'string' ? parsed.layerTwoFill : undefined,
+    lenticularImageUrl:
+      typeof parsed.lenticularImageUrl === 'string' ? parsed.lenticularImageUrl : undefined,
   };
 }
 
@@ -453,6 +457,7 @@ function serializeStoredVisualPatternPayload(visuals: CardVisuals) {
     decorativePattern: visuals.decorativePattern,
     layerOneFill: visuals.layerOneFill,
     layerTwoFill: visuals.layerTwoFill,
+    lenticularImageUrl: visuals.lenticularImageUrl,
   } satisfies StoredVisualPatternPayload);
 }
 
@@ -466,6 +471,7 @@ function normalizeVisuals(visuals?: PartialCardVisualsInput | null): CardVisuals
     decorativePattern: normalizeDecorativePattern(visuals?.decorativePattern),
     layerOneFill: normalizeCardLayerFill(visuals?.layerOneFill, defaults.layerOneFill),
     layerTwoFill: normalizeCardLayerFill(visuals?.layerTwoFill, defaults.layerTwoFill),
+    lenticularImageUrl: normalizeMaskUrl(visuals?.lenticularImageUrl ?? ''),
   };
 }
 
@@ -490,6 +496,7 @@ function applyEditorCapabilityVisualRestrictions(
       defaults.layerTwoFill,
       editorCapabilities.gradientFill,
     ),
+    lenticularImageUrl: editorCapabilities.lenticularImage ? visuals.lenticularImageUrl : '',
   };
 }
 
@@ -580,6 +587,7 @@ function collectStoredAssetUrlsFromRow(
 
   const storedVisuals = parseStoredVisualPatternPayload(row.visual_pattern_json);
   addStoredAssetUrl(target, storedVisuals.decorativePattern?.svgUrl);
+  addStoredAssetUrl(target, storedVisuals.lenticularImageUrl);
 
   const effectLayers = parseJsonArray<Partial<CardEffectLayer>>(row.effect_layers_json, []);
 
@@ -704,6 +712,7 @@ function buildProposalEditorCapabilities(rarity: Rarity): ProposalEditorCapabili
   return {
     decorativePattern: weightedPickValue(config.decorativePatternGrantWeights),
     gradientFill: weightedPickValue(config.gradientFillGrantWeights),
+    lenticularImage: weightedPickValue(config.lenticularImageGrantWeights),
   };
 }
 
@@ -877,6 +886,7 @@ function toCardDefinition(row: CardRow): CardDefinition {
           decorativePattern: storedVisuals.decorativePattern,
           layerOneFill: storedVisuals.layerOneFill,
           layerTwoFill: storedVisuals.layerTwoFill,
+          lenticularImageUrl: storedVisuals.lenticularImageUrl,
         })
       : undefined;
 
@@ -917,6 +927,7 @@ function toCardProposal(row: ProposalRow): CardProposal {
   const editorCapabilities = {
     decorativePattern: row.editor_decorative_pattern === 1,
     gradientFill: row.editor_gradient_fill === 1,
+    lenticularImage: row.editor_lenticular_image === 1,
   };
   const baseVisuals = normalizeVisuals({
     cardType: storedVisuals.cardType,
@@ -925,6 +936,7 @@ function toCardProposal(row: ProposalRow): CardProposal {
     decorativePattern: storedVisuals.decorativePattern,
     layerOneFill: storedVisuals.layerOneFill,
     layerTwoFill: storedVisuals.layerTwoFill,
+    lenticularImageUrl: storedVisuals.lenticularImageUrl,
   });
   const allowedCardTypes = (() => {
     const parsed = parseStoredAllowedCardTypesPayload(row.allowed_card_types_json);
@@ -1150,6 +1162,7 @@ export function createGameStore(config: ServerConfig) {
       rarity text not null,
       editor_decorative_pattern integer not null default 0,
       editor_gradient_fill integer not null default 0,
+      editor_lenticular_image integer not null default 0,
       status text not null,
       title text not null,
       description text not null,
@@ -1338,9 +1351,13 @@ export function createGameStore(config: ServerConfig) {
   const hadProposalGradientFillColumn = proposalColumns.some(
     (column) => column.name === 'editor_gradient_fill',
   );
+  const hadProposalLenticularImageColumn = proposalColumns.some(
+    (column) => column.name === 'editor_lenticular_image',
+  );
   const requiredProposalColumns = [
     ['editor_decorative_pattern', 'integer not null default 0'],
     ['editor_gradient_fill', 'integer not null default 0'],
+    ['editor_lenticular_image', 'integer not null default 0'],
     ['visual_pattern_json', "text not null default '{}'"],
     ['allowed_card_types_json', "text not null default '[]'"],
     ['allowed_effects_json', "text not null default '[]'"],
@@ -1403,6 +1420,32 @@ export function createGameStore(config: ServerConfig) {
       }
     });
     migrateProposalGradientFill();
+  }
+  if (!hadProposalLenticularImageColumn) {
+    const proposalLenticularMigrationRows = db.prepare(`
+      select id, rarity, visual_pattern_json
+      from card_proposals
+    `).all() as Array<{
+      id: string;
+      rarity: Rarity;
+      visual_pattern_json: string;
+    }>;
+    const updateProposalLenticularImageMigration = db.prepare(`
+      update card_proposals
+      set editor_lenticular_image = ?
+      where id = ?
+    `);
+    const migrateProposalLenticularImage = db.transaction(() => {
+      for (const row of proposalLenticularMigrationRows) {
+        const visuals = normalizeVisuals(parseStoredVisualPatternPayload(row.visual_pattern_json));
+        const nextValue =
+          visuals.lenticularImageUrl || buildProposalEditorCapabilities(row.rarity).lenticularImage
+            ? 1
+            : 0;
+        updateProposalLenticularImageMigration.run(nextValue, row.id);
+      }
+    });
+    migrateProposalLenticularImage();
   }
   db.exec(`
     update card_proposals
@@ -1773,12 +1816,13 @@ export function createGameStore(config: ServerConfig) {
   `);
   const insertProposal = db.prepare(`
     insert into card_proposals (
-      id, creator_user_id, creator_name, rarity, editor_decorative_pattern, editor_gradient_fill, status, title, description, url_image,
+      id, creator_user_id, creator_name, rarity, editor_decorative_pattern, editor_gradient_fill,
+      editor_lenticular_image, status, title, description, url_image,
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
       visual_effect_placement, visual_pattern_json, allowed_card_types_json,
       allowed_effects_json, max_effect_layers, effect_layers_json,
       created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1911,6 +1955,7 @@ export function createGameStore(config: ServerConfig) {
       rarity = @rarity,
       editor_decorative_pattern = @editor_decorative_pattern,
       editor_gradient_fill = @editor_gradient_fill,
+      editor_lenticular_image = @editor_lenticular_image,
       visual_pattern_json = @visual_pattern_json,
       allowed_card_types_json = @allowed_card_types_json,
       allowed_effects_json = @allowed_effects_json,
@@ -2271,6 +2316,7 @@ export function createGameStore(config: ServerConfig) {
       rarity,
       editorCapabilities.decorativePattern ? 1 : 0,
       editorCapabilities.gradientFill ? 1 : 0,
+      editorCapabilities.lenticularImage ? 1 : 0,
       'draft',
       'Новая карточка',
       'Опиши, чем эта карточка должна запомниться.',
@@ -2317,6 +2363,7 @@ export function createGameStore(config: ServerConfig) {
     const editorCapabilities = {
       decorativePattern: existing.editor_decorative_pattern === 1,
       gradientFill: existing.editor_gradient_fill === 1,
+      lenticularImage: existing.editor_lenticular_image === 1,
     } satisfies ProposalEditorCapabilities;
     const visuals = applyEditorCapabilityVisualRestrictions(
       normalizeVisuals(payload.visuals),
@@ -2374,6 +2421,7 @@ export function createGameStore(config: ServerConfig) {
       rarity,
       editor_decorative_pattern: editorCapabilities.decorativePattern ? 1 : 0,
       editor_gradient_fill: editorCapabilities.gradientFill ? 1 : 0,
+      editor_lenticular_image: editorCapabilities.lenticularImage ? 1 : 0,
       visual_pattern_json: serializeStoredVisualPatternPayload(nextVisuals),
       allowed_card_types_json: JSON.stringify(nextAllowedCardTypes),
       allowed_effects_json: JSON.stringify(allowedEffects),

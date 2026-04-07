@@ -42,6 +42,7 @@ export interface CardVisuals {
   decorativePattern: CardDecorativePattern;
   layerOneFill: string;
   layerTwoFill: string;
+  lenticularImageUrl: string;
 }
 
 export interface CardEffectLayer {
@@ -263,6 +264,7 @@ export function getDefaultCardVisuals(): CardVisuals {
     decorativePattern: getDefaultDecorativePattern(),
     layerOneFill: DEFAULT_CARD_LAYER_ONE_FILL,
     layerTwoFill: DEFAULT_CARD_LAYER_TWO_FILL,
+    lenticularImageUrl: '',
   };
 }
 
@@ -305,6 +307,7 @@ export function normalizeCardLayoutTypes(
 export interface ProposalEditorCapabilities {
   decorativePattern: boolean;
   gradientFill: boolean;
+  lenticularImage: boolean;
 }
 
 export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {

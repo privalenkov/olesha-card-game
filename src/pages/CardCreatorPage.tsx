@@ -300,12 +300,15 @@ export function CardCreatorPage() {
   const [grantedRarity, setGrantedRarity] = useState<Rarity | null>(null);
   const [rarityGrantOpen, setRarityGrantOpen] = useState(false);
   const [imageFileName, setImageFileName] = useState<string | null>(null);
+  const [lenticularImageFileName, setLenticularImageFileName] = useState<string | null>(null);
+  const [lenticularSettingsOpen, setLenticularSettingsOpen] = useState(false);
   const [decorativePatternFileName, setDecorativePatternFileName] = useState<string | null>(null);
   const [effectMaskFileNames, setEffectMaskFileNames] = useState<Record<string, string>>({});
   const [patternSettingsOpen, setPatternSettingsOpen] = useState(false);
   const isLocked = proposal?.status !== 'draft';
   const patternAvailable = proposal?.editorCapabilities.decorativePattern ?? false;
   const gradientAvailable = proposal?.editorCapabilities.gradientFill ?? false;
+  const lenticularAvailable = proposal?.editorCapabilities.lenticularImage ?? false;
   const availableCardTypes = proposal?.allowedCardTypes ?? [];
   const availableCardTypeOptions = useMemo<SelectOption<CardLayoutType>[]>(
     () =>
@@ -317,16 +320,20 @@ export function CardCreatorPage() {
   );
   const lastRejectionNoticeRef = useRef<string | null>(null);
   const imageUploadRequestIdRef = useRef(0);
+  const lenticularImageUploadRequestIdRef = useRef(0);
   const decorativePatternUploadRequestIdRef = useRef(0);
   const effectMaskUploadRequestIdsRef = useRef<Record<string, number>>({});
   const initializedPatternSettingsProposalIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setImageFileName(null);
+    setLenticularImageFileName(null);
+    setLenticularSettingsOpen(false);
     setDecorativePatternFileName(null);
     setEffectMaskFileNames({});
     setPatternSettingsOpen(false);
     imageUploadRequestIdRef.current = 0;
+    lenticularImageUploadRequestIdRef.current = 0;
     decorativePatternUploadRequestIdRef.current = 0;
     effectMaskUploadRequestIdsRef.current = {};
     initializedPatternSettingsProposalIdRef.current = null;
@@ -375,6 +382,35 @@ export function CardCreatorPage() {
       },
     }));
   }, [draft, gradientAvailable]);
+
+  useEffect(() => {
+    if (!draft) {
+      return;
+    }
+
+    if (lenticularAvailable) {
+      if (draft.visuals.lenticularImageUrl && !lenticularSettingsOpen) {
+        setLenticularSettingsOpen(true);
+      }
+      return;
+    }
+
+    if (!draft.visuals.lenticularImageUrl) {
+      setLenticularSettingsOpen(false);
+      return;
+    }
+
+    lenticularImageUploadRequestIdRef.current += 1;
+    setLenticularImageFileName(null);
+    setLenticularSettingsOpen(false);
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        lenticularImageUrl: '',
+      },
+    }));
+  }, [draft, lenticularAvailable, lenticularSettingsOpen]);
 
   useEffect(() => {
     if (!proposalId) {
@@ -538,6 +574,8 @@ export function CardCreatorPage() {
       visuals.decorativePattern.opacity,
       visuals.decorativePattern.offsetX,
       visuals.decorativePattern.offsetY,
+      visuals.lenticularImageUrl.length,
+      visuals.lenticularImageUrl.slice(-48),
       effectKey,
     ].join('::');
   }, [previewCard]);
@@ -556,6 +594,10 @@ export function CardCreatorPage() {
   const mainImageDisplayName =
     imageFileName ?? getAssetDisplayName(draft?.urlImage ?? '', 'image', 'png');
   const mainImagePreviewUrl = draft?.urlImage || null;
+  const lenticularImageDisplayName =
+    lenticularImageFileName ??
+    getAssetDisplayName(draft?.visuals.lenticularImageUrl ?? '', 'lenticular-image', 'png');
+  const lenticularImagePreviewUrl = draft?.visuals.lenticularImageUrl || null;
   const decorativePatternDisplayName =
     decorativePatternFileName ??
     getAssetDisplayName(draft?.visuals.decorativePattern.svgUrl ?? '', 'pattern', 'svg');
@@ -612,11 +654,17 @@ export function CardCreatorPage() {
   async function materializeDraftAssets(currentDraft: ProposalEditorPayload) {
     const uploadedLayers = [...currentDraft.effectLayers];
     let imageUrl = currentDraft.urlImage;
+    let lenticularImageUrl = currentDraft.visuals.lenticularImageUrl;
     let decorativePatternSvgUrl = currentDraft.visuals.decorativePattern.svgUrl;
 
     if (isDataUrl(imageUrl)) {
       const uploaded = await uploadCardArt(imageUrl);
       imageUrl = uploaded.url;
+    }
+
+    if (isDataUrl(lenticularImageUrl)) {
+      const uploaded = await uploadCardArt(lenticularImageUrl);
+      lenticularImageUrl = uploaded.url;
     }
 
     if (isDataUrl(decorativePatternSvgUrl)) {
@@ -646,6 +694,7 @@ export function CardCreatorPage() {
           ...currentDraft.visuals.decorativePattern,
           svgUrl: decorativePatternSvgUrl,
         },
+        lenticularImageUrl: lenticularAvailable ? lenticularImageUrl : '',
       },
       effectLayers: uploadedLayers,
     };
@@ -739,6 +788,62 @@ export function CardCreatorPage() {
     } catch (error) {
       if (requestId === imageUploadRequestIdRef.current) {
         showCreatorRequestError(error, 'Не удалось загрузить изображение.', 'Ошибка загрузки');
+      }
+    }
+  }
+
+  async function handleLenticularImageChange(file: File | null) {
+    if (!file || !draft || !lenticularAvailable || !lenticularSettingsOpen) {
+      return;
+    }
+
+    if (!validateUploadFileSize(file, 'Файл лентикулярного изображения')) {
+      return;
+    }
+
+    const requestId = lenticularImageUploadRequestIdRef.current + 1;
+    lenticularImageUploadRequestIdRef.current = requestId;
+    setLenticularImageFileName(file.name);
+
+    try {
+      const localDataUrl = await fileToDataUrl(file);
+
+      if (requestId !== lenticularImageUploadRequestIdRef.current) {
+        return;
+      }
+
+      updateDraft((current) => ({
+        ...current,
+        visuals: {
+          ...current.visuals,
+          lenticularImageUrl: localDataUrl,
+        },
+      }));
+      const uploaded = await uploadCardArt(localDataUrl);
+
+      if (requestId !== lenticularImageUploadRequestIdRef.current) {
+        return;
+      }
+
+      updateDraft((current) => ({
+        ...current,
+        visuals: {
+          ...current.visuals,
+          lenticularImageUrl: uploaded.url,
+        },
+      }));
+      notify({
+        kind: 'success',
+        title: 'Лентикулярное изображение загружено',
+        message: 'Дополнительное изображение применено к карточке.',
+      });
+    } catch (error) {
+      if (requestId === lenticularImageUploadRequestIdRef.current) {
+        showCreatorRequestError(
+          error,
+          'Не удалось загрузить лентикулярное изображение.',
+          'Ошибка загрузки',
+        );
       }
     }
   }
@@ -1136,6 +1241,18 @@ export function CardCreatorPage() {
     }));
   }
 
+  function clearLenticularImage() {
+    lenticularImageUploadRequestIdRef.current += 1;
+    setLenticularImageFileName(null);
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        lenticularImageUrl: '',
+      },
+    }));
+  }
+
   function clearDecorativePattern() {
     decorativePatternUploadRequestIdRef.current += 1;
     setDecorativePatternFileName(null);
@@ -1165,6 +1282,24 @@ export function CardCreatorPage() {
       visuals: {
         ...current.visuals,
         decorativePattern: getDefaultDecorativePattern(),
+      },
+    }));
+  }
+
+  function handleLenticularSettingsToggle(checked: boolean) {
+    if (checked) {
+      setLenticularSettingsOpen(true);
+      return;
+    }
+
+    lenticularImageUploadRequestIdRef.current += 1;
+    setLenticularImageFileName(null);
+    setLenticularSettingsOpen(false);
+    updateDraft((current) => ({
+      ...current,
+      visuals: {
+        ...current.visuals,
+        lenticularImageUrl: '',
       },
     }));
   }
@@ -1392,6 +1527,37 @@ export function CardCreatorPage() {
                 previewUrl={mainImagePreviewUrl}
               />
             </div>
+
+            {lenticularAvailable ? (
+              <div className="creator-rarity-card">
+                <Switch
+                  checked={lenticularSettingsOpen}
+                  disabled={isLocked}
+                  label="Лентикулярное изображение"
+                  onCheckedChange={handleLenticularSettingsToggle}
+                />
+
+                <div
+                  aria-hidden={!lenticularSettingsOpen}
+                  className={`creator-collapsible ${lenticularSettingsOpen ? 'creator-collapsible--open' : ''}`}
+                >
+                  <div className="creator-collapsible__inner">
+                    <div className="creator-field creator-field--upload">
+                      <FileUpload
+                        accept="image/png,image/jpeg,image/webp"
+                        addLabel="Добавить изображение"
+                        changeLabel="Изменить изображение"
+                        disabled={isLocked}
+                        fileName={lenticularImageDisplayName}
+                        onClear={clearLenticularImage}
+                        onFileSelect={(file) => void handleLenticularImageChange(file)}
+                        previewUrl={lenticularImagePreviewUrl}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className={`creator-fill-group${gradientAvailable ? ' creator-rarity-card' : ''}`}>
               <div className="creator-field creator-field--picker">

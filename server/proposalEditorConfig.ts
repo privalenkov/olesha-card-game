@@ -7,6 +7,7 @@ import type {
 export interface ProposalEditorRarityConfig {
   decorativePatternGrantWeights: Array<[boolean, number]>;
   gradientFillGrantWeights: Array<[boolean, number]>;
+  lenticularImageGrantWeights: Array<[boolean, number]>;
   // Пары вида [количество эффектов, вес]. Вес не обязан быть равен 100:
   // сервер выбирает вариант пропорционально весу.
   // Пример: [[1, 54], [2, 46]] ~= 54% на 1 эффект и 46% на 2 эффекта.
@@ -29,6 +30,8 @@ export interface ProposalEditorRarityConfig {
  * - `gradientFillGrantWeights`
  *   Шанс получить возможность использовать градиенты в цветовых настройках карточки.
  *   Этот grant общий сразу для всех color-fill полей предложения, а не по одному на каждое поле.
+ * - `lenticularImageGrantWeights`
+ *   Шанс получить настройку "Лентикулярное изображение" и загрузку второго изображения.
  * - `effectGrantCountWeights`
  *   Сколько спецэффектов сервер может выдать предложению этой редкости.
  * - `effectPool`
@@ -54,6 +57,7 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
   common: {
     decorativePatternGrantWeights: [[false, 1]],
     gradientFillGrantWeights: [[false, 1]],
+    lenticularImageGrantWeights: [[false, 1]],
     effectGrantCountWeights: [[0, 1]],
     effectPool: [],
     cardTypeGrantCountWeights: [[1, 1]],
@@ -67,6 +71,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     gradientFillGrantWeights: [
       [false, 94],
       [true, 6],
+    ],
+    lenticularImageGrantWeights: [
+      [false, 92],
+      [true, 8],
     ],
     // Чаще всего эффектов нет: uncommon не должен часто перегружаться спецэффектами.
     effectGrantCountWeights: [
@@ -98,6 +106,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     gradientFillGrantWeights: [
       [false, 68],
       [true, 32],
+    ],
+    lenticularImageGrantWeights: [
+      [false, 76],
+      [true, 24],
     ],
     // Rare уже обычно получает хотя бы 1 эффект, но без трехмерной/волновой ламинации.
     effectGrantCountWeights: [
@@ -134,6 +146,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 34],
       [true, 66],
     ],
+    lenticularImageGrantWeights: [
+      [false, 46],
+      [true, 54],
+    ],
     // Epic чаще собирается вокруг хороших эффектов, но не раздает veryrare-only эффекты.
     effectGrantCountWeights: [
       [1, 20],
@@ -167,6 +183,10 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
     gradientFillGrantWeights: [
       [false, 16],
       [true, 84],
+    ],
+    lenticularImageGrantWeights: [
+      [false, 18],
+      [true, 82],
     ],
     // Very rare может собрать несколько сильных эффектов сразу.
     effectGrantCountWeights: [
@@ -202,6 +222,7 @@ export function getProposalEditorCapabilityGrantConfig(rarity: Rarity) {
   return {
     decorativePatternGrantWeights: proposalEditorRarityConfig[rarity].decorativePatternGrantWeights,
     gradientFillGrantWeights: proposalEditorRarityConfig[rarity].gradientFillGrantWeights,
+    lenticularImageGrantWeights: proposalEditorRarityConfig[rarity].lenticularImageGrantWeights,
   };
 }
 
