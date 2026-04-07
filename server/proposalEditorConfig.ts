@@ -68,13 +68,18 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 94],
       [true, 6],
     ],
-    // Всегда выдается ровно 1 эффект.
-    effectGrantCountWeights: [[1, 1]],
-    // Сумма весов тут 100, поэтому можно читать почти как проценты.
+    // Чаще всего эффектов нет: uncommon не должен часто перегружаться спецэффектами.
+    effectGrantCountWeights: [
+      [0, 70],
+      [1, 30],
+    ],
+    // Только нормальные/хорошие ранние эффекты, без премиальных rare+ эффектов.
     effectPool: [
-      ['spot_gloss', 48],
-      ['texture_sugar', 34],
-      ['spot_holo', 18],
+      ['spot_holo', 34],
+      ['spot_gloss', 34],
+      ['emboss', 12],
+      ['sparkle_foil', 10],
+      ['prismatic_edge', 10],
     ],
     cardTypeGrantCountWeights: [
       [1, 82],
@@ -94,19 +99,20 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 68],
       [true, 32],
     ],
-    // 1 эффект ~= 54%, 2 эффекта ~= 46%.
+    // Rare уже обычно получает хотя бы 1 эффект, но без трехмерной/волновой ламинации.
     effectGrantCountWeights: [
-      [1, 54],
-      [2, 46],
+      [0, 14],
+      [1, 58],
+      [2, 28],
     ],
-    // Относительные шансы выбора эффекта внутри редкости rare.
     effectPool: [
-      ['spot_gloss', 28],
-      ['texture_sugar', 18],
       ['spot_holo', 30],
-      ['sparkle_foil', 16],
-      ['emboss', 8],
-      ['dimensional_lamination', 6],
+      ['spot_gloss', 30],
+      ['emboss', 18],
+      ['sparkle_foil', 18],
+      ['prismatic_edge', 18],
+      ['holo_cracked', 8],
+      ['texture_sugar', 8],
     ],
     cardTypeGrantCountWeights: [
       [1, 16],
@@ -128,20 +134,19 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 34],
       [true, 66],
     ],
-    // 2 эффекта ~= 58%, 3 эффекта ~= 42%.
+    // Epic чаще собирается вокруг хороших эффектов, но не раздает veryrare-only эффекты.
     effectGrantCountWeights: [
-      [2, 58],
-      [3, 42],
+      [1, 20],
+      [2, 56],
+      [3, 24],
     ],
-    // Относительные шансы выбора эффекта внутри редкости epic.
     effectPool: [
-      ['spot_gloss', 16],
-      ['texture_sugar', 14],
-      ['spot_holo', 24],
-      ['sparkle_foil', 20],
-      ['emboss', 16],
-      ['prismatic_edge', 10],
-      ['dimensional_lamination', 12],
+      ['emboss', 34],
+      ['sparkle_foil', 34],
+      ['prismatic_edge', 34],
+      ['texture_sugar', 26],
+      ['spot_holo', 18],
+      ['spot_gloss', 18],
     ],
     cardTypeGrantCountWeights: [
       [1, 34],
@@ -163,20 +168,22 @@ export const proposalEditorRarityConfig: Record<Rarity, ProposalEditorRarityConf
       [false, 16],
       [true, 84],
     ],
-    // 3 эффекта ~= 62%, 4 эффекта ~= 38%.
+    // Very rare может собрать несколько сильных эффектов сразу.
     effectGrantCountWeights: [
-      [3, 62],
-      [4, 38],
+      [2, 18],
+      [3, 52],
+      [4, 30],
     ],
-    // Относительные шансы выбора эффекта внутри редкости veryrare.
     effectPool: [
-      ['spot_gloss', 10],
-      ['texture_sugar', 10],
-      ['spot_holo', 18],
-      ['sparkle_foil', 18],
-      ['emboss', 16],
+      ['holo_cracked', 34],
+      ['texture_sugar', 34],
+      ['dimensional_lamination', 34],
+      ['holo_wave', 34],
+      ['emboss', 28],
+      ['sparkle_foil', 28],
       ['prismatic_edge', 28],
-      ['dimensional_lamination', 18],
+      ['spot_holo', 18],
+      ['spot_gloss', 18],
     ],
     cardTypeGrantCountWeights: [
       [1, 22],
