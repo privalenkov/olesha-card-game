@@ -21,6 +21,7 @@ import {
 } from '../game/cardDimensions';
 import { finishMeta, rarityMeta } from '../game/config';
 import {
+  clampWaveHoloSubdivision,
   type CardEffectLayer,
   getDefaultCardVisuals,
   type CardLayoutType,
@@ -1871,41 +1872,69 @@ function drawWaveHoloEffect(
   height: number,
   accent: string,
   hue: string,
+  subdivision = 1,
 ) {
-  // Large organic blobs with different rainbow colors — wave/bubble holography look
+  const breakup = clampWaveHoloSubdivision(subdivision);
+  const seeded = (value: number) => {
+    const x = Math.sin(value * 127.13 + 41.37) * 43758.5453123;
+    return x - Math.floor(x);
+  };
+
   const baseGradient = ctx.createLinearGradient(0, 0, width, height);
-  baseGradient.addColorStop(0, '#7ee8ff88');
-  baseGradient.addColorStop(0.25, `${accent}88`);
-  baseGradient.addColorStop(0.5, '#ffe56688');
-  baseGradient.addColorStop(0.75, `${hue}88`);
-  baseGradient.addColorStop(1, '#b38fff88');
+  baseGradient.addColorStop(0, '#7ee8ff54');
+  baseGradient.addColorStop(0.25, `${accent}4a`);
+  baseGradient.addColorStop(0.5, '#ffe56652');
+  baseGradient.addColorStop(0.75, `${hue}4a`);
+  baseGradient.addColorStop(1, '#b38fff54');
   ctx.fillStyle = baseGradient;
   ctx.fillRect(0, 0, width, height);
 
   ctx.globalCompositeOperation = 'overlay';
   const blobColors = [
-    'rgba(127,232,255,0.72)',
-    'rgba(255,130,179,0.68)',
-    'rgba(255,229,100,0.7)',
-    'rgba(166,255,142,0.66)',
-    'rgba(179,143,255,0.7)',
-    'rgba(255,160,90,0.66)',
+    'rgba(127,232,255,0.46)',
+    'rgba(255,130,179,0.42)',
+    'rgba(255,229,100,0.44)',
+    'rgba(166,255,142,0.4)',
+    'rgba(179,143,255,0.44)',
+    'rgba(255,160,90,0.4)',
   ];
-  const blobData = [
-    [0.12, 0.18, 0.38], [0.72, 0.08, 0.42], [0.38, 0.55, 0.46],
-    [0.82, 0.62, 0.36], [0.22, 0.82, 0.44], [0.58, 0.32, 0.4],
-    [0.46, 0.72, 0.34], [0.88, 0.38, 0.38],
-  ];
-  blobData.forEach(([bx, by, br], i) => {
-    const grad = ctx.createRadialGradient(
-      bx * width, by * height, 0,
-      bx * width, by * height, br * width,
-    );
-    grad.addColorStop(0, blobColors[i % blobColors.length]);
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
-  });
+  const fragmentCount = 8 + (breakup - 1) * 9;
+  const baseRadius = width * (0.25 / Math.pow(breakup, 0.72));
+
+  for (let index = 0; index < fragmentCount; index += 1) {
+    const seed = index + 1;
+    const centerX = seeded(seed * 0.97) * width;
+    const centerY = seeded(seed * 1.73) * height;
+    const lobeCount = 2 + Math.floor(seeded(seed * 2.91) * 3);
+    const baseAngle = seeded(seed * 3.19) * Math.PI * 2;
+
+    for (let lobeIndex = 0; lobeIndex < lobeCount; lobeIndex += 1) {
+      const lobeSeed = seed * 17 + lobeIndex * 13;
+      const radiusVariance = 0.62 + seeded(lobeSeed * 2.11) * 0.82;
+      const radius = baseRadius * radiusVariance;
+      const stretchX = 0.7 + seeded(lobeSeed * 2.47) * 1.35;
+      const stretchY = 0.58 + seeded(lobeSeed * 2.93) * 1.18;
+      const offsetAngle =
+        baseAngle +
+        (lobeIndex / Math.max(1, lobeCount)) * Math.PI * (1.2 + seeded(lobeSeed * 3.31) * 0.7);
+      const offsetRadius = radius * (0.18 + seeded(lobeSeed * 1.37) * 0.45);
+      const x = centerX + Math.cos(offsetAngle) * offsetRadius;
+      const y = centerY + Math.sin(offsetAngle) * offsetRadius * 0.82;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(baseAngle + seeded(lobeSeed * 1.53) * 1.6 - 0.8);
+      ctx.scale(stretchX, stretchY);
+
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      grad.addColorStop(0, blobColors[(index + lobeIndex) % blobColors.length]);
+      grad.addColorStop(0.52, 'rgba(255,255,255,0.05)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(-radius * 1.8, -radius * 1.8, radius * 3.6, radius * 3.6);
+      ctx.restore();
+    }
+  }
   ctx.globalCompositeOperation = 'source-over';
 }
 
@@ -2190,7 +2219,7 @@ function drawTreatmentLayer(
         drawPrismaticEdgeEffect(effectContext, width, height, accent, hue);
         break;
       case 'holo_wave':
-        drawWaveHoloEffect(effectContext, width, height, accent, hue);
+        drawWaveHoloEffect(effectContext, width, height, accent, hue, layer.subdivision);
         break;
       case 'holo_cracked':
         drawCrackedHoloEffect(effectContext, width, height, accent, hue);

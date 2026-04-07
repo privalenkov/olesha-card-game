@@ -43,6 +43,7 @@ import {
   CARD_TREATMENT_EFFECT_OPTIONS,
   CARD_TREATMENT_EFFECT_DESCRIPTIONS,
   CARD_TREATMENT_EFFECT_LABELS,
+  clampWaveHoloSubdivision,
   type CardLayoutType,
   getDefaultCardVisuals,
   getDefaultDecorativePattern,
@@ -518,7 +519,7 @@ export function CardCreatorPage() {
     const effectKey = (previewCard.effectLayers ?? [])
       .map(
         (layer) =>
-          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.relief}:${layer.offsetX}:${layer.offsetY}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
+          `${layer.id}:${layer.type}:${layer.opacity}:${layer.shimmer}:${layer.relief}:${layer.offsetX}:${layer.offsetY}:${layer.subdivision}:${layer.maskUrl.length}:${layer.maskUrl.slice(-48)}`,
       )
       .join('|');
 
@@ -1023,6 +1024,24 @@ export function CardCreatorPage() {
             step={0.002}
             value={layer.offsetY}
             valueLabel={`${layer.offsetY > 0 ? '+' : ''}${(layer.offsetY * 100).toFixed(1)}%`}
+          />
+        ) : null}
+
+        {layer.type === 'holo_wave' ? (
+          <RangeInput
+            disabled={isLocked}
+            label="Разбиение"
+            max={5}
+            min={1}
+            onValueChange={(value) =>
+              updateEffectLayer(layer.id, (currentLayer) => ({
+                ...currentLayer,
+                subdivision: clampWaveHoloSubdivision(value),
+              }))
+            }
+            step={1}
+            value={layer.subdivision}
+            valueLabel={`${Math.round(layer.subdivision)}`}
           />
         ) : null}
 

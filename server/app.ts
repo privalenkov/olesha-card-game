@@ -15,6 +15,7 @@ import {
   normalizeCardLayoutType,
   normalizeCardLayoutTypes,
   clampEffectShimmer,
+  clampWaveHoloSubdivision,
   getDefaultCardVisuals,
   normalizeCardLayerFill,
   normalizeCardLayerFillForCapability,
@@ -552,6 +553,10 @@ function normalizeProposalPayload(
       typeof layer.offsetX === 'number' && Number.isFinite(layer.offsetX) ? layer.offsetX : 0;
     const offsetY =
       typeof layer.offsetY === 'number' && Number.isFinite(layer.offsetY) ? layer.offsetY : 0;
+    const subdivision =
+      typeof layer.subdivision === 'number' && Number.isFinite(layer.subdivision)
+        ? layer.subdivision
+        : 1;
 
     if (
       id.length < 6 ||
@@ -564,7 +569,8 @@ function normalizeProposalPayload(
       !Number.isFinite(shimmer) ||
       !Number.isFinite(relief) ||
       !Number.isFinite(offsetX) ||
-      !Number.isFinite(offsetY)
+      !Number.isFinite(offsetY) ||
+      !Number.isFinite(subdivision)
     ) {
       return null;
     }
@@ -580,6 +586,7 @@ function normalizeProposalPayload(
       relief: Math.max(-1, Math.min(relief, 1)),
       offsetX: Math.max(-0.2, Math.min(offsetX, 0.2)),
       offsetY: Math.max(-0.2, Math.min(offsetY, 0.2)),
+      subdivision: clampWaveHoloSubdivision(subdivision),
     });
   }
 

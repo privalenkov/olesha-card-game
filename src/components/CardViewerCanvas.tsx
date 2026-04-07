@@ -36,6 +36,7 @@ import {
   CARD_WORLD_HEIGHT,
 } from '../game/cardDimensions';
 import {
+  clampWaveHoloSubdivision,
   normalizeCardTreatmentEffect,
   type CardTreatmentEffect,
   type OwnedCard,
@@ -320,6 +321,12 @@ const finishTreatmentFragmentShader = `
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
   }
 
+  mat2 rotate2d(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
+  }
+
   float noise(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
@@ -539,10 +546,11 @@ const finishTreatmentFragmentShader = `
       diamondDustSpec(dustFine, normal, viewDir, accentLightDir, 1.22, 96.0, 220.0) * 0.56;
 
     float sugarSheen = sugarMask * (
-      keyWide * 0.48 +
-      fillWide * 0.32 +
-      accentWide * 0.2 +
-      fresnel * 0.14
+      0.04 +
+      keyWide * 0.38 +
+      fillWide * 0.24 +
+      accentWide * 0.16 +
+      fresnel * 0.1
     ) * (0.18 + grainLarge * 0.12);
     float sugar =
       sugarMask * (sugarPrimary + sugarSecondary + sugarFine) +
@@ -564,8 +572,9 @@ const finishTreatmentFragmentShader = `
       (keyWide * 0.52 + accentTight * 0.64 + fresnel * 0.18) *
       (0.35 + sparkleFacetField * 0.4);
     float sparkleAmbient = sparkleMask * sparkleFacetField * (
-      accentWide * 0.16 +
-      fresnel * 0.12
+      0.06 +
+      accentWide * 0.12 +
+      fresnel * 0.08
     );
     float sparkleFacets =
       sparkleFacetSpec(sparkleFacetPrimary, normal, viewDir, keyLightDir, 36.0) * 1.56 +
@@ -576,7 +585,7 @@ const finishTreatmentFragmentShader = `
       sparkleMirror +
       sparkleAmbient
     );
-    float prism = prismMask * (accentTight * 0.82 + keyWide * 0.56 + fresnel * 1.08);
+    float prism = prismMask * (0.12 + accentTight * 0.58 + keyWide * 0.36 + fresnel * 0.72);
 
     float phase =
       noise(vUv * vec2(24.0, 34.0)) * 0.48 +
@@ -587,16 +596,16 @@ const finishTreatmentFragmentShader = `
     vec3 sugarColor = mix(vec3(1.0), uAccent, 0.16);
     vec3 sparkleColor = mix(vec3(0.98, 0.985, 1.0), mix(uAccent, uHue, 0.24), 0.12);
     vec3 prismColor = mix(uHue, spectrum(phase), 0.82);
-    vec3 sugarVeil = sugarColor * sugarMask * (0.028 + keyWide * 0.07 + fresnel * 0.04) * uSugarIntensity;
+    vec3 sugarVeil = sugarColor * sugarMask * (0.055 + keyWide * 0.045 + fresnel * 0.028) * uSugarIntensity;
 
     vec3 color =
       sugarVeil +
       sugarColor * sugar * 0.98 +
       sparkleColor * sparkle * 1.54 +
       prismColor * prism * 1.32;
-    float sugarAlpha = clamp(sugarMask * 0.04 + sugar * 0.44, 0.0, 0.72);
-    float sparkleAlpha = clamp(sparkle * 0.78, 0.0, 0.78);
-    float prismAlpha = clamp(prism * 0.7, 0.0, 0.82);
+    float sugarAlpha = clamp(sugarMask * 0.075 + sugar * 0.36, 0.0, 0.68);
+    float sparkleAlpha = clamp(sparkleMask * 0.055 + sparkle * 0.58, 0.0, 0.7);
+    float prismAlpha = clamp(prismMask * 0.055 + prism * 0.56, 0.0, 0.74);
     float alpha =
       1.0 - (1.0 - sugarAlpha) * (1.0 - sparkleAlpha) * (1.0 - prismAlpha);
     alpha = min(alpha, 0.94);
@@ -634,8 +643,9 @@ const glossFragmentShader = `
     float mask = texture2D(uGlossMap, vUv).r * sampleLiftMask(vUv);
     float glossiness = clamp(uGlossiness, 0.0, 1.0);
     float hover = clamp(uHover, 0.0, 1.0);
+    float activeHover = max(hover, 0.24);
 
-    if (mask < 0.0002 || glossiness < 0.001 || hover < 0.001) {
+    if (mask < 0.0002 || glossiness < 0.001) {
       discard;
     }
 
@@ -690,7 +700,8 @@ const glossFragmentShader = `
     float highlight =
       (lightHighlight * 0.34 + movingHighlight * (0.62 + pointerMagnitude * 0.42)) *
       glossiness *
-      hover;
+      activeHover;
+    highlight += glossiness * (0.028 + fresnel * 0.045 + keyWide * 0.05);
 
     float alpha = clamp(mask * highlight * mix(0.56, 0.94, glossiness), 0.0, 0.92);
     vec3 glareTint = mix(uGlareColor, vec3(1.0), 0.12 + glossiness * 0.08);
@@ -791,6 +802,7 @@ const holoFragmentShader = `
       mix(32.0, 12.0, uGlint)
     );
     float glint = keyGlint + fillGlint * 0.55 + accentGlint * 0.85;
+    float compressedGlint = glint / (1.0 + glint * 1.25);
     float sweep = pow(
       max(1.0 - abs(uv.x - (0.5 + tiltX * 0.14 + sin(uTime * 0.6) * 0.06)), 0.0),
       10.0
@@ -798,13 +810,14 @@ const holoFragmentShader = `
 
     float zoneIntensity = smoothstep(0.02, 0.95, max(zone, treatment * 0.92));
     float holo = zoneIntensity * (0.16 + mask * 0.8 + treatment * 0.58 + prism * 0.36);
-    holo *= (0.18 + fresnel * (1.1 + prism * 0.42) + glint * (0.96 + treatment * 0.42) + sweep * 0.22);
+    holo *= (0.3 + fresnel * (0.82 + prism * 0.28) + compressedGlint * (0.62 + treatment * 0.28) + sweep * 0.16);
     holo *= 0.62 + micro * 0.28;
+    holo *= 0.76 + uStrength * 0.3;
 
     vec3 tint = mix(uHue, uAccent, 0.5 + 0.5 * angleWave);
     vec3 color = mix(tint, rainbow, 0.86 + prism * 0.08) * holo;
-    color += spectrum(rainbowPhase + 0.18) * prism * (fresnel * 0.5 + glint * 0.22);
-    float alpha = clamp(holo * (0.38 + uStrength * 0.44 + treatment * 0.12), 0.0, 0.92);
+    color += spectrum(rainbowPhase + 0.18) * prism * (0.08 + fresnel * 0.34 + compressedGlint * 0.14);
+    float alpha = clamp(holo * (0.44 + uStrength * 0.34 + treatment * 0.1), 0.035 * zoneIntensity, 0.84);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -824,6 +837,7 @@ const waveHoloFragmentShader = `
   uniform float uFresnelPower;
   uniform vec2 uPointer;
   uniform float uSeed;
+  uniform float uSubdivision;
 
   varying vec2 vUv;
   varying vec3 vWorldNormal;
@@ -836,6 +850,12 @@ const waveHoloFragmentShader = `
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  mat2 rotate2d(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
   }
 
   vec3 spectrum(float t) {
@@ -857,12 +877,23 @@ const waveHoloFragmentShader = `
     float mask = texture2D(uMaskMap, uv).r * sampleLiftMask(uv);
     if (mask < 0.01) { gl_FragColor = vec4(0.0); return; }
 
-    // Large organic Voronoi cells — each cell has its own unique rainbow phase
-    vec2 cellUv = uv * 3.6 + vec2(uSeed * 0.46, uSeed * 0.33);
+    float breakup = max(uSubdivision, 1.0);
+    float warpStrength = 0.085 / pow(breakup, 0.58);
+    vec2 waveWarp = vec2(
+      sin(uv.y * (9.0 + breakup * 2.2) + uTime * 0.11 + uSeed * 4.3),
+      sin(uv.x * (8.0 + breakup * 1.9) - uTime * 0.09 + uSeed * 3.7)
+    );
+    waveWarp += 0.55 * vec2(
+      sin((uv.x + uv.y) * (6.4 + breakup * 1.4) + uSeed * 7.1),
+      sin((uv.x - uv.y) * (7.2 + breakup * 1.3) - uSeed * 6.3)
+    );
+    vec2 cellUv =
+      (uv + waveWarp * warpStrength) * (3.35 * breakup) + vec2(uSeed * 0.46, uSeed * 0.33);
     vec2 iCell = floor(cellUv);
     vec2 fCell = fract(cellUv);
 
     float minDist1 = 10.0;
+    float minDist2 = 10.0;
     float nearestSeed = 0.0;
 
     for (int y = -2; y <= 2; y++) {
@@ -870,12 +901,33 @@ const waveHoloFragmentShader = `
         vec2 neighbor = vec2(float(x), float(y));
         vec2 cellId = iCell + neighbor;
         float s = hash(cellId + vec2(uSeed * 3.17, uSeed * 1.73));
-        // Slowly drifting organic cell centers
-        vec2 center = neighbor + 0.5 + 0.38 * sin(vec2(s * 6.28318, s * 4.71 + 1.0) + uTime * 0.09);
-        float dist = length(center - fCell);
+        float drift = 0.38 / sqrt(breakup);
+        vec2 center = neighbor + 0.5 + drift * sin(vec2(s * 6.28318, s * 4.71 + 1.0) + uTime * 0.09);
+        float angle = s * 6.28318;
+        vec2 local = rotate2d(angle) * (center - fCell);
+        vec2 stretch = vec2(
+          0.72 + hash(cellId + vec2(4.1, 1.3)) * 1.35,
+          0.68 + hash(cellId + vec2(2.2, 7.9)) * 1.18
+        );
+        local.x /= stretch.x;
+        local.y /= stretch.y;
+        float shapeMix = 0.28 + hash(cellId + vec2(8.4, 2.7)) * 0.5;
+        float ripple =
+          sin(
+            (local.x * 7.0 + local.y * 5.6) *
+              (0.85 + hash(cellId + vec2(6.8, 9.1)) * 0.65) +
+              uTime * 0.04 +
+              angle
+          ) * (0.06 / sqrt(breakup));
+        float euclid = length(local);
+        float diamond = (abs(local.x) + abs(local.y)) * 0.72;
+        float dist = mix(euclid, diamond, shapeMix) + ripple;
         if (dist < minDist1) {
+          minDist2 = minDist1;
           minDist1 = dist;
           nearestSeed = s;
+        } else if (dist < minDist2) {
+          minDist2 = dist;
         }
       }
     }
@@ -893,13 +945,18 @@ const waveHoloFragmentShader = `
     float accentGlint = specularFromLight(uAccentLightPos, normal, viewDir, 18.0);
     float glint = keyGlint + fillGlint * 0.5 + accentGlint * 0.72;
 
-    // Neutral at rest — rainbow emerges with tilt via fresnel + pointer
     float tiltMagnitude = length(uPointer);
-    float reflectStrength = clamp(fresnel * 2.4 + tiltMagnitude * 1.0, 0.0, 1.0);
+    float reflectStrength = clamp(0.34 + fresnel * 1.0 + tiltMagnitude * 0.36, 0.0, 0.82);
+    float compressedGlint = glint / (1.0 + glint * 2.35);
+    float cellContrast = smoothstep(0.02, 0.28, minDist2 - minDist1);
 
-    float intensity = mask * (reflectStrength * uStrength * 1.4 + glint * 1.2);
-    vec3 color = rainbow * intensity;
-    float alpha = clamp(intensity * (0.44 + uStrength * 0.46), 0.0, 0.96);
+    float intensity =
+      mask *
+      (uStrength * (0.34 + reflectStrength * 0.42) + compressedGlint * 0.22) *
+      (0.78 + cellContrast * 0.1);
+    vec3 color = rainbow * intensity * (0.84 + cellContrast * 0.08);
+    float alpha =
+      clamp(intensity * (0.5 + uStrength * 0.22) * (0.8 + cellContrast * 0.08), 0.1 * mask, 0.6);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -1134,7 +1191,7 @@ const crackedHoloFragmentShader = `
       vec3(0.88, 0.9, 0.94),
       clamp(0.08 + fresnel * 0.22 + glint * 0.06 + microSpark * 0.06, 0.0, 1.0)
     );
-    vec3 color = silver * mask * shardPresence * (0.02 + fresnel * 0.06 + glint * 0.02);
+    vec3 color = silver * mask * shardPresence * (0.065 + fresnel * 0.045 + glint * 0.014);
 
     vec2 dominantRand = hash2(vec2(dominant.y * 5.13 + 1.7, dominant.y * 9.41 + 3.2));
     float facetTilt = mix(0.12, 0.78, dominant.z);
@@ -1183,6 +1240,7 @@ const crackedHoloFragmentShader = `
     float shardReflect =
       shardField *
       (
+        0.1 +
         facetFresnel * mix(0.42, 1.92, dominant.z) +
         facetGlint * mix(0.48, 1.48, dominant.z) +
         facetSceneBrightness * mix(0.24, 0.78, dominant.z) +
@@ -1192,14 +1250,14 @@ const crackedHoloFragmentShader = `
 
     color += facetTint * facetLighting * shardReflect;
     color += vec3(1.0) * shardEdge * (0.02 + facetGlint * 0.18 + facetSceneBrightness * 0.08) * (0.45 + dominant.z * 0.8);
-    color += rainbow * shardPresence * 0.03 * (microSpark * 0.4 + fresnel * 0.18);
+    color += rainbow * shardPresence * 0.035 * (0.4 + microSpark * 0.34 + fresnel * 0.12);
 
     float alpha = clamp(
-      mask * shardPresence * (0.03 + fresnel * 0.06) +
-      shardReflect * 0.52 +
+      mask * shardPresence * (0.08 + fresnel * 0.04) +
+      shardReflect * 0.44 +
       shardEdge * 0.1,
       0.0,
-      0.96
+      0.88
     );
 
     gl_FragColor = vec4(color, alpha);
@@ -1447,6 +1505,14 @@ function CardRig({
   );
   const glossiness = MathUtils.clamp(getLayerValue(card, 'spot_gloss', 'shimmer'), 0, 1);
   const sugarIntensity = getLayerValue(card, 'texture_sugar', 'shimmer');
+  const waveOpacity = MathUtils.clamp(getLayerValue(card, 'holo_wave', 'opacity'), 0.18, 1);
+  const holoStrength = tuning.strength + finish.shimmerBoost * 0.08;
+  const waveHoloLayer = useMemo(
+    () => getEffectLayer(card, 'holo_wave'),
+    [card],
+  );
+  const waveSubdivision = clampWaveHoloSubdivision(waveHoloLayer?.subdivision ?? 1);
+  const waveStrength = holoStrength * (0.42 + waveOpacity * 0.58);
   const dimensionalLayer = useMemo(
     () => getEffectLayer(card, 'dimensional_lamination'),
     [card],
@@ -1640,6 +1706,8 @@ function CardRig({
         material.uniforms.uLiftMaskMap.value = textures.dimensionalMask;
         material.uniforms.uAccent.value.set(meta.accent);
         material.uniforms.uHue.value.set(meta.hue);
+        material.uniforms.uStrength.value = waveStrength;
+        material.uniforms.uSubdivision.value = waveSubdivision;
         material.uniformsNeedUpdate = true;
         material.needsUpdate = true;
       });
@@ -1676,6 +1744,8 @@ function CardRig({
     meta.hue,
     sugarIntensity,
     textures,
+    waveStrength,
+    waveSubdivision,
   ]);
 
   useEffect(() => () => faceGeometry.dispose(), [faceGeometry]);
@@ -1896,7 +1966,7 @@ function CardRig({
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
         material.uniforms.uPointer.value.copy(pointer);
-        material.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
+        material.uniforms.uStrength.value = holoStrength;
         material.uniforms.uDensity.value = tuning.density;
         material.uniforms.uGlint.value = tuning.glint + finish.shimmerBoost * 0.12;
         material.uniforms.uFresnelPower.value = tuning.fresnelPower;
@@ -1923,17 +1993,22 @@ function CardRig({
         material.uniforms.uSugarIntensity.value = sugarIntensity;
       });
 
-    [
-      waveHoloShaderRef.current,
-      crackedHoloShaderRef.current,
-      liftedWaveHoloShaderRef.current,
-      liftedCrackedHoloShaderRef.current,
-    ]
+    [waveHoloShaderRef.current, liftedWaveHoloShaderRef.current]
       .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
       .forEach((material) => {
         material.uniforms.uTime.value = state.clock.elapsedTime;
         material.uniforms.uPointer.value.copy(pointer);
-        material.uniforms.uStrength.value = tuning.strength + finish.shimmerBoost * 0.08;
+        material.uniforms.uStrength.value = waveStrength;
+        material.uniforms.uFresnelPower.value = tuning.fresnelPower;
+        material.uniforms.uSubdivision.value = waveSubdivision;
+      });
+
+    [crackedHoloShaderRef.current, liftedCrackedHoloShaderRef.current]
+      .filter((material): material is ShaderMaterial => Boolean(material?.uniforms))
+      .forEach((material) => {
+        material.uniforms.uTime.value = state.clock.elapsedTime;
+        material.uniforms.uPointer.value.copy(pointer);
+        material.uniforms.uStrength.value = holoStrength;
         material.uniforms.uFresnelPower.value = tuning.fresnelPower;
       });
 
@@ -2423,7 +2498,7 @@ function CardRig({
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uStrength: { value: holoStrength },
                         uDensity: { value: tuning.density },
                         uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
                         uFresnelPower: { value: tuning.fresnelPower },
@@ -2453,10 +2528,11 @@ function CardRig({
                         uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                         uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                         uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uStrength: { value: waveStrength },
                         uFresnelPower: { value: tuning.fresnelPower },
                         uPointer: { value: new Vector2(0, 0) },
                         uSeed: { value: (card.holographicSeed % 6.28318) },
+                        uSubdivision: { value: waveSubdivision },
                       }}
                       vertexShader={holoSharedVertex}
                       fragmentShader={waveHoloFragmentShader}
@@ -2490,7 +2566,7 @@ function CardRig({
                         uFillLightColor: { value: crackedLightPalette.fill.clone() },
                         uAccentLightColor: { value: crackedLightPalette.accent.clone() },
                         uRimLightColor: { value: crackedLightPalette.rim.clone() },
-                        uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                        uStrength: { value: holoStrength },
                         uFresnelPower: { value: tuning.fresnelPower },
                         uPointer: { value: new Vector2(0, 0) },
                         uSeed: { value: (card.holographicSeed % 6.28318) },
@@ -2514,18 +2590,18 @@ function CardRig({
                   <primitive attach="geometry" object={faceGeometry} />
                   <meshPhysicalMaterial
                     alphaMap={textures.dimensionalMask}
-                    clearcoat={0.24 + dimensionalLayer.shimmer * 0.28}
+                    clearcoat={0.1}
                     clearcoatNormalMap={textures.surfaceNormalMap}
                     clearcoatNormalScale={surfaceClearcoatScale}
-                    clearcoatRoughness={0.16}
+                    clearcoatRoughness={0.28}
                     depthWrite={false}
                     map={textures.front}
-                    metalness={0.04}
+                    metalness={0.08}
                     normalMap={textures.surfaceNormalMap}
                     normalScale={surfaceNormalScale}
                     opacity={dimensionalLayerOpacity}
-                    reflectivity={0.1}
-                    roughness={0.68 - dimensionalLayer.shimmer * 0.14}
+                    reflectivity={0.07}
+                    roughness={0.84}
                     transparent
                   />
                 </mesh>
@@ -2711,7 +2787,7 @@ function CardRig({
                       uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                       uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                       uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uStrength: { value: holoStrength },
                       uDensity: { value: tuning.density },
                       uGlint: { value: tuning.glint + finish.shimmerBoost * 0.12 },
                       uFresnelPower: { value: tuning.fresnelPower },
@@ -2749,10 +2825,11 @@ function CardRig({
                       uKeyLightPos: { value: VIEWER_LIGHTS.key.clone() },
                       uFillLightPos: { value: VIEWER_LIGHTS.fill.clone() },
                       uAccentLightPos: { value: VIEWER_LIGHTS.accent.clone() },
-                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uStrength: { value: waveStrength },
                       uFresnelPower: { value: tuning.fresnelPower },
                       uPointer: { value: new Vector2(0, 0) },
                       uSeed: { value: (card.holographicSeed % 6.28318) },
+                      uSubdivision: { value: waveSubdivision },
                     }}
                     vertexShader={holoSharedVertex}
                     fragmentShader={waveHoloFragmentShader}
@@ -2794,7 +2871,7 @@ function CardRig({
                       uFillLightColor: { value: crackedLightPalette.fill.clone() },
                       uAccentLightColor: { value: crackedLightPalette.accent.clone() },
                       uRimLightColor: { value: crackedLightPalette.rim.clone() },
-                      uStrength: { value: tuning.strength + finish.shimmerBoost * 0.08 },
+                      uStrength: { value: holoStrength },
                       uFresnelPower: { value: tuning.fresnelPower },
                       uPointer: { value: new Vector2(0, 0) },
                       uSeed: { value: (card.holographicSeed % 6.28318) },

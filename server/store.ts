@@ -40,6 +40,7 @@ import type {
 import { rarityOrder } from '../src/game/types.js';
 import {
   clampEffectShimmer,
+  clampWaveHoloSubdivision,
   getDefaultCardVisuals,
   normalizeCardLayoutType,
   normalizeCardLayoutTypes,
@@ -519,6 +520,7 @@ function normalizeEffectLayers(effectLayers?: CardEffectLayer[] | null): CardEff
         relief: Math.max(-1, Math.min(layer.relief ?? 0, 1)),
         offsetX: Math.max(-0.2, Math.min(layer.offsetX ?? 0, 0.2)),
         offsetY: Math.max(-0.2, Math.min(layer.offsetY ?? 0, 0.2)),
+        subdivision: clampWaveHoloSubdivision(layer.subdivision ?? 1),
       };
     })
     .filter((layer): layer is CardEffectLayer => Boolean(layer && layer.id.length > 0));

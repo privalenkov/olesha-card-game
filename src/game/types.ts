@@ -53,6 +53,7 @@ export interface CardEffectLayer {
   relief: number;
   offsetX: number;
   offsetY: number;
+  subdivision: number;
 }
 
 export const CARD_FRAME_STYLE_OPTIONS: CardFrameStyle[] = [
@@ -318,6 +319,10 @@ export function clampEffectShimmer(type: CardTreatmentEffect, shimmer: number) {
   return Math.max(0.2, Math.min(shimmer, 1.4));
 }
 
+export function clampWaveHoloSubdivision(subdivision: number) {
+  return Math.max(1, Math.min(Math.round(subdivision), 5));
+}
+
 export function getDefaultEffectLayer(
   type: CardTreatmentEffect,
   id = '',
@@ -350,6 +355,7 @@ export function getDefaultEffectLayer(
     relief: 0,
     offsetX: type === 'dimensional_lamination' ? 0.018 : 0,
     offsetY: type === 'dimensional_lamination' ? -0.018 : 0,
+    subdivision: 1,
   };
 }
 
