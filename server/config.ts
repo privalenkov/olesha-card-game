@@ -142,6 +142,7 @@ export const serverConfig = {
   adminUserId: process.env.ADMIN_USER_ID ?? '',
   sessionTtlMs: parseInteger(process.env.SESSION_TTL_DAYS, 30) * 24 * 60 * 60 * 1000,
   dailyPackLimit: parseInteger(process.env.DAILY_PACK_LIMIT, 1),
+  dailyProposalLimit: parseInteger(process.env.DAILY_PROPOSAL_LIMIT, 2),
   uploadOrphanGracePeriodMs:
     parseInteger(process.env.UPLOAD_ORPHAN_GRACE_HOURS, 24) * 60 * 60 * 1000,
   appTimeZone: process.env.APP_TIMEZONE ?? 'Europe/Moscow',

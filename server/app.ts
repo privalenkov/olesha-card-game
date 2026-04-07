@@ -40,6 +40,7 @@ import {
   NicknameTakenError,
   NoApprovedCardsError,
   PackLimitReachedError,
+  ProposalLimitReachedError,
 } from './store.js';
 
 function apiError(
@@ -1470,14 +1471,25 @@ export async function buildApp() {
       return;
     }
 
-    const result = store.startCardProposal(user);
+    try {
+      const result = store.startCardProposal(user);
 
-    setNoStore(reply);
-    reply.send({
-      created: result.created,
-      proposal: result.proposal,
-      rarityBalance: store.getCurrentRarityBalance(),
-    });
+      setNoStore(reply);
+      reply.send({
+        created: result.created,
+        proposal: result.proposal,
+        rarityBalance: store.getCurrentRarityBalance(),
+      });
+    } catch (error) {
+      if (error instanceof ProposalLimitReachedError) {
+        reply.code(409).send(
+          apiError('PROPOSAL_LIMIT_REACHED', undefined, { message: error.message }),
+        );
+        return;
+      }
+
+      throw error;
+    }
   });
 
   app.get('/api/card-proposals/:proposalId', async (request, reply) => {

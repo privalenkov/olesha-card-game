@@ -154,6 +154,11 @@ export const API_ERROR_PRESETS = {
     title: 'Карточка заблокирована',
     message: 'Карточка уже отправлена или обработана.',
   },
+  PROPOSAL_LIMIT_REACHED: {
+    code: 'PROPOSAL_LIMIT_REACHED',
+    title: 'Лимит карточек',
+    message: 'Дневной лимит создания карточек исчерпан.',
+  },
   ADMIN_ONLY: {
     code: 'FORBIDDEN',
     title: 'Доступ запрещен',

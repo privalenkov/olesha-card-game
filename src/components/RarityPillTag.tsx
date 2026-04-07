@@ -143,10 +143,10 @@ const rarityPillParticleTemplates = [
 ] as const;
 
 export const rarityPillLabels: Record<Rarity, string> = {
-  common: 'окаковая',
+  common: 'обычная',
   uncommon: 'необычная',
   rare: 'редкая',
-  epic: 'эпическая',
+  epic: 'свага',
   veryrare: 'абсолютная свага',
 };
 

@@ -1089,6 +1089,28 @@ export class PackLimitReachedError extends Error {
   }
 }
 
+function formatCardProposalLimit(limit: number) {
+  const mod10 = limit % 10;
+  const mod100 = limit % 100;
+
+  if (mod10 === 1 && mod100 !== 11) {
+    return `${limit} карточку`;
+  }
+
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${limit} карточки`;
+  }
+
+  return `${limit} карточек`;
+}
+
+export class ProposalLimitReachedError extends Error {
+  constructor(limit: number) {
+    super('Дневной лимит создания карточек исчерпан');
+    this.name = 'ProposalLimitReachedError';
+  }
+}
+
 export class NicknameTakenError extends Error {
   constructor() {
     super(API_ERROR_PRESETS.NICKNAME_TAKEN.message);
@@ -1178,6 +1200,7 @@ export function createGameStore(config: ServerConfig) {
       max_effect_layers integer not null default 0,
       effect_layers_json text not null default '[]',
       created_at text not null,
+      created_day_key text,
       updated_at text not null,
       submitted_at text,
       approved_at text,
@@ -1363,6 +1386,7 @@ export function createGameStore(config: ServerConfig) {
     ['allowed_effects_json', "text not null default '[]'"],
     ['max_effect_layers', 'integer not null default 0'],
     ['effect_layers_json', "text not null default '[]'"],
+    ['created_day_key', 'text'],
     ['rejection_reason', 'text'],
   ] as const;
 
@@ -1457,10 +1481,36 @@ export function createGameStore(config: ServerConfig) {
     set max_effect_layers = 0
     where max_effect_layers is null
   `);
+  const proposalDayKeyMigrationRows = db.prepare(`
+    select id, created_at
+    from card_proposals
+    where created_day_key is null or trim(created_day_key) = ''
+  `).all() as Array<{
+    id: string;
+    created_at: string;
+  }>;
+  const updateProposalCreatedDayKey = db.prepare(`
+    update card_proposals
+    set created_day_key = ?
+    where id = ?
+  `);
+  const migrateProposalCreatedDayKey = db.transaction(() => {
+    for (const row of proposalDayKeyMigrationRows) {
+      updateProposalCreatedDayKey.run(
+        getDayKey(new Date(row.created_at), config.appTimeZone),
+        row.id,
+      );
+    }
+  });
+  migrateProposalCreatedDayKey();
 
   db.exec(`
     create index if not exists idx_card_proposals_status_created_at
     on card_proposals(status, created_at desc)
+  `);
+  db.exec(`
+    create index if not exists idx_card_proposals_creator_day
+    on card_proposals(creator_user_id, created_day_key, created_at desc)
   `);
 
   const notificationColumns = db
@@ -1821,8 +1871,8 @@ export function createGameStore(config: ServerConfig) {
       default_finish, visual_frame_style, visual_accent_color, visual_effect_pattern,
       visual_effect_placement, visual_pattern_json, allowed_card_types_json,
       allowed_effects_json, max_effect_layers, effect_layers_json,
-      created_at, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, created_day_key, updated_at, submitted_at, approved_at, approved_card_definition_id, rejection_reason
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectProposalById = db.prepare(`
     select *
@@ -1835,6 +1885,11 @@ export function createGameStore(config: ServerConfig) {
     where creator_user_id = ? and status in ('draft', 'pending')
     order by datetime(created_at) desc
     limit 1
+  `);
+  const countCreatedProposalsByUserAndDay = db.prepare(`
+    select count(*) as count
+    from card_proposals
+    where creator_user_id = ? and created_day_key = ?
   `);
   const selectAdminProposals = db.prepare(`
     select *
@@ -2287,62 +2342,97 @@ export function createGameStore(config: ServerConfig) {
   }
 
   function startCardProposal(user: AuthUser): { proposal: CardProposal; created: boolean } {
-    const existing = selectLatestActiveProposalByUser.get(user.id) as ProposalRow | undefined;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const dayKey = getDayKey(now, config.appTimeZone);
 
-    if (existing) {
-      return {
-        proposal: toCardProposal(existing),
-        created: false,
+    try {
+      db.exec('BEGIN IMMEDIATE');
+
+      const existing = selectLatestActiveProposalByUser.get(user.id) as ProposalRow | undefined;
+
+      if (existing) {
+        db.exec('COMMIT');
+        return {
+          proposal: toCardProposal(existing),
+          created: false,
+        };
+      }
+
+      const createdToday =
+        (countCreatedProposalsByUserAndDay.get(user.id, dayKey) as { count: number } | undefined)
+          ?.count ?? 0;
+
+      if (createdToday >= config.dailyProposalLimit) {
+        throw new ProposalLimitReachedError(config.dailyProposalLimit);
+      }
+
+      const rarity = weightedPick(
+        getProposalRarityWeights(countItemsByRarity(getActiveCatalogDefinitions())),
+      );
+      const editorCapabilities = buildProposalEditorCapabilities(rarity);
+      const cardTypeGrant = buildProposalCardTypeGrant(rarity);
+      const effectGrant = buildProposalEffectGrant(rarity);
+      const visuals = {
+        ...getDefaultCardVisuals(),
+        cardType: cardTypeGrant.defaultCardType,
       };
+      const defaultFinish =
+        rarity === 'veryrare'
+          ? 'prismatic'
+          : rarity === 'rare' || rarity === 'epic'
+            ? 'foil'
+            : 'standard';
+      const proposalId = randomUUID();
+
+      insertProposal.run(
+        proposalId,
+        user.id,
+        user.name,
+        rarity,
+        editorCapabilities.decorativePattern ? 1 : 0,
+        editorCapabilities.gradientFill ? 1 : 0,
+        editorCapabilities.lenticularImage ? 1 : 0,
+        'draft',
+        'Новая карточка',
+        'Опиши, чем эта карточка должна запомниться.',
+        '',
+        defaultFinish,
+        visuals.frameStyle,
+        visuals.accentColor,
+        LEGACY_VISUAL_EFFECT_PATTERN,
+        LEGACY_VISUAL_EFFECT_PLACEMENT,
+        serializeStoredVisualPatternPayload(visuals),
+        JSON.stringify(cardTypeGrant.allowedCardTypes),
+        JSON.stringify(effectGrant.allowedEffects),
+        effectGrant.maxEffectLayers,
+        JSON.stringify([]),
+        nowIso,
+        dayKey,
+        nowIso,
+        null,
+        null,
+        null,
+        null,
+      );
+
+      const createdProposal = selectProposalById.get(proposalId) as ProposalRow | undefined;
+
+      if (!createdProposal) {
+        throw new Error('Не удалось создать черновик карточки.');
+      }
+
+      db.exec('COMMIT');
+      return {
+        proposal: toCardProposal(createdProposal),
+        created: true,
+      };
+    } catch (error) {
+      if (db.inTransaction) {
+        db.exec('ROLLBACK');
+      }
+      throw error;
     }
-
-    const now = new Date().toISOString();
-    const rarity = weightedPick(getProposalRarityWeights(countItemsByRarity(getActiveCatalogDefinitions())));
-    const editorCapabilities = buildProposalEditorCapabilities(rarity);
-    const cardTypeGrant = buildProposalCardTypeGrant(rarity);
-    const effectGrant = buildProposalEffectGrant(rarity);
-    const visuals = {
-      ...getDefaultCardVisuals(),
-      cardType: cardTypeGrant.defaultCardType,
-    };
-    const defaultFinish =
-      rarity === 'veryrare' ? 'prismatic' : rarity === 'rare' || rarity === 'epic' ? 'foil' : 'standard';
-    const proposalId = randomUUID();
-
-    insertProposal.run(
-      proposalId,
-      user.id,
-      user.name,
-      rarity,
-      editorCapabilities.decorativePattern ? 1 : 0,
-      editorCapabilities.gradientFill ? 1 : 0,
-      editorCapabilities.lenticularImage ? 1 : 0,
-      'draft',
-      'Новая карточка',
-      'Опиши, чем эта карточка должна запомниться.',
-      '',
-      defaultFinish,
-      visuals.frameStyle,
-      visuals.accentColor,
-      LEGACY_VISUAL_EFFECT_PATTERN,
-      LEGACY_VISUAL_EFFECT_PLACEMENT,
-      serializeStoredVisualPatternPayload(visuals),
-      JSON.stringify(cardTypeGrant.allowedCardTypes),
-      JSON.stringify(effectGrant.allowedEffects),
-      effectGrant.maxEffectLayers,
-      JSON.stringify([]),
-      now,
-      now,
-      null,
-      null,
-      null,
-      null,
-    );
-
-    return {
-      proposal: toCardProposal(selectProposalById.get(proposalId) as ProposalRow),
-      created: true,
-    };
   }
 
   function getProposalById(proposalId: string): CardProposal | null {
