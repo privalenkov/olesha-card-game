@@ -264,6 +264,13 @@ export function unlockAdminUserPack(userId: string) {
   });
 }
 
+export function unlockAdminUserProposal(userId: string) {
+  return apiRequest<{ user: AdminUserRecord }>(`/api/admin/users/${userId}/unlock-proposal`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export function approveProposal(proposalId: string) {
   return apiRequest<UpdateProposalResult>(`/api/admin/card-proposals/${proposalId}/approve`, {
     method: 'POST',

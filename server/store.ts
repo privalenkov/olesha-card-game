@@ -179,6 +179,8 @@ interface AdminUserRow {
   packs_opened: number;
   packs_opened_today: number;
   extra_packs_granted_today: number;
+  proposals_created_today: number;
+  extra_proposals_granted_today: number;
 }
 
 const LEGACY_VISUAL_EFFECT_PATTERN = 'none';
@@ -1002,9 +1004,15 @@ function toAdminCatalogCard(
   };
 }
 
-function toAdminUserRecord(row: AdminUserRow, dailyPackLimit: number): AdminUserRecord {
+function toAdminUserRecord(
+  row: AdminUserRow,
+  dailyPackLimit: number,
+  dailyProposalLimit: number,
+): AdminUserRecord {
   const packsOpenedToday = row.packs_opened_today ?? 0;
   const extraPacksGrantedToday = row.extra_packs_granted_today ?? 0;
+  const proposalsCreatedToday = row.proposals_created_today ?? 0;
+  const extraProposalsGrantedToday = row.extra_proposals_granted_today ?? 0;
 
   return {
     id: row.id,
@@ -1019,6 +1027,13 @@ function toAdminUserRecord(row: AdminUserRow, dailyPackLimit: number): AdminUser
     extraPacksGrantedToday,
     remainingPacksToday: Math.max(dailyPackLimit + extraPacksGrantedToday - packsOpenedToday, 0),
     dailyPackLimit,
+    proposalsCreatedToday,
+    extraProposalsGrantedToday,
+    remainingProposalsToday: Math.max(
+      dailyProposalLimit + extraProposalsGrantedToday - proposalsCreatedToday,
+      0,
+    ),
+    dailyProposalLimit,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1236,6 +1251,14 @@ export function createGameStore(config: ServerConfig) {
       primary key (user_id, day_key)
     );
 
+    create table if not exists admin_proposal_unlocks (
+      user_id text not null references users(id) on delete cascade,
+      day_key text not null,
+      granted_count integer not null default 0,
+      updated_at text not null,
+      primary key (user_id, day_key)
+    );
+
     create table if not exists owned_cards (
       instance_id text primary key,
       user_id text not null references users(id) on delete cascade,
@@ -1250,6 +1273,8 @@ export function createGameStore(config: ServerConfig) {
     create index if not exists idx_pack_open_events_user_id on pack_open_events(user_id, opened_at desc);
     create index if not exists idx_admin_pack_unlocks_user_id
     on admin_pack_unlocks(user_id, day_key desc);
+    create index if not exists idx_admin_proposal_unlocks_user_id
+    on admin_proposal_unlocks(user_id, day_key desc);
     create index if not exists idx_owned_cards_user_id on owned_cards(user_id, acquired_at desc);
     create index if not exists idx_user_notifications_unread
     on user_notifications(user_id, read_at, created_at desc);
@@ -1634,6 +1659,11 @@ export function createGameStore(config: ServerConfig) {
     from admin_pack_unlocks
     where user_id = ? and day_key = ?
   `);
+  const selectAdminProposalUnlockCount = db.prepare(`
+    select coalesce(granted_count, 0) as count
+    from admin_proposal_unlocks
+    where user_id = ? and day_key = ?
+  `);
   const selectMaxPackNumber = db.prepare(`
     select coalesce(max(pack_number), 0) as packNumber
     from pack_open_events
@@ -1970,7 +2000,19 @@ export function createGameStore(config: ServerConfig) {
         from admin_pack_unlocks
         where admin_pack_unlocks.user_id = users.id
           and admin_pack_unlocks.day_key = @day_key
-      ) as extra_packs_granted_today
+      ) as extra_packs_granted_today,
+      (
+        select count(*)
+        from card_proposals
+        where card_proposals.creator_user_id = users.id
+          and card_proposals.created_day_key = @day_key
+      ) as proposals_created_today,
+      (
+        select coalesce(admin_proposal_unlocks.granted_count, 0)
+        from admin_proposal_unlocks
+        where admin_proposal_unlocks.user_id = users.id
+          and admin_proposal_unlocks.day_key = @day_key
+      ) as extra_proposals_granted_today
     from users
     order by total_cards desc, datetime(users.created_at) asc, users.id asc
   `);
@@ -2098,6 +2140,13 @@ export function createGameStore(config: ServerConfig) {
     values (?, ?, 1, ?)
     on conflict(user_id, day_key) do update set
       granted_count = admin_pack_unlocks.granted_count + 1,
+      updated_at = excluded.updated_at
+  `);
+  const upsertAdminProposalUnlock = db.prepare(`
+    insert into admin_proposal_unlocks (user_id, day_key, granted_count, updated_at)
+    values (?, ?, 1, ?)
+    on conflict(user_id, day_key) do update set
+      granted_count = admin_proposal_unlocks.granted_count + 1,
       updated_at = excluded.updated_at
   `);
   const insertOwnedCard = db.prepare(`
@@ -2362,9 +2411,15 @@ export function createGameStore(config: ServerConfig) {
       const createdToday =
         (countCreatedProposalsByUserAndDay.get(user.id, dayKey) as { count: number } | undefined)
           ?.count ?? 0;
+      const extraProposalsGrantedToday =
+        (
+          selectAdminProposalUnlockCount.get(user.id, dayKey) as { count: number } | undefined
+        )?.count ?? 0;
+      const effectiveDailyProposalLimit =
+        config.dailyProposalLimit + extraProposalsGrantedToday;
 
-      if (createdToday >= config.dailyProposalLimit) {
-        throw new ProposalLimitReachedError(config.dailyProposalLimit);
+      if (createdToday >= effectiveDailyProposalLimit) {
+        throw new ProposalLimitReachedError(effectiveDailyProposalLimit);
       }
 
       const rarity = weightedPick(
@@ -2552,7 +2607,9 @@ export function createGameStore(config: ServerConfig) {
     const dayKey = getDayKey(now, config.appTimeZone);
     return selectAdminUsers
       .all({ day_key: dayKey })
-      .map((row) => toAdminUserRecord(row as AdminUserRow, config.dailyPackLimit));
+      .map((row) =>
+        toAdminUserRecord(row as AdminUserRow, config.dailyPackLimit, config.dailyProposalLimit),
+      );
   }
 
   function listReferencedStoredAssetUrls() {
@@ -2596,6 +2653,41 @@ export function createGameStore(config: ServerConfig) {
         'info',
         'Пак снова доступен',
         'Администратор разблокировал для вас еще одно открытие пака на сегодня.',
+        null,
+        null,
+        nowIso,
+      );
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    return listAdminUsers(now).find((user) => user.id === userId) ?? null;
+  }
+
+  function grantAdminProposalUnlockByUserId(
+    userId: string,
+    now = new Date(),
+  ): AdminUserRecord | null {
+    const existingUser = selectUserId.get(userId) as { id: string } | undefined;
+
+    if (!existingUser) {
+      return null;
+    }
+
+    const dayKey = getDayKey(now, config.appTimeZone);
+    const nowIso = now.toISOString();
+
+    db.exec('BEGIN IMMEDIATE');
+
+    try {
+      upsertAdminProposalUnlock.run(userId, dayKey, nowIso);
+      createNotification(
+        userId,
+        'info',
+        'Создание карточки снова доступно',
+        'Администратор разблокировал для вас еще одно создание карточки на сегодня.',
         null,
         null,
         nowIso,
@@ -2842,6 +2934,7 @@ export function createGameStore(config: ServerConfig) {
     listAdminUsers,
     listReferencedStoredAssetUrls,
     grantAdminPackUnlockByUserId,
+    grantAdminProposalUnlockByUserId,
     listUnreadNotifications,
     markNotificationReadById,
     approveProposalById,

@@ -10,6 +10,7 @@ import {
   fetchAdminProposals,
   fetchAdminUsers,
   unlockAdminUserPack,
+  unlockAdminUserProposal,
 } from '../game/api';
 import {
   buildPreviewCardFromDefinition,
@@ -138,12 +139,16 @@ function AdminCatalogRow({
 
 function AdminUserRow({
   user,
-  busy,
-  onUnlock,
+  packBusy,
+  proposalBusy,
+  onUnlockPack,
+  onUnlockProposal,
 }: {
   user: AdminUserRecord;
-  busy: boolean;
-  onUnlock: () => void;
+  packBusy: boolean;
+  proposalBusy: boolean;
+  onUnlockPack: () => void;
+  onUnlockProposal: () => void;
 }) {
   return (
     <article className="admin-user-card">
@@ -160,18 +165,31 @@ function AdminUserRow({
         <span>
           Сегодня открыто: {user.packsOpenedToday} / {user.dailyPackLimit}
         </span>
-        <span>Разблокировок на сегодня: {user.extraPacksGrantedToday}</span>
+        <span>Разблокировок паков: {user.extraPacksGrantedToday}</span>
         <span>Можно открыть сейчас: {user.remainingPacksToday}</span>
+        <span>
+          Сегодня создано карточек: {user.proposalsCreatedToday} / {user.dailyProposalLimit}
+        </span>
+        <span>Разблокировок создания: {user.extraProposalsGrantedToday}</span>
+        <span>Можно создать сейчас: {user.remainingProposalsToday}</span>
         <span>Обновлен: {new Date(user.updatedAt).toLocaleString()}</span>
       </div>
       <div className="admin-user-card__actions">
         <button
           className="action-button action-button--solid"
-          disabled={busy}
-          onClick={onUnlock}
+          disabled={packBusy}
+          onClick={onUnlockPack}
           type="button"
         >
-          {busy ? 'Разблокируем...' : 'Разблокировать пак'}
+          {packBusy ? 'Разблокируем...' : 'Разблокировать пак'}
+        </button>
+        <button
+          className="action-button"
+          disabled={proposalBusy}
+          onClick={onUnlockProposal}
+          type="button"
+        >
+          {proposalBusy ? 'Разблокируем...' : 'Разблокировать создание карточки'}
         </button>
       </div>
     </article>
@@ -465,8 +483,9 @@ export function AdminProposalsPage() {
             users.map((user) => (
               <AdminUserRow
                 key={user.id}
-                busy={busyId === `unlock-pack:${user.id}`}
-                onUnlock={async () => {
+                packBusy={busyId === `unlock-pack:${user.id}`}
+                proposalBusy={busyId === `unlock-proposal:${user.id}`}
+                onUnlockPack={async () => {
                   setBusyId(`unlock-pack:${user.id}`);
 
                   try {
@@ -479,6 +498,24 @@ export function AdminProposalsPage() {
                       unlockError instanceof Error
                         ? unlockError.message
                         : 'Не удалось разблокировать пак пользователю.',
+                    );
+                  } finally {
+                    setBusyId(null);
+                  }
+                }}
+                onUnlockProposal={async () => {
+                  setBusyId(`unlock-proposal:${user.id}`);
+
+                  try {
+                    await unlockAdminUserProposal(user.id);
+                    const usersResponse = await fetchAdminUsers();
+                    setUsers(usersResponse.users);
+                    setError(null);
+                  } catch (unlockError) {
+                    setError(
+                      unlockError instanceof Error
+                        ? unlockError.message
+                        : 'Не удалось разблокировать создание карточки пользователю.',
                     );
                   } finally {
                     setBusyId(null);

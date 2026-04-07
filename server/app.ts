@@ -1732,6 +1732,37 @@ export async function buildApp() {
     reply.send({ user: adminUser });
   });
 
+  app.post('/api/admin/users/:userId/unlock-proposal', async (request, reply) => {
+    assertAllowedOrigin(request, reply);
+
+    if (reply.sent) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, reply, 'admin:unlock-proposal', MUTATION_RATE_LIMITS.admin)) {
+      return;
+    }
+
+    const user = store.getUserFromSessionToken(request.cookies[serverConfig.sessionCookieName]);
+
+    if (!isAdminUser(user)) {
+      reply.code(403).send(apiError('ADMIN_ONLY'));
+      return;
+    }
+
+    const adminUser = store.grantAdminProposalUnlockByUserId(
+      (request.params as { userId: string }).userId,
+    );
+
+    if (!adminUser) {
+      reply.code(404).send(apiError('USER_NOT_FOUND'));
+      return;
+    }
+
+    setNoStore(reply);
+    reply.send({ user: adminUser });
+  });
+
   app.post('/api/admin/card-proposals/:proposalId/approve', async (request, reply) => {
     assertAllowedOrigin(request, reply);
 

@@ -573,6 +573,10 @@ export interface AdminUserRecord {
   extraPacksGrantedToday: number;
   remainingPacksToday: number;
   dailyPackLimit: number;
+  proposalsCreatedToday: number;
+  extraProposalsGrantedToday: number;
+  remainingProposalsToday: number;
+  dailyProposalLimit: number;
   createdAt: string;
   updatedAt: string;
 }
