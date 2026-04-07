@@ -42,9 +42,10 @@ export function RarityGrantModal({ onClose, rarity }: RarityGrantModalProps) {
     <InfoModal
       actionLabel="Понятно"
       backgroundColor="#0C111B"
+      maxHeight={485}
       maxWidth={396}
       onClose={onClose}
-      title="Вам выдана карточка редкости:"
+      title="Случайным образом вам была выдана карточка:"
     >
       <div className="rarity-grant-modal">
         <div className="rarity-grant-modal__pill-stage">
@@ -52,6 +53,18 @@ export function RarityGrantModal({ onClose, rarity }: RarityGrantModalProps) {
         </div>
 
         <p className="rarity-grant-modal__message">{content.message}</p>
+
+
+        <div className="rarity-grant-modal__intro">
+          <p className="rarity-grant-modal__eyebrow">
+            информация
+          </p>
+          <p className="rarity-grant-modal__details">
+            Расширенные настройки и эффекты выдаются сервером по редкости и помечаются контуром <span className="rarity-grant-modal__details--contour"></span>.
+             Шаблоны карточки и маски можно скачать, доработать во внешнем
+            редакторе и загрузить обратно. Создайте свою карточку мечты!
+          </p>
+        </div>
       </div>
     </InfoModal>
   );

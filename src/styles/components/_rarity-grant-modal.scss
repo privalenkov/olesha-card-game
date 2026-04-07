@@ -1,14 +1,40 @@
 .rarity-grant-modal {
   display: grid;
-  gap: 10px;
+  gap: 14px;
+}
+
+.rarity-grant-modal__intro {
+  display: grid;
+  gap: 4px;
+}
+
+.rarity-grant-modal__eyebrow {
+  margin: 10px 0 0 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #F4F1DE;
+}
+
+.rarity-grant-modal__details {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: #B3AF98;
 }
 
 .rarity-grant-modal__pill-stage {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 148px;
-  margin: 4px 0 8px;
+  min-height: 88px;
+  margin: 2px 0 4px;
 }
 
 .rarity-grant-modal__message {
@@ -20,11 +46,22 @@
   color: #B3AF98;
 }
 
+.rarity-grant-modal__details--contour {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  outline: 5px solid #B3AF98;
+  border-radius: 2px;
+  justify-content: center;
+  margin-left: 5px;
+}
+
 @media (max-width: 768px) {
   .rarity-grant-modal__pill-stage {
-    min-height: 132px;
+    min-height: 88px;
   }
 
+  .rarity-grant-modal__details,
   .rarity-grant-modal__message {
     font-size: 12px;
     max-width: 100%;
