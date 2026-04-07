@@ -330,7 +330,7 @@
   color: #0D0E17;
 }
 
-.creator-rarity-card--pattern .creator-collapsible {
+.creator-rarity-card .creator-collapsible {
   margin-top: 0;
   transition:
     max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -339,7 +339,7 @@
     margin-top 220ms ease;
 }
 
-.creator-rarity-card--pattern .creator-collapsible--open {
+.creator-rarity-card .creator-collapsible--open {
   margin-top: 14px;
 }
 
