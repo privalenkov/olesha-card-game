@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { buildCollectionCardShareUrl } from '../game/collectionPaths';
-import { copyTextToClipboard } from '../game/clipboard';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGame } from '../game/GameContext';
 import { rarityRevealImpactDurationsMs } from '../game/rarityRevealEffects';
 import type { OwnedCard, Rarity } from '../game/types';
-import { CardCreatorLink } from './CardCreatorLink';
-import { CardViewerCanvas } from './CardViewerCanvas';
-import { PackCarouselScene, PackScene } from './PackScene';
 import { preloadCardTextureAssets } from '../three/textures';
+import { OwnedCardViewerOverlay } from './OwnedCardViewerOverlay';
+import { PackCarouselScene, PackScene } from './PackScene';
 
 type ExperienceStage =
   | 'hero'
@@ -16,9 +13,7 @@ type ExperienceStage =
   | 'carousel_to_tear'
   | 'tear'
   | 'opening'
-  | 'revealing'
-  | 'complete';
-type RevealState = 'charging' | 'impact' | 'awaiting_flip' | 'revealed' | 'launching' | 'complete';
+  | 'review';
 
 interface TearGesture {
   active: boolean;
@@ -31,7 +26,7 @@ interface TearGesture {
   height: number;
 }
 
-interface CardSwipeGesture {
+interface FlipSwipeGesture {
   active: boolean;
   pointerId: number | null;
   startX: number;
@@ -48,16 +43,10 @@ interface CarouselSwipeGesture {
   mode: 'carousel' | 'pack';
 }
 
-interface RevealProfile {
-  chargeMs: number;
-  effectMs: number;
-  cardDelayLabel: string;
-}
-
 const VISUAL_PACK_COUNT = 8;
 const PACK_FLIP_PREVIEW_LIMIT = 0.72;
 const PACK_FLIP_TRIGGER_DISTANCE = 72;
-const CARD_LAUNCH_EXIT_DISTANCE = 860;
+
 const initialTearGesture: TearGesture = {
   active: false,
   pointerId: null,
@@ -68,12 +57,14 @@ const initialTearGesture: TearGesture = {
   width: 1,
   height: 1,
 };
-const initialCardSwipeGesture: CardSwipeGesture = {
+
+const initialFlipSwipeGesture: FlipSwipeGesture = {
   active: false,
   pointerId: null,
   startX: 0,
   startY: 0,
 };
+
 const initialCarouselSwipeGesture: CarouselSwipeGesture = {
   active: false,
   pointerId: null,
@@ -83,35 +74,6 @@ const initialCarouselSwipeGesture: CarouselSwipeGesture = {
   moved: false,
   mode: 'carousel',
 };
-const revealProfiles: Record<Rarity, RevealProfile> = {
-  common: {
-    chargeMs: 120,
-    effectMs: rarityRevealImpactDurationsMs.common,
-    cardDelayLabel: 'Обычная карта раскрывается через короткую вспышку и маленький сплеш.',
-  },
-  uncommon: {
-    chargeMs: 220,
-    effectMs: rarityRevealImpactDurationsMs.uncommon,
-    cardDelayLabel: 'Необычная карта получает мягкий свет и небольшой сплеш.',
-  },
-  rare: {
-    chargeMs: 760,
-    effectMs: rarityRevealImpactDurationsMs.rare,
-    cardDelayLabel: 'Редкая карта заливается цветом и выбрасывает крупный сплеш частиц.',
-  },
-  epic: {
-    chargeMs: 980,
-    effectMs: rarityRevealImpactDurationsMs.epic,
-    cardDelayLabel: 'Epic карта держит сплошную заливку дольше и раскрывается через более насыщенный сплеш.',
-  },
-  veryrare: {
-    chargeMs: 1320,
-    effectMs: rarityRevealImpactDurationsMs.veryrare,
-    cardDelayLabel: 'Very Rare карта получает самый крупный и сложный партикл-сплеш перед раскрытием.',
-  },
-};
-
-const MANUAL_FLIP_REVEAL_RARITIES: Rarity[] = ['rare', 'epic', 'veryrare'];
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -123,8 +85,12 @@ function getShortestCarouselDelta(targetIndex: number, activeIndex: number, tota
   return Math.abs(backward) < Math.abs(forward) ? backward : forward;
 }
 
+function needsReviewReveal(rarity: Rarity) {
+  return rarity === 'rare' || rarity === 'epic' || rarity === 'veryrare';
+}
+
 export function PackExperience() {
-  const { authenticated, error, notify, openPack, state, timeUntilReset, user } = useGame();
+  const { authenticated, error, openPack, state, timeUntilReset, user } = useGame();
   const [stage, setStage] = useState<ExperienceStage>('hero');
   const [heroRotationOffset, setHeroRotationOffset] = useState(0);
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -133,8 +99,7 @@ export function PackExperience() {
     () => Array.from({ length: VISUAL_PACK_COUNT }, () => 0),
   );
   const [openedPack, setOpenedPack] = useState<OwnedCard[] | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [revealState, setRevealState] = useState<RevealState>('charging');
+  const [reviewCardIndex, setReviewCardIndex] = useState(0);
   const [heroFlipPreview, setHeroFlipPreview] = useState(0);
   const [carouselFlipPreview, setCarouselFlipPreview] = useState(0);
   const [tearGesture, setTearGesture] = useState<TearGesture>(initialTearGesture);
@@ -143,27 +108,19 @@ export function PackExperience() {
   const [tearDocked, setTearDocked] = useState(false);
   const [tearHintVisible, setTearHintVisible] = useState(false);
   const [packOpeningPending, setPackOpeningPending] = useState(false);
-  const [cardLaunchOffset, setCardLaunchOffset] = useState(0);
-  const cardSwipeRef = useRef<CardSwipeGesture>(initialCardSwipeGesture);
-  const carouselSwipeRef = useRef<CarouselSwipeGesture>(initialCarouselSwipeGesture);
-  const heroFlipSwipeRef = useRef<CardSwipeGesture>(initialCardSwipeGesture);
-  const openingTimerRef = useRef<number | null>(null);
-  const carouselSlideTimerRef = useRef<number | null>(null);
-  const cardLaunchTimerRef = useRef<number | null>(null);
-  const cardEntryTimerRef = useRef<number | null>(null);
-  const carouselSuppressClickUntilRef = useRef(0);
   const [carouselDragging, setCarouselDragging] = useState(false);
   const [carouselSliding, setCarouselSliding] = useState(false);
   const [carouselInteracting, setCarouselInteracting] = useState(false);
-  const [stackEntryCardId, setStackEntryCardId] = useState<string | null>(null);
-  const [visibleCreatorCardId, setVisibleCreatorCardId] = useState<string | null>(null);
   const [heroButtonVisible, setHeroButtonVisible] = useState(false);
+  const heroFlipSwipeRef = useRef<FlipSwipeGesture>(initialFlipSwipeGesture);
+  const carouselSwipeRef = useRef<CarouselSwipeGesture>(initialCarouselSwipeGesture);
+  const openingTimerRef = useRef<number | null>(null);
+  const carouselSlideTimerRef = useRef<number | null>(null);
+  const carouselSuppressClickUntilRef = useRef(0);
 
-  const currentCard = openedPack?.[currentIndex] ?? null;
-  const revealProfile = currentCard ? revealProfiles[currentCard.rarity] : null;
   const selectedPackRotationOffset = visualPackRotationOffsets[carouselIndex] ?? 0;
   const tearProgress =
-    stage === 'opening' || stage === 'revealing' || stage === 'complete'
+    stage === 'opening' || stage === 'review'
       ? 1
       : tearGesture.active
         ? clamp(Math.abs(tearGesture.currentX - tearGesture.startX) / 260, 0, 1)
@@ -171,53 +128,18 @@ export function PackExperience() {
   const liveTearAnchor = tearGesture.active
     ? clamp(tearGesture.currentX / tearGesture.width, 0.14, 0.86)
     : tearAnchor;
-  const stackedCards = openedPack?.slice(currentIndex + 1) ?? [];
-  const lastCard = openedPack ? currentIndex >= openedPack.length - 1 : false;
   const availablePacks = authenticated ? state.remainingPacks : state.dailyPackLimit;
   const preloadTearStage = stage === 'carousel_to_tear';
   const dockStageMounted = preloadTearStage || stage === 'tear' || stage === 'opening';
   const dockStageVisible = stage === 'tear' || stage === 'opening';
   const dockPackSnapped = preloadTearStage || (stage === 'tear' && tearDocked);
   const dockPackOffsetY = stage === 'opening' ? -5.4 : dockPackSnapped ? -2.45 : 0.08;
-  const revealStackMode =
-    stage === 'opening' ? 'opening' : stage === 'revealing' || stage === 'complete' ? 'revealing' : null;
-  const handleRevealCardIntroComplete = useCallback((completedIntroKey: string) => {
-    if (completedIntroKey === 'stack-anchor') {
-      return;
-    }
-
-    setVisibleCreatorCardId((currentVisibleCardId) =>
-      currentVisibleCardId === completedIntroKey ? currentVisibleCardId : completedIntroKey,
-    );
-  }, []);
-  const handleShareCurrentCard = useCallback(async () => {
-    const playerSlug = user?.shareSlug?.trim();
-
-    if (!currentCard || !playerSlug) {
-      return;
-    }
-
-    const shareUrl = buildCollectionCardShareUrl(
-      window.location.origin,
-      playerSlug,
-      currentCard.instanceId,
-    );
-
-    try {
-      await copyTextToClipboard(shareUrl);
-      notify({
-        kind: 'success',
-        title: 'Ссылка скопирована',
-        message: 'Отправь её другому пользователю, чтобы показать эту карточку.',
-      });
-    } catch {
-      notify({
-        kind: 'error',
-        title: 'Не удалось скопировать ссылку',
-        message: 'Браузер не дал доступ к буферу обмена.',
-      });
-    }
-  }, [currentCard, notify, user?.shareSlug]);
+  const currentReviewCard = openedPack?.[reviewCardIndex] ?? null;
+  const reviewRevealRarity =
+    currentReviewCard && needsReviewReveal(currentReviewCard.rarity) ? currentReviewCard.rarity : null;
+  const reviewRevealDurationMs = reviewRevealRarity
+    ? rarityRevealImpactDurationsMs[reviewRevealRarity]
+    : 0;
 
   useEffect(() => {
     return () => {
@@ -226,12 +148,6 @@ export function PackExperience() {
       }
       if (carouselSlideTimerRef.current) {
         window.clearTimeout(carouselSlideTimerRef.current);
-      }
-      if (cardLaunchTimerRef.current) {
-        window.clearTimeout(cardLaunchTimerRef.current);
-      }
-      if (cardEntryTimerRef.current) {
-        window.clearTimeout(cardEntryTimerRef.current);
       }
     };
   }, []);
@@ -252,141 +168,6 @@ export function PackExperience() {
     setHeroButtonVisible(false);
   }
 
-  useEffect(() => {
-    if (stage !== 'revealing' || !currentCard) {
-      setVisibleCreatorCardId(null);
-      return;
-    }
-
-    setVisibleCreatorCardId(null);
-
-    const requiresManualFlip = MANUAL_FLIP_REVEAL_RARITIES.includes(currentCard.rarity);
-
-    if (requiresManualFlip) {
-      setRevealState('awaiting_flip');
-      setCardLaunchOffset(0);
-      return;
-    }
-
-    const chargeDuration = Math.max(revealProfile?.chargeMs ?? 0, 0);
-
-    setRevealState(chargeDuration > 0 ? 'charging' : 'impact');
-    setCardLaunchOffset(0);
-
-    const impactTimer = window.setTimeout(() => {
-      setRevealState('impact');
-    }, chargeDuration);
-
-    return () => {
-      window.clearTimeout(impactTimer);
-    };
-  }, [currentCard?.instanceId, currentCard?.rarity, revealProfile?.chargeMs, revealProfile?.effectMs, stage]);
-
-  useEffect(() => {
-    if (stage !== 'revealing' || !currentCard || revealState !== 'impact') {
-      return;
-    }
-
-    const impactDuration = Math.max(revealProfile?.effectMs ?? 0, 0);
-
-    if (impactDuration <= 0) {
-      setRevealState('revealed');
-      return;
-    }
-
-    const revealTimer = window.setTimeout(() => {
-      setRevealState('revealed');
-    }, impactDuration);
-
-    return () => {
-      window.clearTimeout(revealTimer);
-    };
-  }, [currentCard?.instanceId, revealProfile?.effectMs, revealState, stage]);
-
-  useEffect(() => {
-    const handleCardSwipeMove = (event: PointerEvent) => {
-      if (!cardSwipeRef.current.active || cardSwipeRef.current.pointerId !== event.pointerId) {
-        return;
-      }
-
-      const deltaY = event.clientY - cardSwipeRef.current.startY;
-      const deltaX = event.clientX - cardSwipeRef.current.startX;
-
-      if (deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX) * 0.75) {
-        setCardLaunchOffset(clamp(deltaY, -220, 0));
-      }
-    };
-
-    const handleCardSwipeEnd = (event: PointerEvent) => {
-      if (!cardSwipeRef.current.active || cardSwipeRef.current.pointerId !== event.pointerId) {
-        return;
-      }
-
-      const deltaY = event.clientY - cardSwipeRef.current.startY;
-      const deltaX = event.clientX - cardSwipeRef.current.startX;
-
-      cardSwipeRef.current = initialCardSwipeGesture;
-
-      if (
-        (stage === 'revealing' || stage === 'complete') &&
-        revealState === 'revealed' &&
-        deltaY < -120 &&
-        Math.abs(deltaY) > Math.abs(deltaX) * 0.9
-      ) {
-        if (cardLaunchTimerRef.current) {
-          window.clearTimeout(cardLaunchTimerRef.current);
-          cardLaunchTimerRef.current = null;
-        }
-
-        setRevealState('launching');
-        setCardLaunchOffset(-CARD_LAUNCH_EXIT_DISTANCE);
-
-        cardLaunchTimerRef.current = window.setTimeout(() => {
-          cardLaunchTimerRef.current = null;
-
-          if (!openedPack) {
-            return;
-          }
-
-          if (lastCard) {
-            resetExperience();
-            return;
-          }
-
-          const nextCard = openedPack[currentIndex + 1] ?? null;
-          if (cardEntryTimerRef.current) {
-            window.clearTimeout(cardEntryTimerRef.current);
-            cardEntryTimerRef.current = null;
-          }
-
-          setStackEntryCardId(nextCard?.instanceId ?? null);
-          setCurrentIndex((index) => index + 1);
-          setRevealState('charging');
-          setCardLaunchOffset(0);
-
-          cardEntryTimerRef.current = window.setTimeout(() => {
-            cardEntryTimerRef.current = null;
-            setStackEntryCardId(null);
-          }, 420);
-        }, 380);
-
-        return;
-      }
-
-      setCardLaunchOffset(0);
-    };
-
-    window.addEventListener('pointermove', handleCardSwipeMove);
-    window.addEventListener('pointerup', handleCardSwipeEnd);
-    window.addEventListener('pointercancel', handleCardSwipeEnd);
-
-    return () => {
-      window.removeEventListener('pointermove', handleCardSwipeMove);
-      window.removeEventListener('pointerup', handleCardSwipeEnd);
-      window.removeEventListener('pointercancel', handleCardSwipeEnd);
-    };
-  }, [lastCard, openedPack, revealState, stage]);
-
   function resetExperience() {
     if (openingTimerRef.current) {
       window.clearTimeout(openingTimerRef.current);
@@ -396,22 +177,14 @@ export function PackExperience() {
       window.clearTimeout(carouselSlideTimerRef.current);
       carouselSlideTimerRef.current = null;
     }
-    if (cardLaunchTimerRef.current) {
-      window.clearTimeout(cardLaunchTimerRef.current);
-      cardLaunchTimerRef.current = null;
-    }
-    if (cardEntryTimerRef.current) {
-      window.clearTimeout(cardEntryTimerRef.current);
-      cardEntryTimerRef.current = null;
-    }
+
     setStage('hero');
     setHeroRotationOffset(0);
     setCarouselIndex(0);
     setCarouselOrbitIndex(0);
     setVisualPackRotationOffsets(Array.from({ length: VISUAL_PACK_COUNT }, () => 0));
     setOpenedPack(null);
-    setCurrentIndex(0);
-    setRevealState('charging');
+    setReviewCardIndex(0);
     setHeroFlipPreview(0);
     setCarouselFlipPreview(0);
     setTearGesture(initialTearGesture);
@@ -420,11 +193,8 @@ export function PackExperience() {
     setTearDocked(false);
     setTearHintVisible(false);
     setPackOpeningPending(false);
-    setCardLaunchOffset(0);
-    setStackEntryCardId(null);
     setHeroButtonVisible(false);
-    cardSwipeRef.current = initialCardSwipeGesture;
-    heroFlipSwipeRef.current = initialCardSwipeGesture;
+    heroFlipSwipeRef.current = initialFlipSwipeGesture;
     carouselSwipeRef.current = initialCarouselSwipeGesture;
     carouselSuppressClickUntilRef.current = 0;
     setCarouselDragging(false);
@@ -472,8 +242,7 @@ export function PackExperience() {
 
     setStage('preparing');
     setOpenedPack(null);
-    setCurrentIndex(0);
-    setRevealState('charging');
+    setReviewCardIndex(0);
     setHeroFlipPreview(0);
     setCarouselFlipPreview(0);
     setTearGesture(initialTearGesture);
@@ -481,8 +250,6 @@ export function PackExperience() {
     setTearDirection(1);
     setTearDocked(false);
     setTearHintVisible(false);
-    setCardLaunchOffset(0);
-    setStackEntryCardId(null);
     setHeroButtonVisible(false);
     setVisualPackRotationOffsets(Array.from({ length: VISUAL_PACK_COUNT }, () => heroRotationOffset));
     setCarouselIndex(0);
@@ -498,6 +265,7 @@ export function PackExperience() {
     if (carouselSlideTimerRef.current) {
       window.clearTimeout(carouselSlideTimerRef.current);
     }
+
     setCarouselSliding(true);
     carouselSlideTimerRef.current = window.setTimeout(() => {
       carouselSlideTimerRef.current = null;
@@ -507,6 +275,7 @@ export function PackExperience() {
         setCarouselInteracting(false);
       }
     }, 220);
+
     setCarouselIndex((current) => (current + direction + VISUAL_PACK_COUNT) % VISUAL_PACK_COUNT);
     setCarouselOrbitIndex((current) => current + direction);
   }
@@ -561,6 +330,7 @@ export function PackExperience() {
       event.clientX,
       event.clientY,
     );
+
     if (insidePackZone) {
       showHeroButton();
     } else {
@@ -606,7 +376,7 @@ export function PackExperience() {
     }
 
     setHeroFlipPreview(0);
-    heroFlipSwipeRef.current = initialCardSwipeGesture;
+    heroFlipSwipeRef.current = initialFlipSwipeGesture;
   }
 
   function moveHeroFlipSwipe(event: ReactPointerEvent<HTMLDivElement>) {
@@ -702,12 +472,14 @@ export function PackExperience() {
 
     if (swipe.mode === 'pack') {
       event.stopPropagation();
+
       if (Math.abs(deltaX) > 14) {
         carouselSwipeRef.current = {
           ...swipe,
           moved: true,
         };
       }
+
       setCarouselFlipPreview(clamp(deltaX / 180, -1, 1) * PACK_FLIP_PREVIEW_LIMIT);
       return;
     }
@@ -746,6 +518,7 @@ export function PackExperience() {
 
     if (swipe.mode === 'pack') {
       event.stopPropagation();
+
       if (Math.abs(deltaX) > PACK_FLIP_TRIGGER_DISTANCE && Math.abs(deltaY) < 96) {
         rotateCarouselPack(carouselIndex, deltaX > 0 ? Math.PI : -Math.PI);
         carouselSuppressClickUntilRef.current = Date.now() + 220;
@@ -753,6 +526,7 @@ export function PackExperience() {
         beginTearTransition();
         carouselSuppressClickUntilRef.current = Date.now() + 220;
       }
+
       setCarouselFlipPreview(0);
     } else if (!swipe.moved && Math.abs(deltaX) > 56 && Math.abs(deltaX) > Math.abs(deltaY) + 10) {
       stepCarousel(deltaX < 0 ? 1 : -1);
@@ -762,6 +536,7 @@ export function PackExperience() {
     carouselSwipeRef.current = initialCarouselSwipeGesture;
     window.setTimeout(() => {
       setCarouselDragging(false);
+
       if (!carouselSlideTimerRef.current) {
         setCarouselSliding(false);
         setCarouselInteracting(false);
@@ -802,22 +577,11 @@ export function PackExperience() {
       window.clearTimeout(openingTimerRef.current);
       openingTimerRef.current = null;
     }
-    if (cardLaunchTimerRef.current) {
-      window.clearTimeout(cardLaunchTimerRef.current);
-      cardLaunchTimerRef.current = null;
-    }
-    if (cardEntryTimerRef.current) {
-      window.clearTimeout(cardEntryTimerRef.current);
-      cardEntryTimerRef.current = null;
-    }
 
     setPackOpeningPending(true);
     setTearHintVisible(false);
     setOpenedPack(null);
-    setCurrentIndex(0);
-    setRevealState('charging');
-    setCardLaunchOffset(0);
-    setStackEntryCardId(null);
+    setReviewCardIndex(0);
 
     const pack = await openPack();
 
@@ -829,204 +593,27 @@ export function PackExperience() {
 
     void preloadCardTextureAssets(pack);
     setOpenedPack(pack);
+    setReviewCardIndex(0);
     setStage('opening');
     setPackOpeningPending(false);
     openingTimerRef.current = window.setTimeout(() => {
       openingTimerRef.current = null;
-      setStage('revealing');
+      setStage('review');
     }, 980);
   }
 
-  function renderRevealStack(mode: 'opening' | 'revealing') {
-    if (!openedPack || !currentCard) {
-      return null;
+  function advanceReviewCard() {
+    if (!openedPack || openedPack.length === 0) {
+      resetExperience();
+      return;
     }
 
-    const activeCardInstanceId = currentCard.instanceId;
-    const isOpening = mode === 'opening';
-    const launching = !isOpening && revealState === 'launching';
-    const launchExitProgress = Math.min(Math.abs(cardLaunchOffset) / CARD_LAUNCH_EXIT_DISTANCE, 1);
-    const stackCardInteractive =
-      !isOpening && !launching && (revealState === 'revealed' || revealState === 'awaiting_flip');
-    const shakeMode =
-      !isOpening && revealState === 'awaiting_flip'
-        ? currentCard.rarity === 'veryrare'
-          ? 'veryrare'
-          : currentCard.rarity === 'epic'
-            ? 'epic'
-            : currentCard.rarity === 'rare'
-            ? 'rare'
-              : 'none'
-        : 'none';
-    const revealImpactRarity =
-      !isOpening && revealState === 'impact' ? currentCard.rarity : null;
-    function renderRevealCardLayer({
-      card,
-      layerKey,
-      className,
-      forcedSide,
-      interactive,
-      stackBackCount,
-      renderStackOnly = false,
-      enterFromStackAnimation = false,
-      launchExitProgress = 0,
-      introKeyOverride,
-      revealImpactRarity,
-      revealImpactDurationMs,
-      shakeMode,
-      onUserFlip,
-      skipIntroAnimation = false,
-    }: {
-      card: OwnedCard;
-      layerKey: string;
-      className: string;
-      forcedSide: 'front' | 'back' | null;
-      interactive: boolean;
-      stackBackCount: number;
-      renderStackOnly?: boolean;
-      enterFromStackAnimation?: boolean;
-      launchExitProgress?: number;
-      introKeyOverride?: string;
-      revealImpactRarity: Rarity | null;
-      revealImpactDurationMs: number;
-      shakeMode: 'none' | 'rare' | 'epic' | 'veryrare';
-      onUserFlip?: (side: 'front' | 'back') => void;
-      skipIntroAnimation?: boolean;
-    }) {
-      return (
-        <div
-          key={layerKey}
-          className={className}
-          onPointerDownCapture={(event) => {
-            if (
-              event.target instanceof Element &&
-              event.target.closest('[data-card-creator-link]')
-            ) {
-              return;
-            }
-
-            if (card.instanceId !== activeCardInstanceId) {
-              return;
-            }
-
-            if (isOpening || stage !== 'revealing' || revealState !== 'revealed') {
-              return;
-            }
-
-            cardSwipeRef.current = {
-              active: true,
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startY: event.clientY,
-            };
-          }}
-        >
-          <div className="pack-reveal__card-shell pack-reveal__card-shell--active">
-            <div className="pack-reveal__viewer-stage">
-              <div className="pack-reveal__viewer">
-                <CardViewerCanvas
-                  cameraZ={10.6}
-                  card={card}
-                  effectsPreset="full"
-                  forcedSide={forcedSide}
-                  initialSide="back"
-                  interactive={interactive}
-                  introKey={introKeyOverride ?? card.instanceId}
-                  skipIntroAnimation={skipIntroAnimation}
-                  renderStackOnly={renderStackOnly}
-                  enterFromStackAnimation={enterFromStackAnimation}
-                  launchExitProgress={launchExitProgress}
-                  stackBackCount={stackBackCount}
-                  activeLiftProgress={0}
-                  shakeMode={shakeMode}
-                  revealImpactRarity={revealImpactRarity}
-                  revealImpactDurationMs={revealImpactDurationMs}
-                  onUserFlip={onUserFlip}
-                  onIntroComplete={handleRevealCardIntroComplete}
-                  scaleMultiplier={0.7}
-                  transparentBackground
-                />
-              </div>
-              {renderStackOnly ? null : (
-                <CardCreatorLink
-                  card={card}
-                  cameraZ={10.6}
-                  scaleMultiplier={0.7}
-                  visible={visibleCreatorCardId === card.instanceId}
-                  className="card-creator-link-anchor--pack"
-                  action={
-                    user?.shareSlug?.trim() && currentCard?.instanceId === card.instanceId
-                      ? {
-                          label: 'Поделиться',
-                          onClick: () => {
-                            void handleShareCurrentCard();
-                          },
-                        }
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      );
+    if (reviewCardIndex >= openedPack.length - 1) {
+      resetExperience();
+      return;
     }
 
-    return (
-      <div className={`pack-reveal ${isOpening ? 'pack-reveal--opening' : ''}`}>
-        <div className="pack-reveal__stack">
-          {stackedCards.length > 0
-            ? renderRevealCardLayer({
-                card: currentCard,
-                layerKey: 'stack-anchor',
-                className: 'pack-reveal__active pack-reveal__active--stack-anchor',
-                forcedSide: 'back',
-                interactive: false,
-                stackBackCount: stackedCards.length,
-                renderStackOnly: true,
-                introKeyOverride: 'stack-anchor',
-                revealImpactRarity: null,
-                revealImpactDurationMs: 0,
-                shakeMode: 'none',
-                skipIntroAnimation: true,
-              })
-            : null}
-
-          {renderRevealCardLayer({
-            card: currentCard,
-            layerKey: currentCard.instanceId,
-            className: `pack-reveal__active pack-reveal__active--${currentCard.rarity} ${
-              !isOpening && revealState === 'charging' ? 'pack-reveal__active--charging' : ''
-            } ${
-              !isOpening && revealState === 'impact' ? 'pack-reveal__active--impact' : ''
-            } ${
-              !isOpening && revealState === 'awaiting_flip'
-                ? 'pack-reveal__active--awaiting-flip'
-                : ''
-            } ${launching ? 'pack-reveal__active--launching pack-reveal__active--launching-out' : ''}`,
-            forcedSide: isOpening
-              ? 'back'
-              : revealState === 'charging' || revealState === 'awaiting_flip'
-                ? 'back'
-                : 'front',
-            interactive: stackCardInteractive,
-            stackBackCount: 0,
-            enterFromStackAnimation: stackEntryCardId === currentCard.instanceId,
-            launchExitProgress: !isOpening ? launchExitProgress : 0,
-            revealImpactRarity,
-            revealImpactDurationMs: revealImpactRarity ? revealProfile?.effectMs ?? 0 : 0,
-            shakeMode,
-            skipIntroAnimation: stackEntryCardId === currentCard.instanceId,
-            onUserFlip: (side) => {
-              if (revealState === 'awaiting_flip' && side === 'front') {
-                setRevealState('impact');
-              }
-            },
-          })}
-        </div>
-
-      </div>
-    );
+    setReviewCardIndex((current) => current + 1);
   }
 
   return (
@@ -1171,12 +758,8 @@ export function PackExperience() {
                   };
                 });
               }}
-              onPointerUp={(event) => {
-                if (
-                  stage !== 'tear' ||
-                  !tearGesture.active ||
-                  tearGesture.pointerId !== event.pointerId
-                ) {
+              onPointerUp={() => {
+                if (!tearGesture.active || stage !== 'tear') {
                   setTearGesture(initialTearGesture);
                   return;
                 }
@@ -1206,7 +789,7 @@ export function PackExperience() {
                 cards={null}
                 cameraY={0.24}
                 dragPreview={0}
-                focusIndex={currentIndex}
+                focusIndex={0}
                 hoverEnabled={false}
                 onOffsetSettled={
                   stage === 'tear' && tearDocked ? () => setTearHintVisible(true) : undefined
@@ -1220,21 +803,28 @@ export function PackExperience() {
                 tearDirection={tearDirection}
                 tearProgress={tearProgress}
               />
-
             </div>
           </div>
         ) : null}
 
-        {revealStackMode ? (
-          <div
-            className={`pack-ritual__stack-layer ${
-              revealStackMode === 'opening' ? 'pack-ritual__stack-layer--opening' : ''
-            }`}
-          >
-            {renderRevealStack(revealStackMode)}
-          </div>
-        ) : null}
       </div>
+
+      {stage === 'review' && currentReviewCard ? (
+        <OwnedCardViewerOverlay
+          card={currentReviewCard}
+          hintLabel={
+            openedPack && reviewCardIndex >= openedPack.length - 1
+              ? 'Свайп вверх, чтобы завершить просмотр'
+              : 'Свайп вверх, чтобы открыть следующую карточку'
+          }
+          onClose={resetExperience}
+          onSwipeUp={advanceReviewCard}
+          sharePlayerSlug={user?.shareSlug}
+          statusLabel={openedPack ? `${reviewCardIndex + 1} из ${openedPack.length}` : null}
+          viewerRevealImpactDurationMs={reviewRevealDurationMs}
+          viewerRevealImpactRarity={reviewRevealRarity}
+        />
+      ) : null}
 
       {stage === 'hero' ? (
         <div className="home-stage__status-wrap">

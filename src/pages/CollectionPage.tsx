@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import closeIcon from '../assets/icons/close.svg';
-import { CardCreatorLink } from '../components/CardCreatorLink';
-import { CardViewerCanvas } from '../components/CardViewerCanvas';
 import { CollectionCardTile } from '../components/CollectionCardTile';
+import { OwnedCardViewerOverlay } from '../components/OwnedCardViewerOverlay';
 import { ApiError, fetchPublicShowcase } from '../game/api';
-import { copyTextToClipboard } from '../game/clipboard';
-import { buildCollectionCardShareUrl, buildCollectionPath } from '../game/collectionPaths';
+import { buildCollectionPath } from '../game/collectionPaths';
 import { useGame } from '../game/GameContext';
 import type { CollectionFilter, OwnedCard, PublicPlayerProfile } from '../game/types';
 
@@ -18,9 +15,8 @@ export function CollectionPage() {
   const navigate = useNavigate();
   const { playerSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { authenticated, notify, user } = useGame();
+  const { authenticated, user } = useGame();
   const [activeCard, setActiveCard] = useState<OwnedCard | null>(null);
-  const [activeCardCreatorVisible, setActiveCardCreatorVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<CollectionTab>('all');
   const [collectionOwner, setCollectionOwner] = useState<PublicPlayerProfile | null>(null);
   const [loadedCards, setLoadedCards] = useState<OwnedCard[]>([]);
@@ -51,13 +47,6 @@ export function CollectionPage() {
         }
       : collectionOwner;
   const collectionReady = collectionStatus === 'ready' || collectionStatus === 'error';
-  const handleActiveCardIntroComplete = useCallback(() => {
-    setActiveCardCreatorVisible(true);
-  }, []);
-
-  useEffect(() => {
-    setActiveCardCreatorVisible(false);
-  }, [activeCard?.instanceId]);
 
   const resetCollectionState = useCallback(() => {
     setCollectionOwner(null);
@@ -185,17 +174,6 @@ export function CollectionPage() {
   ]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setActiveCard(null);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  useEffect(() => {
     if (!authenticated || !user || activePlayerSlug) {
       return;
     }
@@ -295,35 +273,6 @@ export function CollectionPage() {
     nextSearchParams.delete('card');
     setSearchParams(nextSearchParams, { replace: true });
   }
-
-  const handleShareActiveCard = useCallback(async () => {
-    const shareSlug = viewedOwner?.shareSlug?.trim() || activePlayerSlug;
-
-    if (!activeCard || !shareSlug) {
-      return;
-    }
-
-    const shareUrl = buildCollectionCardShareUrl(
-      window.location.origin,
-      shareSlug,
-      activeCard.instanceId,
-    );
-
-    try {
-      await copyTextToClipboard(shareUrl);
-      notify({
-        kind: 'success',
-        title: 'Ссылка скопирована',
-        message: 'Отправь её другому пользователю, чтобы показать эту карточку.',
-      });
-    } catch {
-      notify({
-        kind: 'error',
-        title: 'Не удалось скопировать ссылку',
-        message: 'Браузер не дал доступ к буферу обмена.',
-      });
-    }
-  }, [activeCard, activePlayerSlug, notify, viewedOwner?.shareSlug]);
 
   const isRemoteCollection = Boolean(activePlayerSlug) && !isOwnCollection;
   const canFilterCreatedCards = Boolean(activePlayerSlug);
@@ -431,56 +380,11 @@ export function CollectionPage() {
       ) : null}
 
       {activeCard ? (
-        <div
-          className="collection-overlay collection-overlay--collection"
-          onClick={closeViewer}
-          role="presentation"
-        >
-          <button
-            aria-label="Закрыть просмотр карточки"
-            className="collection-overlay__close collection-overlay__close--icon"
-            onClick={closeViewer}
-            type="button"
-          >
-            <img alt="" aria-hidden="true" className="collection-overlay__close-icon" src={closeIcon} />
-          </button>
-          <div
-            className="collection-overlay__viewer"
-            onClick={(event) => event.stopPropagation()}
-            role="presentation"
-          >
-            <div className="collection-overlay__viewer-stage">
-              <div className="collection-overlay__viewer-canvas">
-                <CardViewerCanvas
-                  card={activeCard}
-                  introKey={activeCard.instanceId}
-                  cameraZ={10.6}
-                  scaleMultiplier={0.7}
-                  effectsPreset="full"
-                  transparentBackground
-                  onIntroComplete={handleActiveCardIntroComplete}
-                />
-              </div>
-              <CardCreatorLink
-                card={activeCard}
-                cameraZ={10.6}
-                scaleMultiplier={0.7}
-                visible={activeCardCreatorVisible}
-                className="card-creator-link-anchor--overlay"
-                action={
-                  (viewedOwner?.shareSlug?.trim() || activePlayerSlug) && activeCardCreatorVisible
-                    ? {
-                        label: 'Поделиться',
-                        onClick: () => {
-                          void handleShareActiveCard();
-                        },
-                      }
-                    : undefined
-                }
-              />
-            </div>
-          </div>
-        </div>
+        <OwnedCardViewerOverlay
+          card={activeCard}
+          onClose={closeViewer}
+          sharePlayerSlug={viewedOwner?.shareSlug?.trim() || activePlayerSlug}
+        />
       ) : null}
     </div>
   );
