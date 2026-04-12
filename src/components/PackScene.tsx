@@ -5,6 +5,7 @@ import {
   AdditiveBlending,
   Bone,
   Box3,
+  BufferAttribute,
   BufferGeometry,
   Color,
   DoubleSide,
@@ -14,7 +15,11 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
+  NoColorSpace,
+  SRGBColorSpace,
   SkinnedMesh,
+  Texture,
+  TextureLoader,
   Vector3,
 } from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
@@ -23,7 +28,9 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rarityMeta } from '../game/config';
 import type { OwnedCard } from '../game/types';
 import packFlapModelUrl from '../assets/mesh/pack-flap.fbx?url';
-import packModelUrl from '../assets/mesh/pack.fbx?url';
+import packBaseTextureUrl from '../assets/mesh/texture.png?url';
+import packMetallicMaskUrl from '../assets/mesh/metalic.png?url';
+import packRoughnessMapUrl from '../assets/mesh/roughness.png?url';
 import {
   SharedViewerLighting,
   SharedViewerPostProcessing,
@@ -82,7 +89,7 @@ const CAROUSEL_CENTER_Z = -CAROUSEL_RADIUS - 0.54;
 const CAROUSEL_HOVER_PLANE_WIDTH = PACK_WIDTH * 1.18;
 const CAROUSEL_HOVER_PLANE_HEIGHT = PACK_TOTAL_HEIGHT + TEAR_HEIGHT + 0.24;
 const CAROUSEL_HOVER_PLANE_CENTER_Y = 0.08;
-const PACK_ACCENT_LIGHT = '#74dbff';
+const PACK_ACCENT_LIGHT = '#a44a1f';
 const CAROUSEL_TO_TEAR_SETTLE_DISTANCE = 0.06;
 const CAROUSEL_TO_TEAR_SETTLE_SCALE_EPSILON = 0.015;
 const CAROUSEL_TO_TEAR_INACTIVE_DEPTH_OFFSET = 0.92;
@@ -90,16 +97,17 @@ const CAROUSEL_TO_TEAR_INACTIVE_SCALE_FACTOR = 0.95;
 const TEAR_STAGE_DOCK_OFFSET_Y = -2.45;
 const TEAR_STAGE_WORLD_Y = TEAR_STAGE_DOCK_OFFSET_Y + 0.02;
 const PACK_MODEL_MATERIAL = {
-  color: '#d6e0e5',
-  metalness: 0.1,
-  roughness: 0.86,
-  clearcoat: 0.14,
-  clearcoatRoughness: 0.32,
-  reflectivity: 0.06,
+  color: '#e4edf2',
+  metalness: 0.08,
+  clearcoat: 0.42,
+  clearcoatRoughness: 0.28,
+  reflectivity: 0.24,
 } as const;
 
-useLoader.preload(FBXLoader, packModelUrl);
 useLoader.preload(FBXLoader, packFlapModelUrl);
+useLoader.preload(TextureLoader, packBaseTextureUrl);
+useLoader.preload(TextureLoader, packMetallicMaskUrl);
+useLoader.preload(TextureLoader, packRoughnessMapUrl);
 
 function getPositionKey(x: number, y: number, z: number, tolerance: number) {
   return [
@@ -109,127 +117,393 @@ function getPositionKey(x: number, y: number, z: number, tolerance: number) {
   ].join(':');
 }
 
-function usePackModelGeometry() {
-  const packModel = useLoader(FBXLoader, packModelUrl);
+function createSmoothedGeometry(sourceGeometry: BufferGeometry) {
+  const geometry = sourceGeometry.clone();
+  const normalTolerance = 1e-4;
+  const smoothingGeometry = geometry.clone();
 
-  return useMemo(() => {
-    packModel.updateWorldMatrix(true, true);
-    const sourceMesh = packModel.getObjectByProperty('isMesh', true) as Mesh | undefined;
-
-    if (!sourceMesh) {
-      throw new Error('Pack FBX mesh not found');
+  Object.keys(smoothingGeometry.attributes).forEach((attributeName) => {
+    if (attributeName !== 'position') {
+      smoothingGeometry.deleteAttribute(attributeName);
     }
+  });
 
-    const geometry = sourceMesh.geometry.clone();
-    const size = new Vector3();
+  const weldedGeometry = mergeVertices(smoothingGeometry, normalTolerance);
+  weldedGeometry.computeVertexNormals();
 
-    geometry.applyMatrix4(sourceMesh.matrixWorld);
-    geometry.rotateY(Math.PI / 2);
-    geometry.computeBoundingBox();
-    geometry.boundingBox?.getSize(size);
-    geometry.center();
-    const scaleX = PACK_WIDTH / Math.max(size.x, 0.001);
-    const scaleY = PACK_TOTAL_HEIGHT / Math.max(size.y, 0.001);
-    const scaleZ = PACK_DEPTH / Math.max(size.z, 0.001);
-    geometry.scale(scaleX, scaleY, scaleZ);
-    const normalTolerance = 1e-4;
-    const smoothingGeometry = geometry.clone();
-    smoothingGeometry.deleteAttribute('uv');
-    smoothingGeometry.deleteAttribute('normal');
+  const weldedPositions = weldedGeometry.getAttribute('position');
+  const weldedNormals = weldedGeometry.getAttribute('normal');
+  const positionToNormal = new Map<string, [number, number, number]>();
 
-    const weldedGeometry = mergeVertices(smoothingGeometry, normalTolerance);
-    weldedGeometry.computeVertexNormals();
+  for (let index = 0; index < weldedPositions.count; index += 1) {
+    positionToNormal.set(
+      getPositionKey(
+        weldedPositions.getX(index),
+        weldedPositions.getY(index),
+        weldedPositions.getZ(index),
+        normalTolerance,
+      ),
+      [
+        weldedNormals.getX(index),
+        weldedNormals.getY(index),
+        weldedNormals.getZ(index),
+      ],
+    );
+  }
 
-    const weldedPositions = weldedGeometry.getAttribute('position');
-    const weldedNormals = weldedGeometry.getAttribute('normal');
-    const positionToNormal = new Map<string, [number, number, number]>();
+  const positions = geometry.getAttribute('position');
+  const existingNormals = geometry.getAttribute('normal');
+  const normals = new Float32Array(positions.count * 3);
 
-    for (let index = 0; index < weldedPositions.count; index += 1) {
-      positionToNormal.set(
+  for (let index = 0; index < positions.count; index += 1) {
+    const normal =
+      positionToNormal.get(
         getPositionKey(
-          weldedPositions.getX(index),
-          weldedPositions.getY(index),
-          weldedPositions.getZ(index),
+          positions.getX(index),
+          positions.getY(index),
+          positions.getZ(index),
           normalTolerance,
         ),
-        [
-          weldedNormals.getX(index),
-          weldedNormals.getY(index),
-          weldedNormals.getZ(index),
-        ],
-      );
-    }
+      ) ?? [
+        existingNormals?.getX(index) ?? 0,
+        existingNormals?.getY(index) ?? 0,
+        existingNormals?.getZ(index) ?? 1,
+      ];
 
-    const positions = geometry.getAttribute('position');
-    const existingNormals = geometry.getAttribute('normal');
-    const normals = new Float32Array(positions.count * 3);
+    normals[index * 3] = normal[0];
+    normals[index * 3 + 1] = normal[1];
+    normals[index * 3 + 2] = normal[2];
+  }
 
-    for (let index = 0; index < positions.count; index += 1) {
-      const normal =
-        positionToNormal.get(
-          getPositionKey(
-            positions.getX(index),
-            positions.getY(index),
-            positions.getZ(index),
-            normalTolerance,
-          ),
-        ) ?? [
-          existingNormals?.getX(index) ?? 0,
-          existingNormals?.getY(index) ?? 0,
-          existingNormals?.getZ(index) ?? 1,
-        ];
+  geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
+  geometry.computeBoundingSphere();
+  smoothingGeometry.dispose();
+  weldedGeometry.dispose();
 
-      normals[index * 3] = normal[0];
-      normals[index * 3 + 1] = normal[1];
-      normals[index * 3 + 2] = normal[2];
-    }
+  return geometry;
+}
 
-    geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
-    geometry.computeBoundingSphere();
-    smoothingGeometry.dispose();
-    weldedGeometry.dispose();
+function usePackTextures() {
+  const baseTexture = useLoader(TextureLoader, packBaseTextureUrl);
+  const metallicMask = useLoader(TextureLoader, packMetallicMaskUrl);
+  const roughnessMap = useLoader(TextureLoader, packRoughnessMapUrl);
 
-    return geometry;
-  }, [packModel]);
+  return useMemo(() => {
+    baseTexture.colorSpace = SRGBColorSpace;
+    metallicMask.colorSpace = NoColorSpace;
+    roughnessMap.colorSpace = NoColorSpace;
+    baseTexture.needsUpdate = true;
+    metallicMask.needsUpdate = true;
+    roughnessMap.needsUpdate = true;
+
+    return {
+      baseTexture,
+      metallicMask,
+      roughnessMap,
+    };
+  }, [baseTexture, metallicMask, roughnessMap]);
+}
+
+function createPackSurfaceMaterial(
+  baseTexture: Texture,
+  metallicMask: Texture,
+  roughnessMap: Texture,
+  emissiveIntensity: number,
+) {
+  return new MeshPhysicalMaterial({
+    ...PACK_MODEL_MATERIAL,
+    color: '#ffffff',
+    map: baseTexture,
+    metalness: 1,
+    metalnessMap: metallicMask,
+    roughness: 1,
+    roughnessMap,
+    clearcoat: 1,
+    clearcoatMap: metallicMask,
+    clearcoatRoughness: 0.12,
+    emissive: '#0d2d3d',
+    emissiveIntensity,
+    transparent: true,
+    opacity: 1,
+    side: DoubleSide,
+  });
+}
+
+function PackStudioLighting() {
+  return (
+    <>
+      <SharedViewerLighting
+        accentColor={PACK_ACCENT_LIGHT}
+        ambientColor="#f1e6da"
+        ambientIntensity={0.34}
+        hemisphereColor="#fff7ee"
+        hemisphereGroundColor="#101621"
+        hemisphereIntensity={0.86}
+        keyColor="#fff2df"
+        keyIntensity={2.7}
+        rimColor="#b9632e"
+        rimIntensity={1.18}
+        fillColor="#e8c39b"
+        fillIntensity={6.8}
+        accentIntensity={5.2}
+      />
+      <directionalLight
+        position={[4.2, 5.6, 6.9]}
+        intensity={1.65}
+        color="#fff6ea"
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-near={1}
+        shadow-camera-far={20}
+        shadow-camera-left={-6}
+        shadow-camera-right={6}
+        shadow-camera-top={6}
+        shadow-camera-bottom={-6}
+        shadow-bias={-0.00008}
+        shadow-normalBias={0.03}
+      />
+      <directionalLight
+        position={[-3.8, 2.6, 7.8]}
+        intensity={1.05}
+        color="#d49b68"
+      />
+      <directionalLight
+        position={[-2.6, 4.4, -5.8]}
+        intensity={0.92}
+        color="#8f371d"
+      />
+      <pointLight
+        position={[0.8, -0.6, 5.6]}
+        intensity={2.4}
+        distance={11}
+        decay={2}
+        color="#ffedd8"
+      />
+    </>
+  );
 }
 
 interface PackFlapRigModel {
   model: Group;
   bones: Bone[];
+  rootBone: Bone | null;
+  openBone: Bone | null;
   baseRotations: Array<{ x: number; y: number; z: number }>;
+  baseRootPosition: { x: number; y: number; z: number } | null;
+  baseOpenRotation: { x: number; y: number; z: number } | null;
+  materials: MeshPhysicalMaterial[];
   dispose: () => void;
+}
+
+interface PackRigMeshes {
+  bodyMesh: Mesh | null;
+  flapMesh: SkinnedMesh | null;
+}
+
+interface SkinAttributeLike {
+  getComponent(index: number, component: number): number;
+  itemSize: number;
+}
+
+type TypedArrayView =
+  | Float32Array
+  | Uint32Array
+  | Uint16Array
+  | Uint8Array
+  | Int32Array
+  | Int16Array
+  | Int8Array;
+
+type TypedArrayViewConstructor = {
+  new (length: number): TypedArrayView;
+};
+
+function getPackRigMeshes(model: Group): PackRigMeshes {
+  let bodyMesh: Mesh | null = null;
+  let flapMesh: SkinnedMesh | null = null;
+
+  model.traverse((node) => {
+    if ((node as SkinnedMesh).isSkinnedMesh && !flapMesh) {
+      flapMesh = node as SkinnedMesh;
+      return;
+    }
+
+    if ((node as Mesh).isMesh && !bodyMesh) {
+      bodyMesh = node as Mesh;
+    }
+  });
+
+  return {
+    bodyMesh,
+    flapMesh,
+  };
+}
+
+function vertexUsesNonRootInfluence(
+  skinIndex: SkinAttributeLike,
+  skinWeight: SkinAttributeLike,
+  vertexIndex: number,
+) {
+  for (let influenceIndex = 0; influenceIndex < skinIndex.itemSize; influenceIndex += 1) {
+    if (skinWeight.getComponent(vertexIndex, influenceIndex) > 1e-4) {
+      const boneIndex = skinIndex.getComponent(vertexIndex, influenceIndex);
+
+      if (boneIndex !== 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function sliceGeometryTriangles(
+  sourceGeometry: BufferGeometry,
+  triangleMask: boolean[],
+  includeSelectedTriangles: boolean,
+) {
+  const geometry = new BufferGeometry();
+  const includedTriangleCount = triangleMask.reduce(
+    (count, isSelected) => count + (isSelected === includeSelectedTriangles ? 1 : 0),
+    0,
+  );
+
+  Object.entries(sourceGeometry.attributes).forEach(([attributeName, attribute]) => {
+    const typedArrayConstructor = attribute.array.constructor as TypedArrayViewConstructor;
+    const vertexStride = attribute.itemSize * 3;
+    const slicedArray = new typedArrayConstructor(includedTriangleCount * vertexStride);
+    let writeOffset = 0;
+
+    for (let triangleIndex = 0; triangleIndex < triangleMask.length; triangleIndex += 1) {
+      if (triangleMask[triangleIndex] !== includeSelectedTriangles) {
+        continue;
+      }
+
+      const readOffset = triangleIndex * vertexStride;
+
+      for (let componentIndex = 0; componentIndex < vertexStride; componentIndex += 1) {
+        slicedArray[writeOffset + componentIndex] = attribute.array[readOffset + componentIndex];
+      }
+
+      writeOffset += vertexStride;
+    }
+
+    geometry.setAttribute(
+      attributeName,
+      new BufferAttribute(slicedArray, attribute.itemSize, attribute.normalized),
+    );
+  });
+
+  return geometry;
+}
+
+function createPackRigFromWeightedMesh(model: Group) {
+  let sourceFlapMesh: SkinnedMesh | null = null;
+
+  model.traverse((node) => {
+    if ((node as SkinnedMesh).isSkinnedMesh && !sourceFlapMesh) {
+      sourceFlapMesh = node as SkinnedMesh;
+    }
+  });
+
+  if (!sourceFlapMesh) {
+    return null;
+  }
+
+  const flapMeshSource = sourceFlapMesh as SkinnedMesh;
+  const skinIndex = flapMeshSource.geometry.getAttribute('skinIndex');
+  const skinWeight = flapMeshSource.geometry.getAttribute('skinWeight');
+  const position = flapMeshSource.geometry.getAttribute('position');
+
+  if (!skinIndex || !skinWeight || !position || position.count % 3 !== 0) {
+    return null;
+  }
+
+  const triangleMask: boolean[] = [];
+  let hasBodyTriangles = false;
+  let hasFlapTriangles = false;
+
+  for (let triangleStart = 0; triangleStart < position.count; triangleStart += 3) {
+    let triangleUsesNonRootInfluence = false;
+
+    for (let vertexOffset = 0; vertexOffset < 3; vertexOffset += 1) {
+      if (vertexUsesNonRootInfluence(skinIndex, skinWeight, triangleStart + vertexOffset)) {
+        triangleUsesNonRootInfluence = true;
+        break;
+      }
+    }
+
+    triangleMask.push(triangleUsesNonRootInfluence);
+    hasFlapTriangles ||= triangleUsesNonRootInfluence;
+    hasBodyTriangles ||= !triangleUsesNonRootInfluence;
+  }
+
+  if (!hasBodyTriangles || !hasFlapTriangles) {
+    return null;
+  }
+
+  const bodyGeometry = sliceGeometryTriangles(flapMeshSource.geometry, triangleMask, false);
+  const flapGeometry = sliceGeometryTriangles(flapMeshSource.geometry, triangleMask, true);
+  const bodyMesh = new Mesh(
+    bodyGeometry,
+    Array.isArray(flapMeshSource.material) ? flapMeshSource.material[0] : flapMeshSource.material,
+  );
+
+  bodyMesh.name = `${flapMeshSource.name}_body`;
+  bodyMesh.position.copy(flapMeshSource.position);
+  bodyMesh.quaternion.copy(flapMeshSource.quaternion);
+  bodyMesh.scale.copy(flapMeshSource.scale);
+  bodyMesh.matrixAutoUpdate = flapMeshSource.matrixAutoUpdate;
+  bodyMesh.updateMatrix();
+
+  flapMeshSource.geometry = flapGeometry;
+
+  const parent = flapMeshSource.parent ?? model;
+  parent.add(bodyMesh);
+
+  return {
+    model,
+    bodyMesh,
+    flapMesh: flapMeshSource,
+  };
 }
 
 function usePackFlapRigModel() {
   const packFlapModel = useLoader(FBXLoader, packFlapModelUrl);
+  const { baseTexture, metallicMask, roughnessMap } = usePackTextures();
 
   return useMemo<PackFlapRigModel>(() => {
-    const model = cloneSkeleton(packFlapModel) as Group;
+    const currentModel = cloneSkeleton(packFlapModel) as Group;
+    let model = currentModel;
     const root = new Group();
     const size = new Vector3();
     const center = new Vector3();
     const bounds = new Box3();
+    let useUnifiedRigMesh = false;
 
-    let nextBodyMesh: Mesh | null = null;
-    let nextFlapMesh: SkinnedMesh | null = null;
+    let { bodyMesh: nextBodyMesh, flapMesh: nextFlapMesh } = getPackRigMeshes(model);
 
-    model.traverse((node) => {
-      if ((node as SkinnedMesh).isSkinnedMesh && !nextFlapMesh) {
-        nextFlapMesh = node as SkinnedMesh;
-        return;
+    if (!nextBodyMesh && nextFlapMesh) {
+      useUnifiedRigMesh = true;
+    } else if (!nextBodyMesh || !nextFlapMesh) {
+      const fallbackRig = createPackRigFromWeightedMesh(currentModel);
+
+      if (fallbackRig) {
+        model = fallbackRig.model;
+        nextBodyMesh = fallbackRig.bodyMesh;
+        nextFlapMesh = fallbackRig.flapMesh;
       }
-
-      if ((node as Mesh).isMesh && !nextBodyMesh) {
-        nextBodyMesh = node as Mesh;
-      }
-    });
-
-    if (!nextBodyMesh || !nextFlapMesh) {
-      throw new Error('Pack flap FBX must contain body mesh and flap skinned mesh.');
     }
 
-    const bodyMesh = nextBodyMesh as Mesh;
+    if ((!useUnifiedRigMesh && !nextBodyMesh) || !nextFlapMesh) {
+      throw new Error(
+        'Pack flap FBX must contain a body mesh plus rigged flap, or weighted triangles that can be split from a single skinned mesh.',
+      );
+    }
+
     const flapMesh = nextFlapMesh as SkinnedMesh;
+    const flapGeometry = createSmoothedGeometry(flapMesh.geometry);
 
     bounds.setFromObject(model);
     bounds.getSize(size);
@@ -249,41 +523,81 @@ function usePackFlapRigModel() {
     root.add(model);
     root.updateWorldMatrix(true, true);
 
-    const bodyMaterial = new MeshPhysicalMaterial({
-      ...PACK_MODEL_MATERIAL,
-      emissive: '#0d2d3d',
-      emissiveIntensity: 0.03,
-      side: DoubleSide,
-    });
-    const flapMaterial = new MeshPhysicalMaterial({
-      ...PACK_MODEL_MATERIAL,
-      emissive: '#0d2d3d',
-      emissiveIntensity: 0.05,
-      side: DoubleSide,
-    });
+    flapMesh.geometry = flapGeometry;
 
-    bodyMesh.material = bodyMaterial;
+    const bodyMesh = useUnifiedRigMesh ? null : (nextBodyMesh as Mesh);
+    let bodyGeometry: BufferGeometry | null = null;
+    let bodyMaterial: MeshPhysicalMaterial | null = null;
+
+    if (bodyMesh) {
+      bodyGeometry = createSmoothedGeometry(bodyMesh.geometry);
+      bodyMesh.geometry = bodyGeometry;
+      bodyMaterial = createPackSurfaceMaterial(baseTexture, metallicMask, roughnessMap, 0.03);
+      bodyMesh.material = bodyMaterial;
+      bodyMesh.castShadow = true;
+      bodyMesh.receiveShadow = true;
+      bodyMesh.frustumCulled = false;
+    }
+
+    const flapMaterial = createPackSurfaceMaterial(
+      baseTexture,
+      metallicMask,
+      roughnessMap,
+      useUnifiedRigMesh ? 0.04 : 0.05,
+    );
     flapMesh.material = flapMaterial;
-    bodyMesh.frustumCulled = false;
+    flapMesh.castShadow = true;
+    flapMesh.receiveShadow = true;
     flapMesh.frustumCulled = false;
 
-    const bones = flapMesh.skeleton.bones.filter((bone: Bone) => !bone.name.endsWith('_end'));
+    const rigBones = flapMesh.skeleton.bones.filter((bone: Bone) => !bone.name.endsWith('_end'));
+    const rootBone = rigBones[0] ?? null;
+    const openBone = rigBones.find((bone: Bone) => bone.name === 'BoneRotate') ?? null;
+    const bones = (useUnifiedRigMesh
+      ? rigBones.length > 2
+        ? rigBones.slice(2)
+        : rigBones.length > 1
+          ? rigBones.slice(1)
+          : rigBones
+      : rigBones
+    ).filter((bone: Bone) => bone !== openBone);
     const baseRotations = bones.map((bone: Bone) => ({
       x: bone.rotation.x,
       y: bone.rotation.y,
       z: bone.rotation.z,
     }));
+    const baseRootPosition = rootBone
+      ? {
+          x: rootBone.position.x,
+          y: rootBone.position.y,
+          z: rootBone.position.z,
+        }
+      : null;
+    const baseOpenRotation = openBone
+      ? {
+          x: openBone.rotation.x,
+          y: openBone.rotation.y,
+          z: openBone.rotation.z,
+        }
+      : null;
 
     return {
       model: root,
       bones,
+      rootBone,
+      openBone,
       baseRotations,
+      baseRootPosition,
+      baseOpenRotation,
+      materials: bodyMaterial ? [bodyMaterial, flapMaterial] : [flapMaterial],
       dispose: () => {
-        bodyMaterial.dispose();
+        bodyGeometry?.dispose();
+        flapGeometry.dispose();
+        bodyMaterial?.dispose();
         flapMaterial.dispose();
       },
     };
-  }, [packFlapModel]);
+  }, [packFlapModel, baseTexture, metallicMask, roughnessMap]);
 }
 
 function getHoverYawDirection(rotationY: number) {
@@ -419,12 +733,10 @@ function PackRig({
   const offsetSettledRef = useRef(false);
   const offsetSnappedRef = useRef(false);
   const offsetSettledCallbackRef = useRef<(() => void) | undefined>(onOffsetSettled);
-  const packGeometry = usePackModelGeometry();
   const packRigModel = usePackFlapRigModel();
   const useRiggedFlap = !hoverEnabled || phase !== 'sealed' || tearProgress > 0.001;
   const showTearSlit = phase === 'tearing' || tearProgress > 0.001;
 
-  useEffect(() => () => packGeometry.dispose(), [packGeometry]);
   useEffect(() => () => packRigModel.dispose(), [packRigModel]);
   useEffect(() => {
     offsetSettledCallbackRef.current = onOffsetSettled;
@@ -452,6 +764,8 @@ function PackRig({
     const opened = phase !== 'sealed';
     const peelTarget = opened ? 1 : tearProgress;
     const flapBones = packRigModel.bones;
+    const rootBone = packRigModel.rootBone;
+    const openBone = packRigModel.openBone;
     const lastBoneIndex = Math.max(flapBones.length - 1, 1);
     const anchorBias = MathUtils.lerp(-1, 1, tearAnchor);
 
@@ -513,38 +827,102 @@ function PackRig({
     flapBones.forEach((bone, index) => {
       const baseRotation = packRigModel.baseRotations[index];
       const normalizedIndex = lastBoneIndex === 0 ? 1 : index / lastBoneIndex;
-      const activePeelTarget = useRiggedFlap ? peelTarget : 0;
-      const tipWeight = Math.pow(normalizedIndex, 1.32);
-      const anchorWeight = MathUtils.clamp(1 - Math.abs(normalizedIndex - tearAnchor) * 1.7, 0, 1);
-      const bendWeight = Math.max(tipWeight, anchorWeight * 0.82);
-      const curlX = activePeelTarget * (0.16 + bendWeight * 1.08);
-      const twistY =
+      const activePeelTarget = useRiggedFlap
+        ? MathUtils.smootherstep(peelTarget, 0.01, 0.96) * (opened ? 1.82 : 1.68)
+        : 0;
+      const rightEdgeWeight = MathUtils.lerp(0.32, 1, Math.pow(1 - normalizedIndex, 1.05));
+      const sweepFade = MathUtils.lerp(0.26, 1, Math.pow(1 - normalizedIndex, 1.45));
+      const cornerBias = MathUtils.lerp(0.24, 1, Math.pow(1 - normalizedIndex, 1.18));
+      const startFromRight = anchorBias >= 0 ? -1 : 1;
+      const anchorBoost =
+        anchorBias >= 0 ? 1.02 + anchorBias * 0.42 : 0.94 + Math.abs(anchorBias) * 0.12;
+      const cameraFoldX = activePeelTarget * anchorBoost * (0.02 + rightEdgeWeight * 0.11);
+      const cornerDiveX = activePeelTarget * anchorBoost * (0.008 + cornerBias * 0.05);
+      const leftSweepY =
         activePeelTarget *
-        tearDirection *
-        (0.015 + bendWeight * 0.16) *
-        (0.52 + Math.abs(anchorBias) * 0.48);
-      const splayZ = activePeelTarget * tearDirection * (0.04 + bendWeight * 0.36);
-      const rootCurl = (1 - normalizedIndex) * activePeelTarget * 0.22;
+        startFromRight *
+        anchorBoost *
+        sweepFade *
+        (0.22 + rightEdgeWeight * 0.94);
+      const leftSweepZ =
+        activePeelTarget *
+        startFromRight *
+        anchorBoost *
+        sweepFade *
+        (0.16 + rightEdgeWeight * 0.72);
+      const targetRotationX = baseRotation.x - cameraFoldX - cornerDiveX;
+      const targetRotationY = baseRotation.y + leftSweepY;
+      const targetRotationZ = baseRotation.z + leftSweepZ;
 
       bone.rotation.x = MathUtils.damp(
         bone.rotation.x,
-        baseRotation.x - curlX - rootCurl,
-        6,
+        targetRotationX,
+        9.2,
         delta,
       );
       bone.rotation.y = MathUtils.damp(
         bone.rotation.y,
-        baseRotation.y + twistY,
-        6.2,
+        targetRotationY,
+        9.4,
         delta,
       );
       bone.rotation.z = MathUtils.damp(
         bone.rotation.z,
-        baseRotation.z + splayZ,
-        6.2,
+        targetRotationZ,
+        9.4,
         delta,
       );
     });
+
+    if (rootBone && packRigModel.baseRootPosition) {
+      const rootLift =
+        opened && useRiggedFlap && !openBone
+          ? MathUtils.smootherstep(peelTarget, 0.88, 1) * 0.22
+          : 0;
+
+      rootBone.position.x = MathUtils.damp(
+        rootBone.position.x,
+        packRigModel.baseRootPosition.x,
+        7.2,
+        delta,
+      );
+      rootBone.position.y = MathUtils.damp(
+        rootBone.position.y,
+        packRigModel.baseRootPosition.y + rootLift,
+        opened ? 6.8 : 8.2,
+        delta,
+      );
+      rootBone.position.z = MathUtils.damp(
+        rootBone.position.z,
+        packRigModel.baseRootPosition.z,
+        7.2,
+        delta,
+      );
+    }
+
+    if (openBone && packRigModel.baseOpenRotation) {
+      const openLift =
+        opened && useRiggedFlap ? MathUtils.smootherstep(peelTarget, 0.88, 1) * 0.62 : 0;
+
+      openBone.rotation.x = MathUtils.damp(
+        openBone.rotation.x,
+        packRigModel.baseOpenRotation.x - openLift,
+        opened ? 13.5 : 9.2,
+        delta,
+      );
+      openBone.rotation.y = MathUtils.damp(
+        openBone.rotation.y,
+        packRigModel.baseOpenRotation.y,
+        8.2,
+        delta,
+      );
+      openBone.rotation.z = MathUtils.damp(
+        openBone.rotation.z,
+        packRigModel.baseOpenRotation.z,
+        8.2,
+        delta,
+      );
+    }
 
     slitRef.current.position.x = MathUtils.damp(
       slitRef.current.position.x,
@@ -586,7 +964,7 @@ function PackRig({
 
   return (
     <>
-      <SharedViewerLighting accentColor={PACK_ACCENT_LIGHT} />
+      <PackStudioLighting />
 
       <Float speed={1.35} rotationIntensity={0.06} floatIntensity={0.18}>
         <group ref={groupRef} scale={packScale}>
@@ -600,20 +978,7 @@ function PackRig({
             <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
           </mesh>
 
-          {!useRiggedFlap ? (
-            <mesh>
-              <primitive attach="geometry" object={packGeometry} />
-              <meshPhysicalMaterial
-                {...PACK_MODEL_MATERIAL}
-                emissive="#0d2d3d"
-                emissiveIntensity={0.03}
-              />
-            </mesh>
-          ) : null}
-
-          <group visible={useRiggedFlap}>
-            <primitive object={packRigModel.model} />
-          </group>
+          <primitive object={packRigModel.model} />
 
           <mesh
             ref={slitRef}
@@ -642,7 +1007,13 @@ function PackRig({
         </group>
       </Float>
 
-      <SharedViewerPostProcessing />
+      <SharedViewerPostProcessing
+        brightness={0.012}
+        contrast={0.045}
+        hue={0.01}
+        saturation={0.16}
+        vignetteDarkness={0.26}
+      />
     </>
   );
 }
@@ -655,7 +1026,6 @@ function CarouselPack({
   index,
   onClick,
   onTransitionToTearComplete,
-  packGeometry,
   rotationOffset,
   ringGroupRef,
   transitionToTear,
@@ -668,7 +1038,6 @@ function CarouselPack({
   index: number;
   onClick?: (index: number) => void;
   onTransitionToTearComplete?: () => void;
-  packGeometry: BufferGeometry;
   rotationOffset: number;
   ringGroupRef: MutableRefObject<Group | null>;
   transitionToTear: boolean;
@@ -676,7 +1045,6 @@ function CarouselPack({
 }) {
   const slotRef = useRef<Group>(null);
   const packRef = useRef<Group>(null);
-  const bodyMaterialRef = useRef<MeshPhysicalMaterial>(null);
   const shadowMaterialRef = useRef<MeshBasicMaterial>(null);
   const transitionSettledRef = useRef(false);
   const transitionCompleteCallbackRef = useRef<(() => void) | undefined>(onTransitionToTearComplete);
@@ -685,7 +1053,9 @@ function CarouselPack({
   const [hovered, setHovered] = useState(false);
   const hoverTargetRef = useRef({ x: 0, y: 0 });
   const hoverPointerRef = useRef({ x: 0, y: 0 });
+  const packRigModel = usePackFlapRigModel();
 
+  useEffect(() => () => packRigModel.dispose(), [packRigModel]);
   useEffect(() => {
     if (active && hoverEnabled) {
       return;
@@ -794,14 +1164,9 @@ function CarouselPack({
     const dampedScale = MathUtils.damp(currentScale, targetScale, 5, delta);
     packRef.current.scale.setScalar(dampedScale);
 
-    if (bodyMaterialRef.current) {
-      bodyMaterialRef.current.opacity = MathUtils.damp(
-        bodyMaterialRef.current.opacity,
-        inactiveFade,
-        6,
-        delta,
-      );
-    }
+    packRigModel.materials.forEach((material) => {
+      material.opacity = MathUtils.damp(material.opacity, inactiveFade, 6, delta);
+    });
 
     if (shadowMaterialRef.current) {
       shadowMaterialRef.current.opacity = MathUtils.damp(
@@ -898,17 +1263,7 @@ function CarouselPack({
           />
         </mesh>
 
-        <mesh>
-          <primitive attach="geometry" object={packGeometry} />
-          <meshPhysicalMaterial
-            ref={bodyMaterialRef}
-            {...PACK_MODEL_MATERIAL}
-            emissive="#0d2d3d"
-            emissiveIntensity={active ? 0.04 : 0.03}
-            transparent
-            opacity={1}
-          />
-        </mesh>
+        <primitive object={packRigModel.model} />
       </group>
     </group>
   );
@@ -929,10 +1284,8 @@ function PackCarouselRig({
   const transitionProgressRef = useRef(0);
   const outerFloorMaterialRef = useRef<MeshBasicMaterial>(null);
   const innerFloorMaterialRef = useRef<MeshBasicMaterial>(null);
-  const packGeometry = usePackModelGeometry();
   const carouselStep = (Math.PI * 2) / Math.max(rotationOffsets.length, 1);
 
-  useEffect(() => () => packGeometry.dispose(), [packGeometry]);
   useEffect(() => {
     if (transitionToTear) {
       return;
@@ -997,7 +1350,7 @@ function PackCarouselRig({
 
   return (
     <>
-      <SharedViewerLighting accentColor={PACK_ACCENT_LIGHT} />
+      <PackStudioLighting />
 
       <group rotation={[CAROUSEL_TILT, 0, 0]} position={[0, -0.08, 0]}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.72, -2.2]}>
@@ -1022,7 +1375,6 @@ function PackCarouselRig({
               onTransitionToTearComplete={
                 index === activeIndex ? onTransitionToTearComplete : undefined
               }
-              packGeometry={packGeometry}
               ringGroupRef={ringGroupRef}
               rotationOffset={rotationOffset}
               slotAngle={index * carouselStep}
@@ -1033,7 +1385,13 @@ function PackCarouselRig({
         </group>
       </group>
 
-      <SharedViewerPostProcessing />
+      <SharedViewerPostProcessing
+        brightness={0.012}
+        contrast={0.045}
+        hue={0.01}
+        saturation={0.16}
+        vignetteDarkness={0.26}
+      />
     </>
   );
 }
@@ -1044,6 +1402,7 @@ export function PackScene(props: PackSceneProps) {
   return (
     <div className="pack-scene">
       <Canvas
+        shadows
         camera={{ position: [0, cameraY, 10.9], fov: VIEWER_CANVAS_FOV }}
         dpr={VIEWER_CANVAS_DPR}
         onCreated={({ gl }) => {
@@ -1062,6 +1421,7 @@ export function PackCarouselScene(props: PackCarouselSceneProps) {
   return (
     <div className="pack-scene pack-scene--carousel">
       <Canvas
+        shadows
         camera={{ position: [0, 0.24, 10.9], fov: VIEWER_CANVAS_FOV }}
         dpr={VIEWER_CANVAS_DPR}
         onCreated={({ gl }) => {
