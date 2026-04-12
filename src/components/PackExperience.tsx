@@ -120,7 +120,7 @@ export function PackExperience() {
 
   const selectedPackRotationOffset = visualPackRotationOffsets[carouselIndex] ?? 0;
   const tearProgress =
-    stage === 'opening' || stage === 'review'
+    stage === 'opening' || stage === 'review' || packOpeningPending
       ? 1
       : tearGesture.active
         ? clamp(Math.abs(tearGesture.currentX - tearGesture.startX) / 260, 0, 1)
@@ -796,7 +796,7 @@ export function PackExperience() {
                 }
                 offsetY={dockPackOffsetY}
                 packScale={0.86}
-                phase={stage === 'opening' ? 'tearing' : 'sealed'}
+                phase={stage === 'opening' || packOpeningPending ? 'tearing' : 'sealed'}
                 rotationOffset={selectedPackRotationOffset}
                 snapOffsetOnMount={dockPackSnapped}
                 tearAnchor={liveTearAnchor}

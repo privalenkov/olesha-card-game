@@ -1,4 +1,9 @@
-import { EffectComposer, Vignette } from '@react-three/postprocessing';
+import {
+  BrightnessContrast,
+  EffectComposer,
+  HueSaturation,
+  Vignette,
+} from '@react-three/postprocessing';
 import type { ColorRepresentation } from 'three';
 import { Vector3 } from 'three';
 
@@ -21,6 +26,15 @@ export const VIEWER_HOVER_TILT_X = 0.42;
 export const VIEWER_HOVER_TILT_Y = 0.34;
 export const VIEWER_IDLE_ROLL_SPEED = 0.45;
 export const VIEWER_IDLE_ROLL_AMPLITUDE = 0.018;
+
+interface SharedViewerPostProcessingProps {
+  brightness?: number;
+  contrast?: number;
+  hue?: number;
+  saturation?: number;
+  vignetteOffset?: number;
+  vignetteDarkness?: number;
+}
 
 interface SharedViewerLightingProps {
   accentColor?: ColorRepresentation;
@@ -89,13 +103,22 @@ export function SharedViewerLighting({
   );
 }
 
-export function SharedViewerPostProcessing() {
+export function SharedViewerPostProcessing({
+  brightness = 0,
+  contrast = 0,
+  hue = 0,
+  saturation = 0,
+  vignetteOffset = VIEWER_VIGNETTE.offset,
+  vignetteDarkness = VIEWER_VIGNETTE.darkness,
+}: SharedViewerPostProcessingProps = {}) {
   return (
     <EffectComposer>
+      <BrightnessContrast brightness={brightness} contrast={contrast} />
+      <HueSaturation hue={hue} saturation={saturation} />
       <Vignette
         eskil={false}
-        offset={VIEWER_VIGNETTE.offset}
-        darkness={VIEWER_VIGNETTE.darkness}
+        offset={vignetteOffset}
+        darkness={vignetteDarkness}
       />
     </EffectComposer>
   );

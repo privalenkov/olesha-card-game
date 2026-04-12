@@ -202,7 +202,7 @@
 .pack-ritual__hero-open {
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: calc(50% + 120px);
   z-index: 5;
   min-width: 82px;
   opacity: 0;

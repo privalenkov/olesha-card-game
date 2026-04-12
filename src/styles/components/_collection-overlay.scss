@@ -235,7 +235,7 @@
 .collection-overlay__hud {
   position: fixed;
   left: 50%;
-  bottom: 38px;
+  top: calc(env(safe-area-inset-top, 0px) + clamp(24px, 5vh, 44px));
   z-index: 41;
   transform: translateX(-50%);
   display: grid;
